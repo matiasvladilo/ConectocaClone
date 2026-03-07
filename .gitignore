@@ -71,6 +71,7 @@ typings/
 
 # dotenv environment variables file
 .env
+.env.local
 .env.test
 .env.production
 
@@ -119,3 +120,6 @@ dist
 dist-electron
 release
 build/
+
+# Supabase CLI temp files
+supabase/.temp/
