@@ -7,7 +7,14 @@ export function createClient() {
   if (!supabaseClient) {
     supabaseClient = createSupabaseClient(
       `https://${projectId}.supabase.co`,
-      publicAnonKey
+      publicAnonKey,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          storage: window.localStorage,
+        }
+      }
     );
   }
   return supabaseClient;

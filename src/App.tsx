@@ -248,6 +248,7 @@ export default function App() {
         }
       } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
         console.log("⚠️ Sesión cerrada detectada");
+        localStorage.removeItem('conectoca_cached_user');
         setAccessToken(null);
         setCurrentUser(null);
         setCurrentScreen("login");
@@ -525,6 +526,8 @@ export default function App() {
     }
   };
 
+  const CACHED_USER_KEY = 'conectoca_cached_user';
+
   const handleSessionRestore = async (token: string) => {
     try {
       console.log("🔄 Restoring session...");
@@ -543,6 +546,9 @@ export default function App() {
         role: profile.role,
         address: profile.address,
       };
+
+      // Guardar perfil en caché para restauración offline/cold-start
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
 
       setCurrentUser(user);
 
@@ -579,19 +585,53 @@ export default function App() {
       if (isAuthError) {
         // Solo borrar la sesión si es un error estrictamente de autenticación (Expirada / Inválida)
         await supabase.auth.signOut();
+        localStorage.removeItem(CACHED_USER_KEY);
         setAccessToken(null);
         setCurrentUser(null);
         setCurrentScreen("login");
         toast.error("Sesión inválida o expirada. Por favor inicia sesión nuevamente.");
       } else {
-        // En caso de que sea un timeout o cold start del servidor de Supabase
-        toast.warning("Hubo un problema de conexión al cargar la app. Reintentando de fondo...");
-        // Mantener el loading para que no lo mande inmediatamente al login sin explicación lógica
-        // y darle la oportunidad al usuario de refrescar la página manualmente.
-        setTimeout(() => {
-          setLoading(false);
-          setCurrentScreen("login");
-        }, 5000);
+        // Intentar usar el perfil cacheado si hay un error de red/timeout
+        const cachedUserStr = localStorage.getItem(CACHED_USER_KEY);
+        if (cachedUserStr) {
+          try {
+            const cachedUser: User = JSON.parse(cachedUserStr);
+            console.log("⚡ Usando perfil cacheado:", cachedUser.name);
+            setCurrentUser(cachedUser);
+            if (cachedUser.role === 'pastry') {
+              setCurrentScreen("bakeryKds");
+            } else {
+              setCurrentScreen("home");
+            }
+            setIsInitialOrdersLoading(true);
+            loadOrders(token).then(() => {
+              setIsInitialOrdersLoading(false);
+            }).catch(err => {
+              console.error("Failed to load initial orders with cached user", err);
+              setIsInitialOrdersLoading(false);
+            });
+            setLoading(false);
+            // Refrescar perfil en segundo plano
+            profileAPI.get(token).then((profile) => {
+              const updatedUser: User = {
+                id: profile.id,
+                name: profile.name,
+                email: profile.email,
+                role: profile.role,
+                address: profile.address,
+              };
+              localStorage.setItem(CACHED_USER_KEY, JSON.stringify(updatedUser));
+              setCurrentUser(updatedUser);
+            }).catch(() => {});
+            return;
+          } catch {
+            // Si el caché está corrupto, ignorar y mostrar login
+          }
+        }
+        // Sin caché: mostrar advertencia y redirigir al login
+        toast.warning("Hubo un problema de conexión al cargar la app. Por favor inicia sesión nuevamente.");
+        setLoading(false);
+        setCurrentScreen("login");
       }
 
       setLoading(false); // Liberar carga
@@ -1112,6 +1152,7 @@ export default function App() {
   const handleLogout = async (silent: boolean = false) => {
     try {
       await supabase.auth.signOut();
+      localStorage.removeItem('conectoca_cached_user');
       setCurrentUser(null);
       setAccessToken(null);
       setOrders([]);
