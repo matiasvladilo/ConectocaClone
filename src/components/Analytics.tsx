@@ -93,9 +93,9 @@ interface ProductionOrder {
 }
 
 export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps) {
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
+  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('90d');
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: new Date(new Date().setDate(new Date().getDate() - 30)),
+    from: new Date(new Date().setDate(new Date().getDate() - 90)),
     to: new Date(),
   });
   const [activeTab, setActiveTab] = useState('overview');
@@ -164,7 +164,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // Filter orders by date range
   const filteredOrders = useMemo(() => {
     const filtered = allOrders.filter(order => {
-      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date);
+      // Use createdAt as primary date (when the order was placed), not deadline (when it's due)
+      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
+      if (!dateString) return false;
       const orderDate = new Date(dateString);
       if (timeRange === 'custom') {
         if (dateRange?.to) {
@@ -243,7 +245,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
     // Fill with actual data
     filteredOrders.forEach(order => {
-      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date);
+      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
+      if (!dateString) return;
       const orderDate = new Date(dateString);
       const dateStr = orderDate.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
 
@@ -652,7 +655,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
       // 2. Sheet: Detalle Ventas
       const ventasData = filteredOrders.map(order => {
-        const createDate = new Date(order.createdAt || order.date);
+        const createDate = new Date(order.createdAt || order.date || order.deadline || new Date());
         const deadlineDate = order.deadline ? new Date(`${order.deadline}T12:00:00`) : createDate;
 
         return {
@@ -827,7 +830,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
       // 2. Sheet: Detalle Ventas (Con fecha de entrega vs creación para aclarar filtrado)
       const ventasData = filteredOrders.map(order => {
-        const createDate = new Date(order.createdAt || order.date);
+        const createDate = new Date(order.createdAt || order.date || order.deadline || new Date());
         const deadlineDate = order.deadline ? new Date(`${order.deadline}T12:00:00`) : createDate;
 
         return {
