@@ -233,7 +233,8 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
         className="relative z-10 shadow-2xl"
         style={{
           background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B'
+          borderBottom: '3px solid #FFD43B',
+          paddingTop: 'max(env(safe-area-inset-top), 20px)'
         }}
       >
         <div className="max-w-7xl mx-auto px-6 py-6">

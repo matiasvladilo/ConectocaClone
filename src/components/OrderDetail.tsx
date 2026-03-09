@@ -148,7 +148,8 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
         className="sticky top-0 z-20 shadow-2xl"
         style={{
           background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B'
+          borderBottom: '3px solid #FFD43B',
+          paddingTop: 'max(env(safe-area-inset-top), 20px)'
         }}
       >
         <div className="max-w-md mx-auto px-6 py-4">
