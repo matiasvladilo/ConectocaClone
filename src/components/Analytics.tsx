@@ -207,7 +207,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
   // Calculate KPIs
   const kpis = useMemo(() => {
-    const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+    // Use price×quantity per product item (real revenue), not order.total (can be wrong from old KV store)
+    const totalRevenue = filteredOrders.reduce((sum, order) =>
+      sum + (order.products?.reduce((s, p) => s + (p.price * p.quantity), 0) || order.total || 0), 0);
     const completedOrders = filteredOrders.filter(o => o.status === 'completed' || o.status === 'cancelled').length;
     const totalOrders = filteredOrders.length;
     const successRate = totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0;
@@ -634,7 +636,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
         ['', ''],
         ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales (Venta)', kpis.totalRevenue],
+        ['Ingresos Totales', kpis.totalRevenue],
         ['Pedidos Totales', kpis.totalOrders],
         ['Pedidos Completados', kpis.completedOrders],
         ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
@@ -812,7 +814,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
         ['', ''],
         ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales (Venta)', kpis.totalRevenue],
+        ['Ingresos Totales', kpis.totalRevenue],
         ['Pedidos Totales', kpis.totalOrders],
         ['Pedidos Completados', kpis.completedOrders],
         ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
