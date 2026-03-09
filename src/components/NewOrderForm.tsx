@@ -512,7 +512,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl sticky top-0 z-10">
+      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl sticky top-0 z-10" style={{ paddingTop: 'max(env(safe-area-inset-top), 20px)' }}>
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">
