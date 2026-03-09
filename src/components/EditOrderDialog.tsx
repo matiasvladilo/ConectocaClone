@@ -76,6 +76,7 @@ export function EditOrderDialog({
     const [deadline, setDeadline] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
+    const [decimalInputs, setDecimalInputs] = useState<Record<string, string>>({});
 
     // Initialize form when order changes or dialog opens
     useEffect(() => {
@@ -118,7 +119,10 @@ export function EditOrderDialog({
     const handleQuantityChange = (productId: string, delta: number) => {
         setOrderItems(prev => prev.map(item => {
             if (item.productId === productId) {
-                const newQuantity = Math.max(1, item.quantity + delta);
+                const productDef = products.find(p => p.id === productId);
+                const allowDecimal = (productDef as any)?.allowDecimal === true;
+                const min = allowDecimal ? 0.5 : 1;
+                const newQuantity = Math.max(min, Math.round((item.quantity + delta) * 1000) / 1000);
                 return { ...item, quantity: newQuantity };
             }
             return item;
@@ -356,25 +360,59 @@ export function EditOrderDialog({
                                         </TableCell>
                                         <TableCell className="text-right">{formatCLP(item.price)}</TableCell>
                                         <TableCell>
-                                            <div className="flex items-center justify-center gap-2">
-                                                <Button
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className="h-7 w-7"
-                                                    onClick={() => handleQuantityChange(item.productId, -1)}
-                                                >
-                                                    <Minus className="w-3 h-3" />
-                                                </Button>
-                                                <span className="w-6 text-center text-sm">{item.quantity}</span>
-                                                <Button
-                                                    variant="outline"
-                                                    size="icon"
-                                                    className="h-7 w-7"
-                                                    onClick={() => handleQuantityChange(item.productId, 1)}
-                                                >
-                                                    <Plus className="w-3 h-3" />
-                                                </Button>
-                                            </div>
+                                            {(() => {
+                                                const productDef = products.find(p => p.id === item.productId);
+                                                const allowDecimal = (productDef as any)?.allowDecimal === true;
+                                                const step = allowDecimal ? 0.5 : 1;
+                                                return (
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="icon"
+                                                            className="h-7 w-7"
+                                                            onClick={() => {
+                                                                setDecimalInputs(prev => { const n = { ...prev }; delete n[item.productId]; return n; });
+                                                                handleQuantityChange(item.productId, -step);
+                                                            }}
+                                                        >
+                                                            <Minus className="w-3 h-3" />
+                                                        </Button>
+                                                        {allowDecimal ? (
+                                                            <input
+                                                                type="text"
+                                                                inputMode="decimal"
+                                                                value={decimalInputs[item.productId] ?? item.quantity}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value.replace(',', '.');
+                                                                    if (!/^[\d]*\.?[\d]*$/.test(raw)) return;
+                                                                    setDecimalInputs(prev => ({ ...prev, [item.productId]: raw }));
+                                                                    const parsed = parseFloat(raw);
+                                                                    if (!isNaN(parsed) && parsed > 0) {
+                                                                        setOrderItems(prev => prev.map(i =>
+                                                                            i.productId === item.productId ? { ...i, quantity: Math.round(parsed * 1000) / 1000 } : i
+                                                                        ));
+                                                                    }
+                                                                }}
+                                                                onBlur={() => setDecimalInputs(prev => { const n = { ...prev }; delete n[item.productId]; return n; })}
+                                                                className="w-14 text-center text-sm border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                            />
+                                                        ) : (
+                                                            <span className="w-6 text-center text-sm">{item.quantity}</span>
+                                                        )}
+                                                        <Button
+                                                            variant="outline"
+                                                            size="icon"
+                                                            className="h-7 w-7"
+                                                            onClick={() => {
+                                                                setDecimalInputs(prev => { const n = { ...prev }; delete n[item.productId]; return n; });
+                                                                handleQuantityChange(item.productId, step);
+                                                            }}
+                                                        >
+                                                            <Plus className="w-3 h-3" />
+                                                        </Button>
+                                                    </div>
+                                                );
+                                            })()}
                                         </TableCell>
                                         <TableCell className="text-right font-medium">
                                             {formatCLP(item.price * item.quantity)}
