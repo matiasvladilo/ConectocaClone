@@ -965,43 +965,43 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 overflow-x-hidden">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between mb-6">
+        <div className="max-w-7xl mx-auto px-4 py-5">
+          <div className="flex items-center gap-3 mb-4">
             <motion.button
               onClick={onBack}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
+              className="w-10 h-10 shrink-0 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </motion.button>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
               <motion.div
-                className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center"
+                className="w-9 h-9 shrink-0 bg-white/20 rounded-full flex items-center justify-center"
                 whileHover={{ rotate: [0, -10, 10, -10, 0], transition: { duration: 0.5 } }}
               >
-                <Factory className="w-6 h-6 text-white" />
+                <Factory className="w-5 h-5 text-white" />
               </motion.div>
-              <div>
-                <span className="tracking-wider">CONECTOCA</span>
-                <p className="text-xs text-blue-200 opacity-80">Gestión de Pedidos La Oca</p>
+              <div className="min-w-0">
+                <span className="tracking-wider text-sm font-semibold truncate block">CONECTOCA</span>
+                <p className="text-xs text-blue-200 opacity-80 truncate">Gestión de Pedidos La Oca</p>
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-1.5 shrink-0">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
                   onClick={handleExportDrive}
                   variant="outline"
                   size="sm"
-                  className="bg-emerald-600 border-emerald-500 hover:bg-emerald-700 text-white lg:mr-2"
+                  className="bg-emerald-600 border-emerald-500 hover:bg-emerald-700 text-white px-2"
                 >
-                  <Download className="w-4 h-4 mr-2" />
-                  Google Drive
+                  <Download className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Google Drive</span>
                 </Button>
               </motion.div>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
@@ -1009,10 +1009,10 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
                   onClick={handleExport}
                   variant="outline"
                   size="sm"
-                  className="bg-white/10 border-white/20 hover:bg-white/20 text-white"
+                  className="bg-white/10 border-white/20 hover:bg-white/20 text-white px-2"
                 >
-                  <Download className="w-4 h-4 mr-2" />
-                  Excel
+                  <Download className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Excel</span>
                 </Button>
               </motion.div>
             </div>
@@ -1048,10 +1048,10 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      <div className="max-w-7xl mx-auto p-4 space-y-6">
         {/* Time Range Selector */}
-        <div className="flex items-center gap-3 justify-between flex-wrap">
-          <div className="flex gap-2">
+        <div className="flex items-center gap-2 justify-between flex-wrap">
+          <div className="flex gap-1.5 flex-wrap">
             {/* Standard Ranges */}
             {(['7d', '30d', '90d'] as const).map((range) => (
               <Button
