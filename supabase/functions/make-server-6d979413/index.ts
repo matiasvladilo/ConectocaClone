@@ -87,6 +87,7 @@ function toProduct(r: any) {
     stock: r.stock,
     unlimitedStock: r.unlimited_stock,
     trackStock: r.track_stock,
+    allowDecimal: r.allow_decimal || false,
     category: r.categories?.name || r.category_name || 'General',
     categoryId: r.category_id,
     productionAreaId: r.production_area_id,
@@ -667,7 +668,7 @@ app.post("/make-server-6d979413/products", async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const body = await c.req.json();
-    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock } = body;
+    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal } = body;
 
     if (!name || price === undefined || price === null) {
       return c.json({ error: 'Nombre y precio son requeridos' }, 400);
@@ -685,6 +686,7 @@ app.post("/make-server-6d979413/products", async (c) => {
         stock: isUnlimited ? 0 : (stock !== undefined ? parseInt(stock) : 100),
         unlimited_stock: isUnlimited,
         track_stock: !isUnlimited,
+        allow_decimal: allowDecimal === true,
         category_id: categoryId || null,
         production_area_id: productionAreaId || null,
       })
@@ -745,7 +747,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal } = updates;
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
@@ -771,6 +773,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
       if (unlimitedStock) updateData.stock = 0;
     }
     if (trackStock !== undefined) updateData.track_stock = trackStock;
+    if (allowDecimal !== undefined) updateData.allow_decimal = allowDecimal === true;
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('products')

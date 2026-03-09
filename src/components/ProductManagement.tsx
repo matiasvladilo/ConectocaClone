@@ -68,6 +68,7 @@ interface ProductFormData {
   imageUrl: string;
   productionAreaId: string;
   unlimitedStock: boolean;
+  allowDecimal: boolean;
   laborCost: string;
   ingredients: (ProductIngredient & { inputUnit?: string })[];
 }
@@ -82,6 +83,7 @@ const emptyForm: ProductFormData = {
   imageUrl: '',
   productionAreaId: '',
   unlimitedStock: false,
+  allowDecimal: false,
   laborCost: '',
   ingredients: []
 };
@@ -205,6 +207,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         imageUrl: product.imageUrl || '',
         productionAreaId: product.productionAreaId || '',
         unlimitedStock: product.unlimitedStock === true || product.stock === -1,
+        allowDecimal: product.allowDecimal === true,
         laborCost: extractedLaborCost,
         ingredients: displayIngredients
       });
@@ -285,6 +288,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0),
         unlimitedStock: formData.unlimitedStock,
         trackStock: !formData.unlimitedStock,
+        allowDecimal: formData.allowDecimal,
         category: formData.category.trim() || 'General',
         categoryId: formData.categoryId || undefined,
         imageUrl: formData.imageUrl.trim() || undefined,
@@ -923,6 +927,37 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                     </p>
                   </div>
                   <Sparkles className="w-5 h-5 text-blue-500" />
+                </motion.div>
+              </div>
+
+              {/* Allow Decimal Checkbox */}
+              <div className="col-span-2">
+                <motion.div
+                  className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-200"
+                  whileHover={{ scale: 1.01 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <Checkbox
+                    id="allow-decimal"
+                    checked={formData.allowDecimal}
+                    onCheckedChange={(checked: boolean | "indeterminate") => setFormData({
+                      ...formData,
+                      allowDecimal: checked === true
+                    })}
+                    className="border-amber-400 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                  />
+                  <div className="flex-1">
+                    <label
+                      htmlFor="allow-decimal"
+                      className="text-sm text-amber-900 cursor-pointer select-none block"
+                      style={{ fontWeight: 500 }}
+                    >
+                      ½ Venta por fracción / decimal
+                    </label>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Permite pedir 0.5, 1.5, etc. — ideal para pan, masas y productos por peso
+                    </p>
+                  </div>
                 </motion.div>
               </div>
 

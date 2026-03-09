@@ -133,7 +133,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
         stock: (p.unlimitedStock === true || p.stock === -1) ? -1 : p.stock,
         category: p.category,
         categoryId: p.categoryId,
-        trackStock: p.unlimitedStock !== true && p.trackStock !== false
+        trackStock: p.unlimitedStock !== true && p.trackStock !== false,
+        allowDecimal: p.allowDecimal === true
       }));
 
       if (transformedProducts.length > 0) {
@@ -292,7 +293,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
   const handleUpdateCartQuantity = (productId: string, delta: number) => {
     setCart(cart.map(item => {
       if (item.id === productId) {
-        const newQuantity = item.quantity + delta;
+        const step = (item as any).allowDecimal ? 0.5 : 1;
+        const newQuantity = Math.round((item.quantity + delta * step) * 100) / 100;
 
         // Check if new quantity exceeds stock (handle unlimited stock -1)
         if (newQuantity > item.stock && item.stock !== -1 && item.trackStock) {
@@ -300,7 +302,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
           return item;
         }
 
-        return { ...item, quantity: Math.max(1, newQuantity) };
+        const minQty = (item as any).allowDecimal ? 0.5 : 1;
+        return { ...item, quantity: Math.max(minQty, newQuantity) };
       }
       return item;
     }).filter(item => item.quantity > 0));
