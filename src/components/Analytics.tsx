@@ -634,7 +634,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
         ['', ''],
         ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales', kpis.totalRevenue],
+        ['Ingresos Totales', allProductStats.reduce((sum, p) => sum + p.ingresos, 0)],
         ['Pedidos Totales', kpis.totalOrders],
         ['Pedidos Completados', kpis.completedOrders],
         ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
@@ -643,7 +643,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       // Add Profitability if available
       if ((user.role === 'admin' || user.role === 'production') && profitabilityAnalysis.length > 0) {
         const totalProfit = profitabilityAnalysis.reduce((sum, p) => sum + p.profit, 0);
-        const margin = kpis.totalRevenue > 0 ? (totalProfit / kpis.totalRevenue) * 100 : 0;
+        const totalIngresos = allProductStats.reduce((sum, p) => sum + p.ingresos, 0);
+        const margin = totalIngresos > 0 ? (totalProfit / totalIngresos) * 100 : 0;
 
         resumenData.push(
           ['Utilidad Estimada', totalProfit],
@@ -812,7 +813,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
         ['', ''],
         ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales', kpis.totalRevenue],
+        ['Ingresos Totales', allProductStats.reduce((sum, p) => sum + p.ingresos, 0)],
         ['Pedidos Totales', kpis.totalOrders],
         ['Pedidos Completados', kpis.completedOrders],
         ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
@@ -820,7 +821,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
       if ((user.role === 'admin' || user.role === 'production') && profitabilityAnalysis.length > 0) {
         const totalProfit = profitabilityAnalysis.reduce((sum, p) => sum + p.profit, 0);
-        const margin = kpis.totalRevenue > 0 ? (totalProfit / kpis.totalRevenue) * 100 : 0;
+        const totalIngresos = allProductStats.reduce((sum, p) => sum + p.ingresos, 0);
+        const margin = totalIngresos > 0 ? (totalProfit / totalIngresos) * 100 : 0;
         resumenData.push(
           ['Utilidad Estimada', totalProfit],
           ['Margen Global Estimado', `${margin.toFixed(1)}%`]
