@@ -130,10 +130,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
         description: p.description || '',
         price: p.price,
         image: p.imageUrl || p.image || '',
-        stock: p.stock,
+        stock: (p.unlimitedStock === true || p.stock === -1) ? -1 : p.stock,
         category: p.category,
         categoryId: p.categoryId,
-        trackStock: p.trackStock
+        trackStock: p.unlimitedStock !== true && p.trackStock !== false
       }));
 
       if (transformedProducts.length > 0) {
@@ -318,10 +318,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
       description: product.description,
       price: product.price.toString(),
       image: product.image,
-      stock: product.stock?.toString() || '0',
+      stock: (product.trackStock === false || product.stock === -1) ? '0' : (product.stock?.toString() || '0'),
       category: product.category || 'General',
       categoryId: product.categoryId || '',
-      trackStock: product.trackStock || true
+      trackStock: product.trackStock !== false
     });
     setImageFile(null);
     setImagePreview(product.image);
@@ -378,10 +378,14 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
       return;
     }
 
-    const stock = parseInt(editForm.stock);
-    if (isNaN(stock) || stock < 0) {
-      toast.error('El stock debe ser un número válido mayor o igual a 0');
-      return;
+    const isUnlimited = !editForm.trackStock;
+    let stock = 0;
+    if (!isUnlimited) {
+      stock = parseInt(editForm.stock);
+      if (isNaN(stock) || stock < 0) {
+        toast.error('El stock debe ser un número válido mayor o igual a 0');
+        return;
+      }
     }
 
     try {
@@ -390,10 +394,11 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
         description: editForm.description,
         price,
         image: editForm.image,
-        stock,
+        stock: isUnlimited ? 0 : stock,
         category: editForm.category || 'General',
         categoryId: editForm.categoryId || undefined,
-        trackStock: editForm.trackStock
+        trackStock: editForm.trackStock,
+        unlimitedStock: isUnlimited
       });
 
       setProducts(products.map(p =>
@@ -403,7 +408,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
       // Update cart if product is in cart
       setCart(cart.map(item =>
         item.id === editingProduct.id
-          ? { ...item, name: updatedProduct.name, description: updatedProduct.description, price: updatedProduct.price, image: updatedProduct.image, stock: updatedProduct.stock, category: updatedProduct.category, categoryId: updatedProduct.categoryId }
+          ? { ...item, name: updatedProduct.name, description: updatedProduct.description, price: updatedProduct.price, image: updatedProduct.image, stock: isUnlimited ? -1 : updatedProduct.stock, trackStock: !isUnlimited, category: updatedProduct.category, categoryId: updatedProduct.categoryId }
           : item
       ));
 
@@ -689,9 +694,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
               })
               .map((product) => {
                 const productStock = product.stock ?? 0;
-                const isOutOfStock = productStock <= 0 && productStock !== -1 && product.trackStock;
+                const isUnlimitedProduct = product.trackStock === false || productStock === -1;
+                const isOutOfStock = !isUnlimitedProduct && productStock <= 0;
                 const cartItem = cart.find(item => item.id === product.id);
-                const remainingStock = productStock - (cartItem?.quantity || 0);
+                const remainingStock = isUnlimitedProduct ? Infinity : productStock - (cartItem?.quantity || 0);
 
                 return (
                   <Card
@@ -758,10 +764,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                             <span className="text-xs text-gray-500">/unidad</span>
                           </div>
                           <Badge
-                            variant={isOutOfStock ? "destructive" : remainingStock < 10 ? "outline" : "secondary"}
+                            variant={isOutOfStock ? "destructive" : (!isUnlimitedProduct && remainingStock < 10) ? "outline" : "secondary"}
                             className="text-xs"
                           >
-                            {product.trackStock === false || productStock === -1 ? '∞ Ilimitado' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
+                            {isUnlimitedProduct ? '∞ Ilimitado' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
                           </Badge>
                         </div>
 
@@ -827,12 +833,12 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                               Agregar
                             </Button>
                           </div>
-                          {!isOutOfStock && remainingStock < productStock && (
+                          {!isUnlimitedProduct && !isOutOfStock && remainingStock < productStock && (
                             <p className="text-xs text-orange-600">
                               {remainingStock} disponibles (ya tienes {cartItem?.quantity} en el carrito)
                             </p>
                           )}
-                          {(isOutOfStock || productStock < 20) && (
+                          {!isUnlimitedProduct && (isOutOfStock || productStock < 20) && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -917,8 +923,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                       {/* Product List */}
                       <div className="space-y-3 max-h-64 overflow-y-auto">
                         {cart.map((item) => {
-                          const isNearLimit = item.stock !== -1 && item.quantity >= item.stock * 0.8;
-                          const atLimit = item.stock !== -1 && item.quantity >= item.stock;
+                          const isNearLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock * 0.8;
+                          const atLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock;
 
                           return (
                             <div key={item.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">

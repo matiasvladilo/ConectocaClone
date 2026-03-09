@@ -25,7 +25,8 @@ import {
   Monitor,
   Factory,
   Warehouse,
-  ChefHat
+  ChefHat,
+  Loader2
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -49,6 +50,7 @@ interface UserProfileProps {
 }
 
 export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
   const [soundNotifications, setSoundNotifications] = useState(() => {
@@ -899,7 +901,11 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
           whileTap={{ scale: 0.98 }}
         >
           <Button
-            onClick={onLogout}
+            onClick={async () => {
+              setIsLoggingOut(true);
+              await onLogout();
+            }}
+            disabled={isLoggingOut}
             variant="outline"
             className="w-full h-12 border-2 hover:bg-red-50 hover:border-red-300 transition-colors group"
             style={{
@@ -910,8 +916,11 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
             }}
           >
             <div className="flex items-center gap-2 text-gray-700 group-hover:text-red-600 transition-colors">
-              <LogOut className="w-5 h-5" />
-              Cerrar Sesión
+              {isLoggingOut
+                ? <Loader2 className="w-5 h-5 animate-spin" />
+                : <LogOut className="w-5 h-5" />
+              }
+              {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar Sesión'}
             </div>
           </Button>
         </motion.div>

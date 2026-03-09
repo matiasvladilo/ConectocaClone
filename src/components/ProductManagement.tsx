@@ -204,7 +204,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         categoryId: product.categoryId || '',
         imageUrl: product.imageUrl || '',
         productionAreaId: product.productionAreaId || '',
-        unlimitedStock: product.stock === -1,
+        unlimitedStock: product.unlimitedStock === true || product.stock === -1,
         laborCost: extractedLaborCost,
         ingredients: displayIngredients
       });
@@ -236,7 +236,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       toast.error('El precio debe ser mayor o igual a 0');
       return;
     }
-    if (!formData.stock || parseInt(formData.stock) < 0) {
+    if (!formData.unlimitedStock && (!formData.stock || parseInt(formData.stock) < 0)) {
       toast.error('El stock debe ser mayor o igual a 0');
       return;
     }
@@ -282,7 +282,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         name: formData.name.trim(),
         description: formData.description.trim(),
         price: priceValue,
-        stock: formData.unlimitedStock ? -1 : (parseInt(formData.stock) || 0),
+        stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0),
+        unlimitedStock: formData.unlimitedStock,
+        trackStock: !formData.unlimitedStock,
         category: formData.category.trim() || 'General',
         categoryId: formData.categoryId || undefined,
         imageUrl: formData.imageUrl.trim() || undefined,
@@ -380,9 +382,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
   const stats = {
     total: products.length,
-    lowStock: products.filter(p => p.stock < 10 && p.stock !== -1).length,
-    outOfStock: products.filter(p => p.stock === 0).length,
-    totalValue: products.reduce((sum, p) => sum + (p.price * (p.stock === -1 ? 0 : p.stock)), 0)
+    lowStock: products.filter(p => !p.unlimitedStock && p.stock !== -1 && p.stock < 10).length,
+    outOfStock: products.filter(p => !p.unlimitedStock && p.stock === 0).length,
+    totalValue: products.reduce((sum, p) => sum + (p.price * (p.unlimitedStock || p.stock === -1 ? 0 : p.stock)), 0)
   };
 
   return (

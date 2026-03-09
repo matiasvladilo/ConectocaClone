@@ -34,7 +34,8 @@ import {
     X,
     Search,
     AlertCircle,
-    Edit
+    Edit,
+    Calendar
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Order } from '../App';
@@ -42,8 +43,7 @@ import { productsAPI, ordersAPI, type Product as APIProduct } from '../utils/api
 import { formatCLP } from '../utils/format';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
-import { createClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+
 
 interface EditOrderDialogProps {
     isOpen: boolean;
@@ -73,6 +73,7 @@ export function EditOrderDialog({
     const [products, setProducts] = useState<APIProduct[]>([]);
     const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
     const [notes, setNotes] = useState('');
+    const [deadline, setDeadline] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
 
@@ -109,6 +110,9 @@ export function EditOrderDialog({
 
         setOrderItems(items);
         setNotes(order.notes || '');
+        // Normalize deadline to YYYY-MM-DD for the date input
+        const dl = order.deadline ? order.deadline.split('T')[0] : '';
+        setDeadline(dl);
     };
 
     const handleQuantityChange = (productId: string, delta: number) => {
@@ -161,19 +165,6 @@ export function EditOrderDialog({
 
         try {
             setIsSaving(true);
-
-            // Initialize Supabase client
-            const supabase = createClient(
-                `https://${projectId}.supabase.co`,
-                publicAnonKey,
-                {
-                    global: {
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`
-                        }
-                    }
-                }
-            );
 
             // 1. Calculate and Apply Stock Changes
             const freshProducts = await productsAPI.getAll(accessToken);
@@ -256,39 +247,14 @@ export function EditOrderDialog({
                 return;
             }
 
-            const updatedOrderData = {
+            await ordersAPI.update(accessToken, order.id, {
                 products: enrichedProducts,
                 total: calculateTotal(),
-                notes: notes,
-                deadline: order.deadline,
+                notes,
+                deadline: deadline || order.deadline,
                 customerName: order.customerName,
                 deliveryAddress: order.deliveryAddress
-            };
-
-            // Get current user businessId to ensure it persists
-            const { data: { user } } = await supabase.auth.getUser();
-            const businessId = user?.user_metadata?.businessId || (order as any).businessId || '';
-
-            // Merge with existing order data to preserve other fields, ensuring businessId and userId are set
-            const fullUpdatedOrder = {
-                ...order,
-                ...updatedOrderData,
-                businessId: businessId, // CRITICAL: Ensure businessId is set
-                userId: order.userId || user?.id, // CRITICAL: Ensure userId is set
-                updatedAt: new Date().toISOString()
-            };
-
-            console.log('Sending Updated Order to RPC:', fullUpdatedOrder);
-
-            const { error: rpcError } = await supabase.rpc('update_order_kv', {
-                order_id: order.id,
-                new_data: fullUpdatedOrder
-            });
-
-            if (rpcError) {
-                console.error('RPC Error:', rpcError);
-                throw new Error(`Error en base de datos: ${rpcError.message}`);
-            }
+            } as any);
 
             toast.success('Pedido actualizado correctamente');
             onOrderUpdated();
@@ -337,7 +303,9 @@ export function EditOrderDialog({
                                                 placeholder="Buscar..."
                                                 value={searchTerm}
                                                 onChange={(e) => setSearchTerm(e.target.value)}
+                                                onKeyDown={(e) => e.stopPropagation()}
                                                 className="h-8"
+                                                autoFocus
                                             />
                                         </div>
                                         <ScrollArea className="h-60">
@@ -429,15 +397,29 @@ export function EditOrderDialog({
 
                     {/* Totals & Notes */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <Label htmlFor="notes">Notas del Pedido</Label>
-                            <Textarea
-                                id="notes"
-                                placeholder="Instrucciones especiales..."
-                                value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
-                                className="h-24 resize-none"
-                            />
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="deadline" className="flex items-center gap-1.5">
+                                    <Calendar className="w-4 h-4 text-gray-500" />
+                                    Fecha de entrega
+                                </Label>
+                                <Input
+                                    id="deadline"
+                                    type="date"
+                                    value={deadline}
+                                    onChange={(e) => setDeadline(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="notes">Notas del Pedido</Label>
+                                <Textarea
+                                    id="notes"
+                                    placeholder="Instrucciones especiales..."
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    className="h-20 resize-none"
+                                />
+                            </div>
                         </div>
                         <div className="bg-gray-50 p-4 rounded-lg space-y-3 h-fit">
                             <div className="flex justify-between text-sm">
