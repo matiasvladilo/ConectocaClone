@@ -86,8 +86,9 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
   const [deadline, setDeadline] = useState(today);
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(new Date());
 
+  const [decimalInputs, setDecimalInputs] = useState<Record<string, string>>({});
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', description: '', price: '', image: '', stock: '', category: '', categoryId: '', trackStock: true });
+  const [editForm, setEditForm] = useState({ name: '', description: '', price: '', image: '', stock: '', category: '', categoryId: '', trackStock: true, allowDecimal: false });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [summaryExpanded, setSummaryExpanded] = useState(true);
@@ -309,6 +310,20 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
     }).filter(item => item.quantity > 0));
   };
 
+  const handleSetCartQuantity = (productId: string, value: string) => {
+    const parsed = parseFloat(value.replace(',', '.'));
+    if (isNaN(parsed) || parsed <= 0) return;
+    const rounded = Math.round(parsed * 100) / 100;
+    setCart(prev => prev.map(item => {
+      if (item.id !== productId) return item;
+      if (rounded > item.stock && item.stock !== -1 && item.trackStock) {
+        toast.error(`Solo hay ${item.stock} unidades disponibles en stock`);
+        return item;
+      }
+      return { ...item, quantity: rounded };
+    }));
+  };
+
   const handleRemoveFromCart = (productId: string) => {
     setCart(cart.filter(item => item.id !== productId));
     toast.success('Producto eliminado del pedido');
@@ -324,7 +339,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
       stock: (product.trackStock === false || product.stock === -1) ? '0' : (product.stock?.toString() || '0'),
       category: product.category || 'General',
       categoryId: product.categoryId || '',
-      trackStock: product.trackStock !== false
+      trackStock: product.trackStock !== false,
+      allowDecimal: (product as any).allowDecimal === true
     });
     setImageFile(null);
     setImagePreview(product.image);
@@ -401,7 +417,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
         category: editForm.category || 'General',
         categoryId: editForm.categoryId || undefined,
         trackStock: editForm.trackStock,
-        unlimitedStock: isUnlimited
+        unlimitedStock: isUnlimited,
+        allowDecimal: editForm.allowDecimal
       });
 
       setProducts(products.map(p =>
@@ -959,9 +976,30 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                                 >
                                   <Minus className="w-3 h-3" />
                                 </button>
-                                <span className={`text-sm w-8 text-center ${atLimit ? 'text-orange-600' : ''}`}>
-                                  {item.quantity}
-                                </span>
+                                {(item as any).allowDecimal ? (
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={decimalInputs[item.id] ?? item.quantity}
+                                    onChange={(e) => {
+                                      const raw = e.target.value.replace(',', '.');
+                                      if (!/^[\d]*\.?[\d]*$/.test(raw)) return;
+                                      setDecimalInputs(prev => ({ ...prev, [item.id]: raw }));
+                                      const parsed = parseFloat(raw);
+                                      if (!isNaN(parsed) && parsed > 0) {
+                                        handleSetCartQuantity(item.id, raw);
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      setDecimalInputs(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+                                    }}
+                                    className={`text-sm w-14 text-center border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 ${atLimit ? 'text-orange-600' : ''}`}
+                                  />
+                                ) : (
+                                  <span className={`text-sm w-8 text-center ${atLimit ? 'text-orange-600' : ''}`}>
+                                    {item.quantity}
+                                  </span>
+                                )}
                                 <button
                                   onClick={() => handleUpdateCartQuantity(item.id, 1)}
                                   disabled={atLimit}
@@ -1303,6 +1341,25 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                 id="track-stock"
                 checked={editForm.trackStock}
                 onCheckedChange={(checked) => setEditForm({ ...editForm, trackStock: checked })}
+              />
+            </div>
+
+            {/* Allow Decimal Switch */}
+            <div className="flex items-center justify-between p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <div className="flex-1">
+                <Label htmlFor="allow-decimal" className="cursor-pointer text-amber-900">
+                  ½ Permitir venta por decimal
+                </Label>
+                <p className="text-xs text-amber-700 mt-1">
+                  {editForm.allowDecimal
+                    ? 'Se puede pedir 0.5, 1.5, etc.'
+                    : 'Solo cantidades enteras (1, 2, 3...)'}
+                </p>
+              </div>
+              <Switch
+                id="allow-decimal"
+                checked={editForm.allowDecimal}
+                onCheckedChange={(checked) => setEditForm({ ...editForm, allowDecimal: checked })}
               />
             </div>
           </div>
