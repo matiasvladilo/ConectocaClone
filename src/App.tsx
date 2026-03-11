@@ -694,7 +694,7 @@ export default function App() {
             deliveryAddress:
               order.deliveryAddress || "Sin dirección registrada",
             userId: order.userId || '',
-            createdAt: order.createdAt || new Date().toISOString(),
+            createdAt: order.createdAt || undefined,
             notes: order.notes,
             itemStatuses: order.itemStatuses || {},
           };

@@ -120,10 +120,12 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
       );
     }
 
-    // Filter by date range (uses creation date)
+    // Filter by date range — only filter orders that have a real createdAt from the API
     if (dateFrom || dateTo) {
       filtered = filtered.filter(order => {
-        const d = new Date(order.createdAt || order.date);
+        // If no real API createdAt, we can't determine the date → include the order
+        if (!order.createdAt) return true;
+        const d = new Date(order.createdAt);
         const orderDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
         if (dateFrom) {
@@ -565,25 +567,39 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                           <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
                             Desde
                           </label>
-                          <Input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            className="h-10 bg-white border-[#CBD5E1]"
-                            style={{ borderRadius: '10px' }}
-                          />
+                          <div className="relative h-10">
+                            <div className="h-10 bg-white border border-[#CBD5E1] flex items-center px-3 pointer-events-none" style={{ borderRadius: '10px' }}>
+                              <span className="text-sm" style={{ color: dateFrom ? '#111827' : '#9CA3AF' }}>
+                                {dateFrom ? dateFrom.split('-').reverse().join('/') : 'DD/MM/AAAA'}
+                              </span>
+                              <Calendar className="w-4 h-4 ml-auto text-gray-400" />
+                            </div>
+                            <input
+                              type="date"
+                              value={dateFrom}
+                              onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
                             Hasta
                           </label>
-                          <Input
-                            type="date"
-                            value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            className="h-10 bg-white border-[#CBD5E1]"
-                            style={{ borderRadius: '10px' }}
-                          />
+                          <div className="relative h-10">
+                            <div className="h-10 bg-white border border-[#CBD5E1] flex items-center px-3 pointer-events-none" style={{ borderRadius: '10px' }}>
+                              <span className="text-sm" style={{ color: dateTo ? '#111827' : '#9CA3AF' }}>
+                                {dateTo ? dateTo.split('-').reverse().join('/') : 'DD/MM/AAAA'}
+                              </span>
+                              <Calendar className="w-4 h-4 ml-auto text-gray-400" />
+                            </div>
+                            <input
+                              type="date"
+                              value={dateTo}
+                              onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                          </div>
                         </div>
                       </div>
                     </motion.div>
