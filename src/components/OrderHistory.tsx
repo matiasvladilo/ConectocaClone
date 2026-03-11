@@ -82,6 +82,12 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   }
 };
 
+function truncateProducts(productName: string, max = 2): string {
+  const parts = productName.split(', ');
+  if (parts.length <= max) return productName;
+  return parts.slice(0, max).join(', ') + ` y ${parts.length - max} más...`;
+}
+
 export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToken, onRefresh }: OrderHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
@@ -710,7 +716,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                               className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors"
                               style={{ fontSize: '16px', fontWeight: 600 }}
                             >
-                              {order.productName}
+                              {truncateProducts(order.productName)}
                             </h3>
                             <Badge
                               className={`${config.bgColor} ${config.color} border px-2.5 py-1 flex items-center gap-1.5`}
@@ -850,7 +856,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                         className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors mb-3 line-clamp-2"
                         style={{ fontSize: '15px', fontWeight: 600 }}
                       >
-                        {order.productName}
+                        {truncateProducts(order.productName)}
                       </h3>
 
                       <div className="space-y-2 mb-4">
