@@ -114,19 +114,11 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
       );
     }
 
-    // Filter by date range
+    // Filter by date range (uses creation date)
     if (dateFrom || dateTo) {
       filtered = filtered.filter(order => {
-        let orderDate;
-
-        if (order.deadline) {
-          // deadline is e.g. "2026-02-23"
-          const [dy, dm, dd] = order.deadline.split('-').map(Number);
-          orderDate = new Date(dy, dm - 1, dd);
-        } else {
-          const d = new Date(order.createdAt || order.date);
-          orderDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        }
+        const d = new Date(order.createdAt || order.date);
+        const orderDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
         if (dateFrom) {
           const [y, m, day] = dateFrom.split('-').map(Number);
