@@ -664,14 +664,19 @@ export default function App() {
       const transformedOrders: Order[] = response.data.map(
         (order: APIOrder) => {
           const products = order.products || [];
-          let safeDate = new Date().toISOString().split("T")[0];
-          try {
-            if (order.createdAt) {
-              safeDate = new Date(order.createdAt).toISOString().split("T")[0];
-            }
-          } catch (e) {
-            // keep today as fallback
+          // Resolve creation date: prefer createdAt, fallback to MongoDB ObjectId timestamp
+          let resolvedCreatedAt: string | undefined;
+          if (order.createdAt) {
+            const d = new Date(order.createdAt);
+            if (!isNaN(d.getTime())) resolvedCreatedAt = order.createdAt;
           }
+          if (!resolvedCreatedAt && order.id && /^[0-9a-f]{24}$/i.test(order.id)) {
+            const ts = parseInt(order.id.slice(0, 8), 16) * 1000;
+            resolvedCreatedAt = new Date(ts).toISOString();
+          }
+          const safeDate = resolvedCreatedAt
+            ? new Date(resolvedCreatedAt).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0];
 
           return {
             id: order.id || crypto.randomUUID(),
@@ -694,7 +699,7 @@ export default function App() {
             deliveryAddress:
               order.deliveryAddress || "Sin dirección registrada",
             userId: order.userId || '',
-            createdAt: order.createdAt || undefined,
+            createdAt: resolvedCreatedAt,
             notes: order.notes,
             itemStatuses: order.itemStatuses || {},
           };

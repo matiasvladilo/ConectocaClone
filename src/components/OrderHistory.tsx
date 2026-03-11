@@ -120,11 +120,10 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
       );
     }
 
-    // Filter by date range — only filter orders that have a real createdAt from the API
+    // Filter by date range
     if (dateFrom || dateTo) {
       filtered = filtered.filter(order => {
-        // If no real API createdAt, we can't determine the date → include the order
-        if (!order.createdAt) return true;
+        if (!order.createdAt) return false;
         const d = new Date(order.createdAt);
         const orderDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
