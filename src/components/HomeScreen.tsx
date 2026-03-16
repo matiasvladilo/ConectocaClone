@@ -739,9 +739,10 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                     <Clock className="w-3.5 h-3.5" />
                                     {(() => {
                                       const createdAt = order.createdAt || order.date;
-                                      const deadlineDay = order.deadline ? order.deadline.slice(0, 10) : null;
-                                      const createdDay = createdAt ? new Date(createdAt).toISOString().split('T')[0] : null;
-                                      // Only show time if order was created on the same day as deadline
+                                      // Compare LOCAL calendar dates (not UTC) to avoid midnight-shift false positives
+                                      const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                                      const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
+                                      const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
                                       if (deadlineDay && createdDay && deadlineDay !== createdDay) {
                                         return 'Pedido anticipado';
                                       }
