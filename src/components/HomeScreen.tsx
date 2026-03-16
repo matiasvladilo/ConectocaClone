@@ -803,15 +803,15 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     </div>
                   );
 
-                  // Render upcoming (today + future, toggle-controlled) first, then regular
+                  // Render today (always visible) + future (toggle-controlled) first, then regular
                   let currentGroupIndex = 0;
                   const renderedGroups: React.ReactNode[] = [];
 
-                  if (showFutureOrders) {
-                    Object.entries(upcomingGrouped).forEach(([dateKey, { orders, isToday }]) => {
+                  Object.entries(upcomingGrouped).forEach(([dateKey, { orders, isToday }]) => {
+                    if (isToday || showFutureOrders) {
                       renderedGroups.push(renderOrderGroup([dateKey, orders], currentGroupIndex++, !isToday, isToday));
-                    });
-                  }
+                    }
+                  });
 
                   Object.entries(regularGrouped).forEach(entry => {
                     renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false, false));
