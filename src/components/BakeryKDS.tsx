@@ -40,6 +40,7 @@ import logo from '../assets/logo.png';
 const logoFull = logo;
 import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';
+import { parseDate } from '../utils/dateUtils';
 
 interface BakeryKDSProps {
   orders: Order[];
@@ -436,7 +437,9 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+    if (!dateString) return '';
+    // Pure YYYY-MM-DD → parse as local calendar date to avoid UTC midnight shift
+    const date = /^\d{4}-\d{2}-\d{2}/.test(dateString) ? parseDate(dateString) : new Date(dateString);
     return date.toLocaleDateString('es-CL', {
       day: '2-digit',
       month: 'long',
