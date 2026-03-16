@@ -111,13 +111,16 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
     const fetchAllOrders = async () => {
       if (!accessToken) return;
       try {
-        // Fetch up to 1000 orders to ensure we have enough historical data
         const response = await ordersAPI.getAll(accessToken, 1, 1000);
         if (response && response.data) {
-          setAllOrders(response.data);
+          const normalized = response.data.map((order: any) => ({
+            ...order,
+            deadline: order.deadline ? order.deadline.slice(0, 10) : order.deadline,
+          }));
+          setAllOrders(normalized);
         }
       } catch (error) {
-        console.error('Error fetching comprehensive orders for analytics:', error);
+        console.error('Error fetching orders for analytics:', error);
       }
     };
 
@@ -161,21 +164,19 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
     return date;
   }, [dateRangeInDays, timeRange, dateRange]);
 
-  // Filter orders by date range
+  // Filter orders by date range using createdAt (when the order was placed)
   const filteredOrders = useMemo(() => {
-    const filtered = allOrders.filter(order => {
-      // Use deadline as operational date (when order is due/delivered), fallback to createdAt
-      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date || null);
+    return allOrders.filter(order => {
+      const dateString = (order as any).createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
       if (!dateString) return false;
       const orderDate = new Date(dateString);
+      if (isNaN(orderDate.getTime())) return false;
       if (timeRange === 'custom') {
         if (dateRange?.to) {
-          // End of day for the end date
           const endDate = new Date(dateRange.to);
           endDate.setHours(23, 59, 59, 999);
           return orderDate >= startDate && orderDate <= endDate;
         } else if (dateRange?.from) {
-          // If only 'from' is selected, filter for that specific day
           const endDate = new Date(dateRange.from);
           endDate.setHours(23, 59, 59, 999);
           return orderDate >= startDate && orderDate <= endDate;
@@ -184,25 +185,11 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       return orderDate >= startDate;
     }).map(order => ({
       ...order,
-      // Ensure all products have id field set from productId
-      products: order.products?.map(product => {
-        // Log the product structure to debug
-        if (!product.id && !product.productId) {
-          console.log('⚠️ Product without id or productId:', product);
-        }
-        return {
-          ...product,
-          id: product.id || product.productId || undefined
-        };
-      })
+      products: order.products?.map(product => ({
+        ...product,
+        id: (product as any).id || product.productId || undefined
+      }))
     }));
-
-    console.log('📋 Filtered orders with products:', filtered.map(o => ({
-      orderId: o.id.substring(0, 8),
-      products: o.products?.map(p => ({ name: p.name, id: p.id, productId: (p as any).productId }))
-    })));
-
-    return filtered;
   }, [allOrders, startDate, timeRange, dateRange]);
 
   // Calculate KPIs
@@ -210,7 +197,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
     // Use price×quantity per product item (real revenue), not order.total (can be wrong from old KV store)
     const totalRevenue = filteredOrders.reduce((sum, order) =>
       sum + (order.products?.reduce((s, p) => s + (p.price * p.quantity), 0) || order.total || 0), 0);
-    const completedOrders = filteredOrders.filter(o => o.status === 'completed' || o.status === 'cancelled').length;
+    const completedOrders = filteredOrders.filter(o =>
+      o.status === 'completed' || o.status === 'dispatched' || o.status === 'delivered' || o.status === 'cancelled'
+    ).length;
     const totalOrders = filteredOrders.length;
     const successRate = totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0;
 
@@ -245,9 +234,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       statsMap.set(dateStr, { pedidos: 0, ingresos: 0 });
     }
 
-    // Fill with actual data — group by deadline (operational date), fallback to createdAt
+    // Fill with actual data — group by createdAt (when the order was placed)
     filteredOrders.forEach(order => {
-      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date || null);
+      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
       if (!dateString) return;
       const orderDate = new Date(dateString);
       const dateStr = orderDate.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
@@ -295,11 +284,13 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
   // Status distribution for pie chart
   const statusDistribution = useMemo((): StatusDistribution[] => {
-    const distribution = {
+    const distribution: Record<string, { count: number; label: string; color: string }> = {
       pending: { count: 0, label: 'Pendientes', color: COLORS.warning },
       in_progress: { count: 0, label: 'En Preparación', color: COLORS.info },
       completed: { count: 0, label: 'Listos', color: COLORS.success },
-      cancelled: { count: 0, label: 'Despachados', color: COLORS.primary }
+      dispatched: { count: 0, label: 'Despachados', color: COLORS.primary },
+      delivered: { count: 0, label: 'Recibidos', color: COLORS.secondary },
+      cancelled: { count: 0, label: 'Cancelados', color: COLORS.danger }
     };
 
     filteredOrders.forEach(order => {
@@ -531,7 +522,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
           // Calculate cost based on recipe
           recipe.forEach(recipeItem => {
             // Try to find ingredient by name first, then by ID
-            let ing = ingredientMapByName.get(recipeItem.ingredientName);
+            let ing = recipeItem.ingredientName ? ingredientMapByName.get(recipeItem.ingredientName) : undefined;
             if (!ing && recipeItem.ingredientId) {
               ing = ingredientMapById.get(recipeItem.ingredientId);
             }

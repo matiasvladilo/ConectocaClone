@@ -688,7 +688,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   style={{
                     borderRadius: '16px',
                     borderTopWidth: '4px',
-                    borderTopColor: product.stock === 0 ? '#EF4444' : product.stock < 10 ? '#F59E0B' : '#10B981',
+                    borderTopColor: (product.unlimitedStock || product.stock === -1) ? '#6B7280' : product.stock === 0 ? '#EF4444' : product.stock < 10 ? '#F59E0B' : '#10B981',
                     borderLeftColor: '#E0EDFF',
                     borderRightColor: '#E0EDFF',
                     borderBottomColor: '#E0EDFF'
@@ -749,13 +749,16 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Stock</p>
                         <p
-                          className={`${product.stock === 0 ? 'text-red-600' :
+                          className={`${(product.unlimitedStock || product.stock === -1) ? 'text-blue-500' :
+                            product.stock === 0 ? 'text-red-600' :
                             product.stock < 10 ? 'text-amber-600' :
-                              'text-green-600'
-                            }`}
+                            'text-green-600'
+                          }`}
                           style={{ fontSize: '18px', fontWeight: 600 }}
                         >
-                          {product.stock === -1 ? 'Ilimitado' : product.stock}
+                          {(product.unlimitedStock || product.stock === -1) ? '∞ Ilimitado' :
+                            product.stock === 0 ? 'Sin stock' :
+                            product.stock}
                         </p>
                       </div>
                     </div>

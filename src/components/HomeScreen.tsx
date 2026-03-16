@@ -64,8 +64,24 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
   }
 };
 
+const SCROLL_KEY = 'ordersScrollPosition';
+
 export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, pagination, onPageChange, isLoading = false }: HomeScreenProps) {
   const [showFutureOrders, setShowFutureOrders] = React.useState(true);
+
+  // Restore scroll position when returning from an order detail
+  React.useEffect(() => {
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved) {
+      window.scrollTo(0, Number(saved));
+      sessionStorage.removeItem(SCROLL_KEY);
+    }
+  }, []);
+
+  const handleViewOrder = (order: Order) => {
+    sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+    onViewOrder(order);
+  };
 
   // If pagination is enabled, use all orders (already paginated from backend)
   // Otherwise, show only first 5 orders (legacy behavior)
@@ -690,7 +706,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                           >
                             <Card
                               className={`cursor-pointer transition-all duration-300 border-2 group ${isTodayGroup ? 'hover:shadow-xl' : isFutureGroup ? 'hover:shadow-md border-dashed bg-slate-50 border-purple-200' : 'hover:shadow-xl'}`}
-                              onClick={() => onViewOrder(order)}
+                              onClick={() => handleViewOrder(order)}
                               style={{
                                 borderRadius: '16px',
                                 borderLeftWidth: order.status === 'pending' || order.status === 'in_progress' || order.status === 'completed' ? '4px' : '2px',
