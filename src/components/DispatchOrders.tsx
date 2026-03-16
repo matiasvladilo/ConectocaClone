@@ -22,6 +22,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCLP } from '../utils/format';
+import { formatDateCL } from '../utils/dateUtils';
 import { StandardDeliveryGuideContent } from './StandardDeliveryGuide';
 import { EditOrderDialog } from './EditOrderDialog';
 
@@ -429,9 +430,7 @@ export function DispatchOrders({
                                 Entrega
                               </p>
                               <p className={`font-medium ${isFutureGroup ? 'text-purple-700' : 'text-gray-900'} pl-4.5`}>
-                                {new Date(order.deadline).toLocaleDateString('es-CL', {
-                                  weekday: 'short', day: '2-digit', month: 'long'
-                                })}
+                                {formatDateCL(order.deadline, { weekday: 'short', day: '2-digit', month: 'long' })}
                               </p>
                             </div>
                           </div>

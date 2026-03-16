@@ -692,7 +692,7 @@ export default function App() {
               order.status === 'despachado' ? 'dispatched' :
                 order.status || 'pending') as OrderStatus,
             customerName: order.customerName || "",
-            deadline: order.deadline ? new Date(order.deadline).toISOString().split('T')[0] : safeDate,
+            deadline: order.deadline ? order.deadline.slice(0, 10) : safeDate,
             progress: order.progress || 0,
             products: products,
             total: order.total || 0,
