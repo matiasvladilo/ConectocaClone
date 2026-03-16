@@ -582,13 +582,23 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                   const today = new Date();
                   today.setHours(0, 0, 0, 0);
 
+                  const getDeadlineLocal = (deadline: string) => {
+                    const parts = deadline.split('T')[0].split('-');
+                    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                    d.setHours(0, 0, 0, 0);
+                    return d;
+                  };
+
+                  const isTodayOrder = (deadline?: string) => {
+                    if (!deadline) return false;
+                    const dl = getDeadlineLocal(deadline);
+                    return dl.getTime() === today.getTime();
+                  };
+
                   const isFutureOrder = (deadline?: string) => {
                     if (!deadline) return false;
-                    const parts = deadline.split('T')[0].split('-');
-                    if (parts.length !== 3) return false;
-                    const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    deadlineDate.setHours(0, 0, 0, 0);
-                    return deadlineDate >= today;
+                    const dl = getDeadlineLocal(deadline);
+                    return dl > today;
                   };
 
                   const getDateKey = (dateStr: string) => {
@@ -600,12 +610,15 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     });
                   };
 
-                  // Separate future and regular orders
+                  // Separate today, future and regular orders
+                  const todayOrders: typeof displayOrders = [];
                   const futureOrders: typeof displayOrders = [];
                   const regularOrders: typeof displayOrders = [];
 
                   displayOrders.forEach(order => {
-                    if (isFutureOrder(order.deadline)) {
+                    if (isTodayOrder(order.deadline)) {
+                      todayOrders.push(order);
+                    } else if (isFutureOrder(order.deadline)) {
                       futureOrders.push(order);
                     } else {
                       regularOrders.push(order);
@@ -620,6 +633,20 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                       regularGrouped[dateKey] = [];
                     }
                     regularGrouped[dateKey].push(order);
+                  });
+
+                  // Group today orders by delivery deadline
+                  const todayGrouped: Record<string, typeof displayOrders> = {};
+                  todayOrders.forEach(order => {
+                    const parts = order.deadline!.split('T')[0].split('-');
+                    const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                    const dateKey = 'Hoy · ' + deadlineDate.toLocaleDateString('es-CL', {
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long'
+                    });
+                    if (!todayGrouped[dateKey]) todayGrouped[dateKey] = [];
+                    todayGrouped[dateKey].push(order);
                   });
 
                   // Group future orders by delivery deadline
@@ -638,7 +665,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     futureGrouped[dateKey].push(order);
                   });
 
-                  const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, isFutureGroup: boolean) => (
+                  const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, isFutureGroup: boolean, isTodayGroup: boolean = false) => (
                     <div key={dateLabel} className="space-y-3 mb-6">
                       {/* Date Header */}
                       <motion.div
@@ -647,14 +674,15 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                         transition={{ delay: 0.3 + (groupIndex * 0.1) }}
                         className="flex items-center gap-2 pb-1 pt-2"
                       >
-                        <div className={`h-px flex-1 ${isFutureGroup ? 'bg-gradient-to-r from-purple-300 to-transparent' : 'bg-gradient-to-r from-blue-200 to-transparent'}`} />
+                        <div className={`h-px flex-1 ${isTodayGroup ? 'bg-gradient-to-r from-orange-300 to-transparent' : isFutureGroup ? 'bg-gradient-to-r from-purple-300 to-transparent' : 'bg-gradient-to-r from-blue-200 to-transparent'}`} />
                         <span
-                          className={`text-sm font-medium capitalize px-2 py-1 rounded-full backdrop-blur-sm border ${isFutureGroup ? 'text-purple-800 bg-purple-50/80 border-purple-200 shadow-sm' : 'text-blue-800 bg-blue-50/80 border-blue-100'}`}
+                          className={`text-sm font-medium capitalize px-2 py-1 rounded-full backdrop-blur-sm border ${isTodayGroup ? 'text-orange-800 bg-orange-50/80 border-orange-200 shadow-sm' : isFutureGroup ? 'text-purple-800 bg-purple-50/80 border-purple-200 shadow-sm' : 'text-blue-800 bg-blue-50/80 border-blue-100'}`}
                         >
-                          {isFutureGroup && <Clock className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-purple-600" />}
+                          {isTodayGroup && <Clock className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-orange-600" />}
+                          {!isTodayGroup && isFutureGroup && <Clock className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-purple-600" />}
                           {dateLabel}
                         </span>
-                        <div className={`h-px flex-1 ${isFutureGroup ? 'bg-gradient-to-l from-purple-300 to-transparent' : 'bg-gradient-to-l from-blue-200 to-transparent'}`} />
+                        <div className={`h-px flex-1 ${isTodayGroup ? 'bg-gradient-to-l from-orange-300 to-transparent' : isFutureGroup ? 'bg-gradient-to-l from-purple-300 to-transparent' : 'bg-gradient-to-l from-blue-200 to-transparent'}`} />
                       </motion.div>
 
                       {/* Orders for this date */}
@@ -675,7 +703,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                             transition={{ delay: 0.4 + (groupIndex * 0.1) + (index * 0.05) }}
                           >
                             <Card
-                              className={`cursor-pointer transition-all duration-300 border-2 group ${isFutureGroup ? 'hover:shadow-md border-dashed bg-slate-50 border-purple-200' : 'hover:shadow-xl'}`}
+                              className={`cursor-pointer transition-all duration-300 border-2 group ${isTodayGroup ? 'hover:shadow-xl' : isFutureGroup ? 'hover:shadow-md border-dashed bg-slate-50 border-purple-200' : 'hover:shadow-xl'}`}
                               onClick={() => onViewOrder(order)}
                               style={{
                                 borderRadius: '16px',
@@ -689,7 +717,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                 <div className="flex justify-between items-start gap-3">
                                   <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <CardTitle
-                                      className={`${isFutureGroup ? 'text-purple-900 group-hover:text-purple-700' : 'text-[#0047BA] group-hover:text-[#0059FF]'} transition-colors truncate`}
+                                      className={`${isTodayGroup ? 'text-orange-900 group-hover:text-orange-700' : isFutureGroup ? 'text-purple-900 group-hover:text-purple-700' : 'text-[#0047BA] group-hover:text-[#0059FF]'} transition-colors truncate`}
                                       style={{ fontSize: '16px', fontWeight: 600 }}
                                     >
                                       Pedido #{order.id.slice(0, 8).toUpperCase()}
@@ -779,18 +807,22 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     </div>
                   );
 
-                  // Render future groups first, then regular groups
+                  // Render today first, then future, then regular
                   let currentGroupIndex = 0;
                   const renderedGroups: React.ReactNode[] = [];
 
+                  Object.entries(todayGrouped).forEach(entry => {
+                    renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false, true));
+                  });
+
                   if (showFutureOrders) {
                     Object.entries(futureGrouped).forEach(entry => {
-                      renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, true));
+                      renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, true, false));
                     });
                   }
 
                   Object.entries(regularGrouped).forEach(entry => {
-                    renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false));
+                    renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false, false));
                   });
 
                   return renderedGroups;
