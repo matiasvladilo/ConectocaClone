@@ -164,8 +164,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // Filter orders by date range
   const filteredOrders = useMemo(() => {
     const filtered = allOrders.filter(order => {
-      // Use createdAt as primary date (when the order was placed), not deadline (when it's due)
-      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
+      // Use deadline as operational date (when order is due/delivered), fallback to createdAt
+      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date || null);
       if (!dateString) return false;
       const orderDate = new Date(dateString);
       if (timeRange === 'custom') {
@@ -245,9 +245,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       statsMap.set(dateStr, { pedidos: 0, ingresos: 0 });
     }
 
-    // Fill with actual data
+    // Fill with actual data — group by deadline (operational date), fallback to createdAt
     filteredOrders.forEach(order => {
-      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
+      const dateString = order.deadline ? `${order.deadline}T12:00:00` : (order.createdAt || order.date || null);
       if (!dateString) return;
       const orderDate = new Date(dateString);
       const dateStr = orderDate.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });

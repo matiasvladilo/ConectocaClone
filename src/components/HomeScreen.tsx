@@ -737,11 +737,20 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                   <span>•</span>
                                   <span className="flex items-center gap-1">
                                     <Clock className="w-3.5 h-3.5" />
-                                    {new Date(order.createdAt || order.date).toLocaleString('es-CL', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      hour12: false
-                                    })}
+                                    {(() => {
+                                      const createdAt = order.createdAt || order.date;
+                                      const deadlineDay = order.deadline ? order.deadline.slice(0, 10) : null;
+                                      const createdDay = createdAt ? new Date(createdAt).toISOString().split('T')[0] : null;
+                                      // Only show time if order was created on the same day as deadline
+                                      if (deadlineDay && createdDay && deadlineDay !== createdDay) {
+                                        return 'Pedido anticipado';
+                                      }
+                                      return new Date(createdAt).toLocaleString('es-CL', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                      });
+                                    })()}
                                   </span>
                                   {order.customerName && (
                                     <>
