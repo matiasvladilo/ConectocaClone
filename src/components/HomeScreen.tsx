@@ -588,7 +588,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     if (parts.length !== 3) return false;
                     const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
                     deadlineDate.setHours(0, 0, 0, 0);
-                    return deadlineDate > today;
+                    return deadlineDate >= today;
                   };
 
                   const getDateKey = (dateStr: string) => {
