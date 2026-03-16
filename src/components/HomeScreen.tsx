@@ -622,10 +622,17 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     }
                   });
 
-                  // Group regular orders by creation date
+                  // Group regular orders by deadline (if exists) or creation date
                   const regularGrouped: Record<string, typeof displayOrders> = {};
                   regularOrders.forEach(order => {
-                    const dateKey = getDateKey(order.createdAt || order.date);
+                    let dateKey: string;
+                    if (order.deadline) {
+                      const parts = order.deadline.split('T')[0].split('-');
+                      const dl = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                      dateKey = dl.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+                    } else {
+                      dateKey = getDateKey(order.createdAt || order.date);
+                    }
                     if (!regularGrouped[dateKey]) regularGrouped[dateKey] = [];
                     regularGrouped[dateKey].push(order);
                   });
