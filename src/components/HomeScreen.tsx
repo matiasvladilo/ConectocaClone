@@ -610,16 +610,13 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     });
                   };
 
-                  // Separate today, future and regular orders
-                  const todayOrders: typeof displayOrders = [];
-                  const futureOrders: typeof displayOrders = [];
+                  // Separate upcoming (today + future, toggle-controlled) and regular orders
+                  const upcomingOrders: typeof displayOrders = [];
                   const regularOrders: typeof displayOrders = [];
 
                   displayOrders.forEach(order => {
-                    if (isTodayOrder(order.deadline)) {
-                      todayOrders.push(order);
-                    } else if (isFutureOrder(order.deadline)) {
-                      futureOrders.push(order);
+                    if (isTodayOrder(order.deadline) || isFutureOrder(order.deadline)) {
+                      upcomingOrders.push(order);
                     } else {
                       regularOrders.push(order);
                     }
@@ -629,40 +626,22 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                   const regularGrouped: Record<string, typeof displayOrders> = {};
                   regularOrders.forEach(order => {
                     const dateKey = getDateKey(order.createdAt || order.date);
-                    if (!regularGrouped[dateKey]) {
-                      regularGrouped[dateKey] = [];
-                    }
+                    if (!regularGrouped[dateKey]) regularGrouped[dateKey] = [];
                     regularGrouped[dateKey].push(order);
                   });
 
-                  // Group today orders by delivery deadline
-                  const todayGrouped: Record<string, typeof displayOrders> = {};
-                  todayOrders.forEach(order => {
+                  // Group upcoming orders by deadline, marking today vs future
+                  // Each entry: { orders, isToday }
+                  const upcomingGrouped: Record<string, { orders: typeof displayOrders; isToday: boolean }> = {};
+                  upcomingOrders.forEach(order => {
                     const parts = order.deadline!.split('T')[0].split('-');
                     const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    const dateKey = 'Hoy · ' + deadlineDate.toLocaleDateString('es-CL', {
-                      weekday: 'long',
-                      day: 'numeric',
-                      month: 'long'
-                    });
-                    if (!todayGrouped[dateKey]) todayGrouped[dateKey] = [];
-                    todayGrouped[dateKey].push(order);
-                  });
-
-                  // Group future orders by delivery deadline
-                  const futureGrouped: Record<string, typeof displayOrders> = {};
-                  futureOrders.forEach(order => {
-                    const parts = order.deadline!.split('T')[0].split('-');
-                    const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    const dateKey = 'Para el ' + deadlineDate.toLocaleDateString('es-CL', {
-                      weekday: 'long',
-                      day: 'numeric',
-                      month: 'long'
-                    });
-                    if (!futureGrouped[dateKey]) {
-                      futureGrouped[dateKey] = [];
-                    }
-                    futureGrouped[dateKey].push(order);
+                    const isToday = isTodayOrder(order.deadline);
+                    const dateKey = isToday
+                      ? 'Hoy · ' + deadlineDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
+                      : 'Para el ' + deadlineDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+                    if (!upcomingGrouped[dateKey]) upcomingGrouped[dateKey] = { orders: [], isToday };
+                    upcomingGrouped[dateKey].orders.push(order);
                   });
 
                   const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, isFutureGroup: boolean, isTodayGroup: boolean = false) => (
@@ -807,17 +786,13 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     </div>
                   );
 
-                  // Render today first, then future, then regular
+                  // Render upcoming (today + future, toggle-controlled) first, then regular
                   let currentGroupIndex = 0;
                   const renderedGroups: React.ReactNode[] = [];
 
-                  Object.entries(todayGrouped).forEach(entry => {
-                    renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false, true));
-                  });
-
                   if (showFutureOrders) {
-                    Object.entries(futureGrouped).forEach(entry => {
-                      renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, true, false));
+                    Object.entries(upcomingGrouped).forEach(([dateKey, { orders, isToday }]) => {
+                      renderedGroups.push(renderOrderGroup([dateKey, orders], currentGroupIndex++, !isToday, isToday));
                     });
                   }
 
