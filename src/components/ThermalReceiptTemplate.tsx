@@ -99,12 +99,18 @@ export const ThermalReceiptTemplate = ({
                     <span>{order.deliveryAddress || '-'}</span>
                 </div>
                 <div style={{ display: 'flex', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 'bold', width: '70px' }}>Fecha:</span>
+                    <span style={{ fontWeight: 'bold', width: '70px' }}>Pedido:</span>
                     <span>{formatDate(order.createdAt || order.date)}</span>
                 </div>
                 <div style={{ display: 'flex', marginBottom: '2px' }}>
                     <span style={{ fontWeight: 'bold', width: '70px' }}>Hora:</span>
                     <span>{formatTime(order.createdAt || order.date)}</span>
+                </div>
+                <div style={{ display: 'flex', marginBottom: '2px' }}>
+                    <span style={{ fontWeight: 'bold', width: '70px' }}>Despacho:</span>
+                    <span style={{ fontWeight: 'bold' }}>
+                        {order.deadline ? formatDate(order.deadline + 'T12:00:00') : '-'}
+                    </span>
                 </div>
                 {order.notes && (
                     <div style={{ display: 'flex', marginTop: '2px' }}>

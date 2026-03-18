@@ -49,6 +49,7 @@ interface NewOrderFormProps {
     notes?: string;
   }) => Promise<void>;
   accessToken: string;
+  userRole?: string;
 }
 
 interface Product {
@@ -67,7 +68,7 @@ interface CartItem extends Product {
   quantity: number;
 }
 
-export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProps) {
+export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrderFormProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
@@ -757,18 +758,17 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                             <ShoppingCart className="w-4 h-4 text-blue-900" />
                           </div>
                         )}
-                        {/* Only show edit button if we are in management mode or authorized context - currently NewOrderForm is for creating orders, maybe shouldn't edit?
-                            Actually NewOrderForm has handleEditProduct, so we keep it. 
-                         */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditProduct(product);
-                          }}
-                          className="edit-btn absolute top-2 right-2 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-md transition-colors z-[5]"
-                        >
-                          <Edit className="w-4 h-4 text-blue-600" />
-                        </button>
+                        {userRole !== 'local' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditProduct(product);
+                            }}
+                            className="edit-btn absolute top-2 right-2 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-md transition-colors z-[5]"
+                          >
+                            <Edit className="w-4 h-4 text-blue-600" />
+                          </button>
+                        )}
                       </div>
 
                       <CardContent className="p-4 space-y-3">
@@ -857,18 +857,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken }: NewOrderFormProp
                             <p className="text-xs text-orange-600">
                               {remainingStock} disponibles (ya tienes {cartItem?.quantity} en el carrito)
                             </p>
-                          )}
-                          {!isUnlimitedProduct && (isOutOfStock || productStock < 20) && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRestockProduct(product);
-                              }}
-                              className="w-full mt-2 px-3 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center justify-center gap-2 transition-colors"
-                            >
-                              <PackagePlus className="w-3 h-3" />
-                              {isOutOfStock ? 'Reabastecer Stock (+100)' : 'Agregar Stock (+100)'}
-                            </button>
                           )}
                         </div>
                       </CardContent>

@@ -1789,6 +1789,7 @@ export default function App() {
             onBack={() => setCurrentScreen("home")}
             onSubmit={handleCreateOrder}
             accessToken={accessToken}
+            userRole={currentUser?.role}
           />
         )}
 

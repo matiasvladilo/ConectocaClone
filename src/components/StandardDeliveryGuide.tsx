@@ -31,7 +31,7 @@ export function StandardDeliveryGuideContent({
   order,
   onClose,
   businessName = "CONECTOCA",
-  businessAddress = "Dirección del Negocio",
+  businessAddress = "Av. Pedro de Valdivia 4260",
   businessPhone = "+56 9 XXXX XXXX",
   businessRut = "XX.XXX.XXX-X"
 }: Omit<StandardDeliveryGuideProps, 'open'>) {
@@ -152,6 +152,18 @@ export function StandardDeliveryGuideContent({
                       hour: '2-digit',
                       minute: '2-digit'
                     })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Fecha de Despacho</p>
+                  <p className="text-sm font-bold text-[#0047BA]">
+                    {order.deadline
+                      ? new Date(order.deadline + 'T12:00:00').toLocaleDateString('es-CL', {
+                          day: '2-digit',
+                          month: 'long',
+                          year: 'numeric'
+                        })
+                      : '-'}
                   </p>
                 </div>
                 <div>
@@ -344,6 +356,18 @@ export function StandardDeliveryGuideContent({
                         hour: '2-digit',
                         minute: '2-digit'
                       })}
+                    </p>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-600">Fecha de Despacho</p>
+                    <p className="text-sm font-bold text-gray-900">
+                      {order.deadline
+                        ? new Date(order.deadline + 'T12:00:00').toLocaleDateString('es-CL', {
+                            day: '2-digit',
+                            month: 'long',
+                            year: 'numeric'
+                          })
+                        : '-'}
                     </p>
                   </div>
                   <div className="mt-2">

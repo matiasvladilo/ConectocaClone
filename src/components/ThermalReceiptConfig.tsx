@@ -30,7 +30,7 @@ export function ThermalReceiptConfigContent({
   order,
   onClose,
   businessName = "PANIFICADORA ELORRIO LTDA.",
-  businessAddress = "PEDRO DE VALDIVIA 4280",
+  businessAddress = "Av. Pedro de Valdivia 4260",
   businessPhone = "+569 1234 5678",
   businessRut = "76.020.756-K"
 }: Omit<ThermalReceiptConfigProps, 'open'>) {

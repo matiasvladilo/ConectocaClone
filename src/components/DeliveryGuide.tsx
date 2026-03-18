@@ -27,7 +27,7 @@ export function DeliveryGuide({
   open,
   onClose,
   businessName = "CONECTOCA",
-  businessAddress = "Dirección del Negocio",
+  businessAddress = "Av. Pedro de Valdivia 4260",
   businessPhone = "+56 9 XXXX XXXX"
 }: DeliveryGuideProps) {
   const [view, setView] = useState<ViewType>('selection');
