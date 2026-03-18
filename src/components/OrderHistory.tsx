@@ -42,6 +42,7 @@ interface OrderHistoryProps {
 type FilterStatus = 'all' | 'pending' | 'in_progress' | 'completed' | 'dispatched' | 'delivered' | 'cancelled';
 type ViewMode = 'grid' | 'list';
 type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
+type DateFilterType = 'createdAt' | 'deadline';
 
 const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: any }> = {
   pending: {
@@ -98,6 +99,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
   const [showFilters, setShowFilters] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [dateFilterType, setDateFilterType] = useState<DateFilterType>('createdAt');
 
   const itemsPerPage = 10;
 
@@ -123,8 +125,17 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
     // Filter by date range
     if (dateFrom || dateTo) {
       filtered = filtered.filter(order => {
-        if (!order.createdAt) return false;
-        const d = new Date(order.createdAt);
+        let dateStr: string | undefined;
+        if (dateFilterType === 'deadline') {
+          dateStr = order.deadline;
+        } else {
+          dateStr = order.createdAt || order.date;
+        }
+        if (!dateStr) return false;
+
+        const d = dateFilterType === 'deadline'
+          ? new Date(dateStr + 'T12:00:00')
+          : new Date(dateStr);
         const orderDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
         if (dateFrom) {
@@ -168,7 +179,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
     });
 
     return filtered;
-  }, [orders, filterStatus, searchQuery, sortBy, dateFrom, dateTo]);
+  }, [orders, filterStatus, searchQuery, sortBy, dateFrom, dateTo, dateFilterType]);
 
   // Pagination
   const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
@@ -197,6 +208,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
     setDateFrom('');
     setDateTo('');
     setSortBy('date-desc');
+    setDateFilterType('createdAt');
     setCurrentPage(1);
   };
 
@@ -561,6 +573,35 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                       className="overflow-hidden"
                     >
                       <Separator className="my-4" />
+                      <div className="mb-3">
+                        <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
+                          Filtrar por
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setDateFilterType('createdAt'); setCurrentPage(1); }}
+                            className="flex-1 h-10 rounded-lg text-sm font-medium transition-all border"
+                            style={{
+                              background: dateFilterType === 'createdAt' ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' : 'white',
+                              color: dateFilterType === 'createdAt' ? 'white' : '#374151',
+                              borderColor: dateFilterType === 'createdAt' ? '#0059FF' : '#CBD5E1'
+                            }}
+                          >
+                            Fecha de pedido
+                          </button>
+                          <button
+                            onClick={() => { setDateFilterType('deadline'); setCurrentPage(1); }}
+                            className="flex-1 h-10 rounded-lg text-sm font-medium transition-all border"
+                            style={{
+                              background: dateFilterType === 'deadline' ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' : 'white',
+                              color: dateFilterType === 'deadline' ? 'white' : '#374151',
+                              borderColor: dateFilterType === 'deadline' ? '#0059FF' : '#CBD5E1'
+                            }}
+                          >
+                            Fecha de despacho
+                          </button>
+                        </div>
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                           <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
@@ -621,7 +662,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                     )}
                     {(dateFrom || dateTo) && (
                       <Badge className="bg-blue-100 text-blue-700 border-blue-200">
-                        Fecha: {dateFrom || '...'} - {dateTo || '...'}
+                        {dateFilterType === 'deadline' ? 'Despacho' : 'Pedido'}: {dateFrom || '...'} - {dateTo || '...'}
                       </Badge>
                     )}
                     <motion.button
