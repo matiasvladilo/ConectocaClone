@@ -27,35 +27,19 @@ import {
   Folder,
   Factory,
   AlertTriangle,
-  Check,
-  ChevronsUpDown,
   Filter
 } from 'lucide-react';
 import { toast } from 'sonner';
 import logo from '../assets/logo.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { ImageUpload } from './ImageUpload';
-import { cn } from './ui/utils';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "./ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "./ui/popover";
-
 
 
 interface ProductManagementProps {
   accessToken: string;
   onBack: () => void;
   onManageCategories: () => void;
+  onManageRecipe?: () => void;
 }
 
 interface ProductFormData {
@@ -69,7 +53,6 @@ interface ProductFormData {
   productionAreaId: string;
   unlimitedStock: boolean;
   allowDecimal: boolean;
-  laborCost: string;
   ingredients: (ProductIngredient & { inputUnit?: string })[];
 }
 
@@ -84,11 +67,10 @@ const emptyForm: ProductFormData = {
   productionAreaId: '',
   unlimitedStock: false,
   allowDecimal: false,
-  laborCost: '',
   ingredients: []
 };
 
-export function ProductManagement({ accessToken, onBack, onManageCategories }: ProductManagementProps) {
+export function ProductManagement({ accessToken, onBack, onManageCategories, onManageRecipe }: ProductManagementProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [productionAreas, setProductionAreas] = useState<ProductionArea[]>([]);
@@ -102,7 +84,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   const [isDeleting, setIsDeleting] = useState<Product | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [isIngredientSearchOpen, setIsIngredientSearchOpen] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -165,18 +146,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     if (product) {
       setEditingProduct(product);
 
-      // Transform ingredients for display and extract labor cost
-      let extractedLaborCost = '';
+      // Transform ingredients for display
       const displayIngredients: (ProductIngredient & { inputUnit?: string })[] = [];
 
       (product.ingredients || []).forEach(pi => {
         const ingData = ingredients.find(i => i.id === pi.ingredientId);
-
-        // Hide the special labor cost ingredient from the recipe and extract its value
-        if (ingData?.name === 'Costo Mano de Obra') {
-          extractedLaborCost = pi.quantity.toString();
-          return;
-        }
 
         const baseUnit = ingData?.unit?.toLowerCase() || 'kg';
         let displayQty = pi.quantity;
@@ -208,7 +182,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         productionAreaId: product.productionAreaId || '',
         unlimitedStock: product.unlimitedStock === true || product.stock === -1,
         allowDecimal: product.allowDecimal === true,
-        laborCost: extractedLaborCost,
         ingredients: displayIngredients
       });
     } else {
@@ -249,38 +222,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
       console.log('📝 [DEBUG] Form Ingredients:', formData.ingredients);
 
-      let finalFormIngredients = [...formData.ingredients];
-      const laborCostValue = parseInt(formData.laborCost.replace(/[^0-9]/g, '')) || 0;
-
-      // Ensure the "Costo Mano de Obra" ingredient exists and add it to the final recipe
-      if (laborCostValue > 0) {
-        let laborIng = ingredients.find(i => i.name === 'Costo Mano de Obra');
-
-        if (!laborIng) {
-          try {
-            laborIng = await ingredientsAPI.create(accessToken, {
-              name: 'Costo Mano de Obra',
-              unit: 'CLP',
-              currentStock: 999999,
-              minStock: 0,
-              costPerUnit: 1
-            });
-            setIngredients(prev => [...prev, laborIng as Ingredient]);
-          } catch (err) {
-            console.error("Error creating hidden labor ingredient", err);
-            toast.error("Error al configurar el costo de mano de obra");
-            setSubmitting(false);
-            return;
-          }
-        }
-
-        finalFormIngredients.push({
-          ingredientId: laborIng.id,
-          quantity: laborCostValue,
-          inputUnit: 'CLP'
-        } as any);
-      }
-
       const productData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
@@ -293,7 +234,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         categoryId: formData.categoryId || undefined,
         imageUrl: formData.imageUrl.trim() || undefined,
         productionAreaId: formData.productionAreaId || undefined,
-        ingredients: finalFormIngredients.map(pi => {
+        ingredients: formData.ingredients.map(pi => {
           // Convert back to base unit if necessary before saving
           let quantityToSave = pi.quantity;
           const unit = pi.inputUnit;
@@ -869,21 +810,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
               </div>
 
               <div>
-                <Label htmlFor="laborCost">Costo Mano de Obra</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
-                  <Input
-                    id="laborCost"
-                    type="text"
-                    value={formData.laborCost ? formatCLP(parseInt(formData.laborCost.replace(/[^0-9]/g, '')) || 0) : ''}
-                    onChange={(e) => setFormData({ ...formData, laborCost: e.target.value.replace(/[^0-9]/g, '') })}
-                    placeholder="Ej: $1.500"
-                    className="pl-9 border-amber-200 focus-visible:ring-amber-400"
-                  />
-                </div>
-              </div>
-
-              <div>
                 <Label htmlFor="stock">Stock *</Label>
                 <div className="relative">
                   <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1051,341 +977,28 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                 />
               </div>
 
-              {/* Recipe/Ingredients Section */}
+              {/* Recipe Summary (read-only) */}
               <div className="col-span-2">
-                <div className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/50">
-                  <div className="flex items-center justify-between mb-3">
-                    <Label className="flex items-center gap-2">
-                      <Factory className="w-4 h-4 text-blue-600" />
-                      Receta del Producto (Ingredientes)
-                    </Label>
-                    <Badge variant="outline" className="bg-white">
-                      {formData.ingredients.length} ingrediente{formData.ingredients.length !== 1 ? 's' : ''}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-gray-600 mb-4">
-                    Define qué materias primas se necesitan para fabricar este producto. El stock se descontará automáticamente al crear órdenes de producción.
-                  </p>
-
-                  {/* Add Ingredient Selector - Searchable Combobox */}
-                  <div className="mb-4">
-                    <Label className="text-xs mb-2 block">Agregar Ingrediente</Label>
-                    <Popover open={isIngredientSearchOpen} onOpenChange={setIsIngredientSearchOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={isIngredientSearchOpen}
-                          className="w-full justify-between bg-white border-input"
-                        >
-                          <span className="truncate text-gray-600 font-normal">
-                            + Seleccionar ingrediente para agregar...
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        className="w-[450px] p-0 shadow-xl border border-slate-200 bg-white rounded-lg overflow-hidden"
-                        align="start"
-                        style={{ height: '300px' }} // Hard limit on height
-                      >
-                        <Command className="w-full h-full flex flex-col bg-white">
-                          {/* Header */}
-                          <div className="flex items-center border-b border-slate-100 bg-slate-50 px-3 shrink-0 h-12">
-                            <Search className="w-4 h-4 mr-2 text-slate-400" />
-                            <CommandInput
-                              placeholder="Buscar..."
-                              className="flex-1 h-full bg-transparent border-none focus:ring-0 text-sm"
-                              style={{ boxShadow: 'none' }}
-                            />
-                          </div>
-
-                          {/* Bounded List */}
-                          <CommandList
-                            className="flex-1 overflow-y-auto custom-scrollbar p-1"
-                            style={{
-                              maxHeight: 'calc(300px - 48px)', // Explicit math: Total - Header
-                              height: '100%',
-                              overscrollBehavior: 'contain',   // Prevents scrolling parent when list end is reached
-                              touchAction: 'pan-y',            // Enables finger scrolling
-                              WebkitOverflowScrolling: 'touch' // iOS Momentum scrolling
-                            }}
-                          >
-                            <CommandEmpty className="py-6 text-center text-xs text-slate-500">
-                              No se encontró nada.
-                            </CommandEmpty>
-
-                            <CommandGroup heading="Ingredientes" className="px-1">
-                              {ingredients.length === 0 ? (
-                                <div className="p-4 text-center text-sm text-gray-500">
-                                  No hay materias primas creadas
-                                </div>
-                              ) : (
-                                ingredients
-                                  .filter(ing => !formData.ingredients.some(i => i.ingredientId === ing.id))
-                                  .map((ing) => (
-                                    <CommandItem
-                                      key={ing.id}
-                                      value={ing.name}
-                                      onSelect={() => {
-                                        setFormData({
-                                          ...formData,
-                                          ingredients: [
-                                            ...formData.ingredients,
-                                            {
-                                              ingredientId: ing.id,
-                                              ingredientName: ing.name,
-                                              quantity: 1,
-                                              unit: ing.unit,
-                                              inputUnit: ing.unit
-                                            }
-                                          ]
-                                        });
-                                        toast.success(`${ing.name} agregado a la receta`);
-                                        setIsIngredientSearchOpen(false);
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4 opacity-0"
-                                        )}
-                                      />
-                                      <div className="flex flex-col">
-                                        <span className="font-medium">{ing.name}</span>
-                                        <span className="text-xs text-gray-500">Stock actual: {ing.currentStock} {ing.unit || 'unidades'}</span>
-                                      </div>
-                                    </CommandItem>
-                                  ))
-                              )}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-
-                    {ingredients.length === 0 && (
-                      <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" />
-                        No hay materias primas disponibles. Crea materias primas primero desde Perfil → Materias Primas.
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm flex items-center gap-2">
+                        <Factory className="w-4 h-4 text-blue-600" />
+                        Receta
+                      </Label>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {formData.ingredients.length} ingrediente{formData.ingredients.length !== 1 ? 's' : ''} configurado{formData.ingredients.length !== 1 ? 's' : ''}
                       </p>
-                    )}
-                  </div>
-
-                  {/* Ingredient List */}
-                  <div className="space-y-2">
-                    {formData.ingredients.length === 0 ? (
-                      <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg bg-white">
-                        <Package className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-sm text-gray-400">
-                          No hay ingredientes en la receta
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          Selecciona ingredientes arriba para agregarlos
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <Label className="text-xs">Ingredientes de la Receta:</Label>
-                        {formData.ingredients.map((ingredient, index) => {
-                          const ingredientData = ingredients.find(i => i.id === ingredient.ingredientId);
-                          return (
-                            <div key={index} className="flex items-center gap-2 bg-white p-3 rounded-lg border border-gray-300 hover:border-blue-400 transition-colors">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {ingredientData?.name || 'Ingrediente desconocido'}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  Stock disponible: {ingredientData?.currentStock || 0} {ingredientData?.unit}
-                                </p>
-                                {ingredientData?.costPerUnit && (
-                                  <p className="text-[10px] font-bold text-blue-600 mt-0.5">
-                                    Costo: {formatCLP((() => {
-                                      let finalQty = ingredient.quantity;
-                                      if (ingredient.inputUnit === 'g' || ingredient.inputUnit === 'ml') finalQty = ingredient.quantity / 1000;
-                                      return (ingredientData.costPerUnit || 0) * finalQty;
-                                    })())}
-                                  </p>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  value={ingredient.quantity}
-                                  onChange={(e) => {
-                                    const newIngredients = [...formData.ingredients];
-                                    newIngredients[index].quantity = parseFloat(e.target.value) || 0;
-                                    setFormData({ ...formData, ingredients: newIngredients });
-                                  }}
-                                  className="w-20 h-8 text-center"
-                                  placeholder="Cant."
-                                />
-                                <div className="w-20">
-                                  <Select
-                                    value={ingredient.inputUnit || ingredientData?.unit || 'unidades'}
-                                    onValueChange={(val: string) => {
-                                      const newIngredients = [...formData.ingredients];
-                                      // Store the input type (unit)
-                                      // If changing unit, we might want to adjust quantity? Or just interpret quantity differently?
-                                      // The requirement "meter el ingrediente en gramos y que haga la transformación" means the input value is in 'val', 
-                                      // but we need to store it as base unit eventually? 
-                                      // Or we store the input unit and convert on Save. The user said "haga la transformacion automatica".
-                                      // Let's store inputUnit and rawInputQuantity if we want to preserve what user sees.
-                                      // But here we are iterating formData.ingredients which is ProductIngredient[].
-                                      // Let's augment the state to handle this UI logic or do it on the fly.
-                                      // Easier: Use a local unit state per row? But rows are dynamic.
-                                      // Let's add an optional 'inputUnit' property to the ingredient object in formData for UI purposes.
-                                      // We need to update the interface in the component or just cast it.
-                                      newIngredients[index] = { ...newIngredients[index], inputUnit: val };
-
-                                      // If switching from kg to g, multiply by 1000? Or just keep number and let user change it?
-                                      // Usually better to keep number or convert. If I have 1 kg and switch to g, it should be 1000 g.
-                                      const currentQty = newIngredients[index].quantity;
-                                      const currentUnit = ingredient.inputUnit || ingredientData?.unit;
-
-                                      // Simple conversion logic for display
-                                      if (currentUnit === 'kg' && val === 'g') newIngredients[index].quantity = currentQty * 1000;
-                                      if (currentUnit === 'g' && val === 'kg') newIngredients[index].quantity = currentQty / 1000;
-                                      if (currentUnit === 'l' && val === 'ml') newIngredients[index].quantity = currentQty * 1000;
-                                      if (currentUnit === 'ml' && val === 'l') newIngredients[index].quantity = currentQty / 1000;
-
-                                      setFormData({ ...formData, ingredients: newIngredients });
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-8 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {(() => {
-                                        const baseUnit = ingredientData?.unit?.toLowerCase();
-                                        if (baseUnit === 'kg' || baseUnit === 'kilos') {
-                                          return (
-                                            <>
-                                              <SelectItem value="kg">kg</SelectItem>
-                                              <SelectItem value="g">g</SelectItem>
-                                            </>
-                                          );
-                                        } else if (baseUnit === 'l' || baseUnit === 'litros') {
-                                          return (
-                                            <>
-                                              <SelectItem value="l">l</SelectItem>
-                                              <SelectItem value="ml">ml</SelectItem>
-                                            </>
-                                          );
-                                        } else {
-                                          return <SelectItem value={baseUnit || 'unidades'}>{baseUnit || 'unidades'}</SelectItem>;
-                                        }
-                                      })()}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    const newIngredients = formData.ingredients.filter((_, i) => i !== index);
-                                    setFormData({ ...formData, ingredients: newIngredients });
-                                    toast.success('Ingrediente eliminado de la receta');
-                                  }}
-                                  className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {/* Cost Summary in Form */}
-                        <div className="mt-4 p-4 rounded-xl border border-blue-200 bg-white shadow-sm">
-                          <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-100">
-                            <div className="flex items-center gap-2">
-                              <DollarSign className="w-5 h-5 text-[#0059FF]" />
-                              <span className="font-bold text-gray-900">Análisis Financiero</span>
-                            </div>
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider text-blue-600 bg-blue-50 border-blue-200">
-                              Tiempo Real
-                            </Badge>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-gray-500">Materias Primas:</span>
-                              <span className="font-bold text-slate-800">
-                                {formatCLP(formData.ingredients.reduce((sum, pi) => {
-                                  const ing = ingredients.find(i => i.id === pi.ingredientId);
-                                  let finalQty = pi.quantity;
-                                  if (pi.inputUnit === 'g' || pi.inputUnit === 'ml') finalQty = pi.quantity / 1000;
-                                  return sum + ((ing?.costPerUnit || pi.costPerUnit || 0) * finalQty);
-                                }, 0))}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between items-center text-sm">
-                              <span className="text-gray-500">Mano de Obra:</span>
-                              <span className="font-bold text-slate-800">
-                                {formatCLP(parseInt(formData.laborCost.replace(/[^0-9]/g, '')) || 0)}
-                              </span>
-                            </div>
-
-                            <div className="flex justify-between items-center text-sm border-t border-slate-100 pt-2">
-                              <span className="text-gray-700 font-semibold">Costo Total:</span>
-                              <span className="font-bold text-[#0059FF]">
-                                {formatCLP(
-                                  formData.ingredients.reduce((sum, pi) => {
-                                    const ing = ingredients.find(i => i.id === pi.ingredientId);
-                                    let finalQty = pi.quantity;
-                                    if (pi.inputUnit === 'g' || pi.inputUnit === 'ml') finalQty = pi.quantity / 1000;
-                                    return sum + ((ing?.costPerUnit || pi.costPerUnit || 0) * finalQty);
-                                  }, 0) + (parseInt(formData.laborCost.replace(/[^0-9]/g, '')) || 0)
-                                )}
-                              </span>
-                            </div>
-
-                            {formData.price && (
-                              <div className="flex justify-between items-center pt-2 text-sm">
-                                <span className="text-gray-500">Margen Bruto Receta:</span>
-                                {(() => {
-                                  const materialCost = formData.ingredients.reduce((sum, pi) => {
-                                    const ing = ingredients.find(i => i.id === pi.ingredientId);
-                                    let finalQty = pi.quantity;
-                                    if (pi.inputUnit === 'g' || pi.inputUnit === 'ml') finalQty = pi.quantity / 1000;
-                                    return sum + ((ing?.costPerUnit || pi.costPerUnit || 0) * finalQty);
-                                  }, 0);
-                                  const laborCost = parseInt(formData.laborCost.replace(/[^0-9]/g, '')) || 0;
-                                  const totalCost = materialCost + laborCost;
-                                  const margin = parseCLP(formData.price) - totalCost;
-                                  const marginPercent = parseCLP(formData.price) > 0 ? (margin / parseCLP(formData.price)) * 100 : 0;
-
-                                  return (
-                                    <div className="text-right">
-                                      <p className={`font-bold ${margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        {formatCLP(margin)}
-                                      </p>
-                                      <p className="text-[10px] text-gray-400">
-                                        {marginPercent.toFixed(1)}% de margen
-                                      </p>
-                                    </div>
-                                  );
-                                })()}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                          <p className="text-xs text-green-800 flex items-center gap-2">
-                            <Check className="w-3 h-3" />
-                            Esta receta tiene {formData.ingredients.length} ingrediente{formData.ingredients.length !== 1 ? 's' : ''} configurado{formData.ingredients.length !== 1 ? 's' : ''}
-                          </p>
-                        </div>
-                      </>
+                    </div>
+                    {onManageRecipe && (
+                      <Button type="button" variant="outline" onClick={onManageRecipe}>
+                        Configurar receta
+                      </Button>
                     )}
                   </div>
                 </div>
               </div>
+
             </div>
 
             <DialogFooter>
