@@ -92,6 +92,7 @@ function toProduct(r: any) {
     categoryId: r.category_id,
     productionAreaId: r.production_area_id,
     ingredients,
+    laborCost: Number(r.labor_cost) || 0,
     businessId: r.business_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -668,7 +669,7 @@ app.post("/make-server-6d979413/products", async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const body = await c.req.json();
-    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal } = body;
+    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost } = body;
 
     if (!name || price === undefined || price === null) {
       return c.json({ error: 'Nombre y precio son requeridos' }, 400);
@@ -689,6 +690,7 @@ app.post("/make-server-6d979413/products", async (c) => {
         allow_decimal: allowDecimal === true,
         category_id: categoryId || null,
         production_area_id: productionAreaId || null,
+        labor_cost: laborCost !== undefined ? Number(laborCost) : 0,
       })
       .select('*, categories(name)')
       .single();
@@ -747,7 +749,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost } = updates;
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
@@ -774,6 +776,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     }
     if (trackStock !== undefined) updateData.track_stock = trackStock;
     if (allowDecimal !== undefined) updateData.allow_decimal = allowDecimal === true;
+    if (laborCost !== undefined) updateData.labor_cost = Number(laborCost) || 0;
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('products')
