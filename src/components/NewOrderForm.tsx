@@ -107,6 +107,14 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     loadCategories();
   }, []);
 
+  // Refrescar productos cada 5 seg para reflejar cambios de stock de otros usuarios
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      loadProducts(true);
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [accessToken]);
+
   // Save cart state to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('conectoca_cart', JSON.stringify(cart));
@@ -118,10 +126,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     localStorage.setItem('conectoca_orderNotes', notes);
   }, [notes]);
 
-  const loadProducts = async () => {
+  const loadProducts = async (silent = false) => {
     try {
-      setIsLoadingProducts(true);
-      console.log('🟢 [NewOrderForm] Loading products...');
+      if (!silent) setIsLoadingProducts(true);
+      console.log('🟢 [NewOrderForm] Loading products...', silent ? '(silent)' : '');
       const apiProducts = await productsAPI.getAll(accessToken);
       console.log('🟢 [NewOrderForm] Products received:', apiProducts?.length || 0, 'products');
 
@@ -147,16 +155,18 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
 
       setProducts(transformedProducts);
 
-      // Show message if no products
-      if (transformedProducts.length === 0) {
+      // Show message if no products (solo en carga visible)
+      if (!silent && transformedProducts.length === 0) {
         toast.info('No hay productos disponibles. El administrador debe crear productos primero.');
       }
     } catch (error) {
       console.error('❌ [NewOrderForm] Error loading products:', error);
-      toast.error('Error al cargar productos');
-      setProducts([]);
+      if (!silent) {
+        toast.error('Error al cargar productos');
+        setProducts([]);
+      }
     } finally {
-      setIsLoadingProducts(false);
+      if (!silent) setIsLoadingProducts(false);
     }
   };
 
