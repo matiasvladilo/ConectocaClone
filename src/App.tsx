@@ -1725,6 +1725,9 @@ export default function App() {
             onManageCategories={() =>
               setCurrentScreen("categories")
             }
+            onManageRecipe={() =>
+              setCurrentScreen("productIngredients")
+            }
           />
         )}
 
