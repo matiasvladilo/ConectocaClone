@@ -249,7 +249,8 @@ export const ordersAPI = {
       customerName?: string;
     }
   ): Promise<Order> => {
-    // START: Client-side creation to bypass backend limitations (Unlimited Stock Bug)
+    // Creación de pedido vía RPC create_order_with_stock: descuenta stock de forma
+    // atómica en el servidor (FOR UPDATE) y crea el pedido en la misma transacción.
 
     // Initialize Supabase Client
     const supabase = createClient(
@@ -264,42 +265,11 @@ export const ordersAPI = {
       }
     );
 
-    // 1. Fetch Fresh Products for Stock Check
-    // We assume getAll returns all products. If pagination is involved, we might need a specific getByIds or search.
-    // For now, trusting getAll is sufficient as per usage.
+    // Traer productos frescos solo para enriquecer cada item con su productionAreaId.
+    // El descuento de stock NO se hace en el cliente: lo hace atómicamente la
+    // función create_order_with_stock en el servidor.
     const productsResponse = await productsAPI.getAll(token);
     const freshProducts = Array.isArray(productsResponse) ? productsResponse : (productsResponse as any).data || [];
-
-    const stockUpdates: Promise<any>[] = [];
-
-    // 2. Validate & Prepare Stock Updates
-    for (const item of orderData.products) {
-      const product = freshProducts.find((p: any) => p.id === item.productId);
-
-      if (!product) {
-        // Fallback: If product not found in fresh list (maybe new?), allow it but warn? 
-        // Or strict check. Strict check is safer.
-        console.warn(`Producto ${item.name} (${item.productId}) no encontrado en lista fresca.`);
-        continue;
-      }
-
-      const currentStock = Number(product.stock);
-
-      // Check for unlimited stock (-1 or unlimitedStock flag or trackStock === false)
-      if (currentStock === -1 || product.unlimitedStock === true || product.trackStock === false) {
-        continue; // Skip stock check/update
-      }
-
-      if (currentStock < item.quantity) {
-        throw new Error(`Stock insuficiente para "${item.name}". Disponible: ${currentStock}, Solicitado: ${item.quantity}`);
-      }
-
-      const newStock = Math.max(0, currentStock - item.quantity);
-      stockUpdates.push(productsAPI.update(token, product.id, { stock: newStock }));
-    }
-
-    // 3. Execute Stock Updates
-    await Promise.all(stockUpdates);
 
     // 4. Construct Order Object
     const newOrderId = crypto.randomUUID();
@@ -342,14 +312,18 @@ export const ordersAPI = {
       areaStatuses: {}
     };
 
-    // 5. Save Order via RPC
-    const { error } = await supabase.rpc('create_order_kv', {
+    // 5. Crear pedido + descontar stock atómicamente vía RPC
+    const { error } = await supabase.rpc('create_order_with_stock', {
       order_id: newOrderId,
       new_data: newOrder
     });
 
     if (error) {
       console.error('RPC Error creating order:', error);
+      const stockMatch = (error.message || '').match(/STOCK_INSUFICIENTE:(.+)/);
+      if (stockMatch) {
+        throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
+      }
       throw new Error(`Error guardando pedido: ${error.message}`);
     }
 
