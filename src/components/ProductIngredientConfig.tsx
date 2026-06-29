@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import {
@@ -32,6 +32,8 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
     quantity: 0,
   });
   const [inputUnit, setInputUnit] = useState<string>("");
+  const [laborCost, setLaborCost] = useState<string>("");
+  const [savingLabor, setSavingLabor] = useState(false);
 
   useEffect(() => {
     console.log("ProductIngredientConfig: Component mounted");
@@ -43,6 +45,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
     let isActive = true;
 
     if (selectedProduct) {
+      setLaborCost(selectedProduct.laborCost ? String(selectedProduct.laborCost) : "");
       console.log("Loading ingredients for product:", selectedProduct.name);
       setLoadingIngredients(true);
       setProductIngredients([]); // Clear previous ingredients immediately
@@ -210,68 +213,46 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
     return ingredients.find(i => i.id === ingredientId);
   };
 
-  const handleSyncRecipes = async () => {
-    if (confirm("Esto sincronizará las recetas desde la configuración antigua de productos a este nuevo sistema. ¿Desea continuar?")) {
-      try {
-        setLoading(true);
-        let productsUpdated = 0;
+  const handleSaveLaborCost = async () => {
+    if (!selectedProduct || savingLabor) return;
+    try {
+      setSavingLabor(true);
+      const value = parseInt(laborCost.replace(/[^0-9]/g, "")) || 0;
+      await productsAPI.update(accessToken, selectedProduct.id, { laborCost: value });
+      setSelectedProduct({ ...selectedProduct, laborCost: value });
+      setProducts(prev => prev.map(p => p.id === selectedProduct.id ? { ...p, laborCost: value } : p));
+      toast.success("Costo de mano de obra guardado");
+    } catch (error: any) {
+      console.error("Error saving labor cost:", error);
+      toast.error(error.message || "Error al guardar costo de mano de obra");
+    } finally {
+      setSavingLabor(false);
+    }
+  };
 
-        for (const product of products) {
-          // Check if product has legacy ingredients but no new structure?
-          // Actually, we can just force update if legacy ingredients exist.
-          // But checking if sync is needed is better.
-          // Let's just iterate and set ingredients if they exist on the product object.
-
-          // Note: The product object from productsAPI.getAll() contains the 'ingredients' array
-          // which comes from the JSON column or the enriched response.
-          // If the backend GET /products is enriched properly, it includes the ingredients.
-          // But we know GET /products returns the JSON column primarily if not enriched.
-
-          // ACTUALLY, checking index.tsx, GET /products just returns kv.getByPrefix('product:')
-          // So product.ingredients IS the JSON column. This is exactly what we want to source from.
-
-          if (product.ingredients && product.ingredients.length > 0) {
-            // Prepare ingredients for setIngredients
-            const ingredientsToSet = product.ingredients.map(pi => ({
-              ingredientId: pi.ingredientId,
-              quantity: pi.quantity
-            }));
-
-            // We filter out invalid ingredients (e.g. if ingredient deleted)
-            const validIngredients = ingredientsToSet.filter(pi =>
-              ingredients.some(i => i.id === pi.ingredientId)
-            );
-
-            if (validIngredients.length > 0) {
-              await productIngredientsAPI.setIngredients(
-                accessToken,
-                product.id,
-                validIngredients
-              );
-              productsUpdated++;
-            }
-          }
-        }
-
-        toast.success(`Sincronización completada. ${productsUpdated} productos actualizados.`);
-        loadInitialData(); // Reload to see changes
-      } catch (error: any) {
-        console.error("Error syncing recipes:", error);
-        toast.error("Error al sincronizar recetas");
-      } finally {
-        setLoading(false);
-      }
+  const handleClearRecipe = async () => {
+    if (!selectedProduct) return;
+    if (!confirm(`¿Seguro que querés limpiar TODA la receta de "${selectedProduct.name}"? Se eliminarán todos los ingredientes. El costo de mano de obra se conserva. Esta acción no se puede deshacer.`)) return;
+    try {
+      await productIngredientsAPI.setIngredients(accessToken, selectedProduct.id, []);
+      toast.success("Receta limpiada");
+      loadProductIngredients(selectedProduct.id);
+    } catch (error: any) {
+      console.error("Error clearing recipe:", error);
+      toast.error(error.message || "Error al limpiar la receta");
     }
   };
 
   const calculateTotalCost = () => {
-    return productIngredients.reduce((total, pi) => {
+    const ingredientsCost = productIngredients.reduce((total, pi) => {
       const ingredient = getIngredientDetails(pi.ingredientId);
       if (ingredient?.costPerUnit) {
         return total + (pi.quantity * ingredient.costPerUnit);
       }
       return total;
     }, 0);
+    const labor = parseInt(laborCost.replace(/[^0-9]/g, "")) || 0;
+    return ingredientsCost + labor;
   };
 
   const availableIngredients = ingredients.filter(
@@ -302,14 +283,16 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
               </p>
             </div>
           </div>
-          <Button
-            onClick={handleSyncRecipes}
-            variant="outline"
-            className="bg-white/10 text-white border-white/20 hover:bg-white/20"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Sincronizar Recetas
-          </Button>
+          {selectedProduct && (
+            <Button
+              onClick={handleClearRecipe}
+              variant="outline"
+              className="bg-white/10 text-white border-white/20 hover:bg-white/20"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Limpiar receta
+            </Button>
+          )}
         </div>
       </div>
 
@@ -395,6 +378,19 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                                 Costo Materias Primas: <span className="text-green-600">${calculateTotalCost().toFixed(2)}</span>
                               </span>
                             )}
+                          </div>
+                          <div className="mt-3 flex items-center gap-2">
+                            <label className="text-sm text-gray-600">Costo mano de obra (opcional):</label>
+                            <input
+                              type="text"
+                              value={laborCost}
+                              onChange={(e) => setLaborCost(e.target.value.replace(/[^0-9]/g, ""))}
+                              onBlur={handleSaveLaborCost}
+                              placeholder="0"
+                              className="w-28 px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                            <span className="text-xs text-gray-400">CLP</span>
+                            {savingLabor && <span className="text-xs text-gray-400">guardando...</span>}
                           </div>
                         </div>
                         <Button
