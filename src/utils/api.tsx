@@ -26,6 +26,7 @@ export interface Product {
   categoryId?: string;
   productionAreaId?: string; // New: ID of production area assigned to this product
   ingredients?: ProductIngredient[]; // New: Recipe ingredients for this product
+  laborCost?: number; // Costo de mano de obra (opcional), separado de los ingredientes
   createdAt?: string;
   updatedAt?: string;
 }
@@ -539,6 +540,7 @@ export const productsAPI = {
     imageUrl?: string;
     productionAreaId?: string;
     ingredients?: Array<{ ingredientId: string; quantity: number }>;
+    laborCost?: number;
   }): Promise<Product> => {
     const response = await fetchAPI('/products', {
       method: 'POST',
