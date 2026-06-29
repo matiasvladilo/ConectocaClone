@@ -32,26 +32,32 @@ Enfoques descartados:
 
 ### Componente 1 — Función Postgres `create_order_with_stock`
 
-Firma:
+Firma (misma que `create_order_kv`, para minimizar el cambio en el cliente):
 
 ```sql
-create_order_with_stock(order_id uuid, new_data jsonb, items jsonb) RETURNS void
+create_order_with_stock(order_id text, new_data jsonb) RETURNS void
 ```
 
-`items` es un array JSON: `[{ "id": "<uuid>", "quantity": <numeric>, "name": "<texto>" }, ...]`.
+Los ítems se derivan directamente de `new_data->'products'` (ya trae `productId`, `quantity`, `name`), así que no hace falta un parámetro `items` separado. La función es `SECURITY DEFINER` (igual que `create_order_kv`) para poder actualizar `products` sin chocar con RLS.
 
 Lógica (toda dentro de la transacción implícita de la función):
 
 ```
-para cada item en items:
-  SELECT ... FROM products WHERE id = item.id FOR UPDATE   -- lock de fila
+para cada item en new_data->'products':
+  si productId es null/''/'null': continuar
+  SELECT id, name, stock, unlimited_stock, track_stock
+    FROM products WHERE id = productId FOR UPDATE   -- lock de fila
+  si NOT FOUND: continuar (no bloquea, igual que el cliente actual)
   si es ilimitado (unlimited_stock OR NOT track_stock OR stock = -1):
     continuar (no tocar stock)
   si stock < quantity:
     RAISE EXCEPTION 'STOCK_INSUFICIENTE:<nombre>'
-  UPDATE products SET stock = stock - quantity WHERE id = item.id
-insertar el pedido en el KV (mismo INSERT que hace hoy create_order_kv)
+  UPDATE products SET stock = stock - quantity WHERE id = productId
+
+PERFORM create_order_kv(order_id, new_data)   -- reusa la inserción existente, misma transacción
 ```
+
+`orders` y `order_items` son tablas relacionales reales; `create_order_kv` ya hace ese `INSERT` (incluyendo el upsert en `orders` y el loop a `order_items`). Reusarla vía `PERFORM` mantiene la inserción DRY y garantiza atomicidad (corre en la misma transacción que el descuento). El `quantity` usado para descontar debe coincidir con el que `create_order_kv` guarda (`GREATEST(quantity, 0.001)`); para el descuento se usa `GREATEST(quantity, 0)`.
 
 Propiedades:
 - **Atómico:** si un solo producto no tiene stock, se revierte todo (ni descuento ni pedido).
@@ -67,13 +73,12 @@ Detección de ilimitado (columnas reales de `products`): `unlimited_stock = true
 
 - **Eliminar** el bloque de validación de stock client-side (~líneas 267-302) y los `productsAPI.update`.
 - Mantener el enriquecimiento de productos (`productionAreaId`, `areaStatus`) y la construcción de `newOrder`.
-- Reemplazar `create_order_kv` por una sola llamada:
+- Reemplazar `create_order_kv` por `create_order_with_stock` (misma firma, solo cambia el nombre):
 
 ```ts
 const { error } = await supabase.rpc('create_order_with_stock', {
   order_id: newOrderId,
-  new_data: newOrder,
-  items: orderData.products.map(p => ({ id: p.productId, quantity: p.quantity, name: p.name }))
+  new_data: newOrder
 });
 ```
 
@@ -100,5 +105,6 @@ El cliente deja de tener autoridad sobre el stock; solo pide y el servidor decid
 
 ## Riesgos / notas
 
-- La definición de `create_order_kv` no está versionada en el repo (se creó a mano en Supabase). La nueva función debe replicar exactamente el `INSERT` al KV que hace `create_order_kv` para no romper el guardado de pedidos. Hay que obtener su definición actual antes de implementar.
+- La definición de `create_order_kv` no está versionada en el repo (se creó a mano en Supabase); se obtuvo su definición actual. Inserta en las tablas relacionales `orders` y `order_items` (no es un KV jsonb). La función nueva la reutiliza vía `PERFORM` en vez de duplicar la inserción.
+- `create_order_with_stock` también debe versionarse como migración en `supabase/migrations/` (hoy `create_order_kv` no lo está).
 - El polling de productos agrega carga: refrescar productos cada 5 seg. Aceptable según el patrón existente; si el payload es grande, evaluar traer solo lo necesario.
