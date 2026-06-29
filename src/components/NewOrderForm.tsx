@@ -110,7 +110,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   // Refrescar productos cada 5 seg para reflejar cambios de stock de otros usuarios
   useEffect(() => {
     const intervalId = setInterval(() => {
-      loadProducts(true);
+      if (accessToken) loadProducts(true);
     }, 5000);
     return () => clearInterval(intervalId);
   }, [accessToken]);
