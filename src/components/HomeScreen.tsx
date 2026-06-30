@@ -146,7 +146,6 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 whileHover={{ rotate: [0, -10, 10, -10, 0] }}
                 transition={{ duration: 0.5 }}
               >
-                <div className="absolute inset-0 bg-yellow-400/30 rounded-full blur-lg" />
                 <img
                   src={logo}
                   alt="La Oca Logo"

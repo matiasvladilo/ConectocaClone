@@ -387,13 +387,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.2, duration: 0.3 }}
             >
-              {/* Logo with glow */}
+              {/* Logo */}
               <motion.div
                 className="relative"
                 whileHover={{ scale: 1.05 }}
                 transition={{ duration: 0.2 }}
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-400/30 to-yellow-400/30 blur-xl rounded-full" />
                 <img
                   src={logo}
                   alt="La Oca Logo"
