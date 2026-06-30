@@ -22,7 +22,7 @@ import { PWAHead } from "./components/PWAHead";
 import { InstallPWA } from "./components/InstallPWA";
 import { AudioInitializer } from "./components/AudioInitializer";
 import { Toaster } from "./components/ui/sonner";
-import { createClient } from "./utils/supabase/client";
+import { createClient, setRememberSession } from "./utils/supabase/client";
 import { registerServiceWorker } from "./utils/registerServiceWorker";
 import {
   authAPI,
@@ -322,6 +322,37 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, [accessToken, currentUser, ordersPagination]);
+
+  // Refresco proactivo de sesión al volver a la app (foco / pestaña visible).
+  // En PWA/móvil el timer de auto-refresh de Supabase no corre mientras la app está
+  // suspendida, así que al regresar el access token puede estar vencido. Refrescamos
+  // de inmediato para que el siguiente request use un token fresco en vez de un 401.
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let lastRefresh = 0;
+    const refreshIfStale = async () => {
+      if (document.visibilityState === 'hidden') return;
+      // Throttle: evitar refrescos en ráfaga al alternar foco/visibilidad.
+      const now = Date.now();
+      if (now - lastRefresh < 30000) return;
+      lastRefresh = now;
+      try {
+        await supabase.auth.refreshSession();
+        // onAuthStateChange (TOKEN_REFRESHED) actualiza accessToken en el estado.
+      } catch (err) {
+        console.warn('[SESSION] Refresh proactivo falló:', err);
+      }
+    };
+
+    document.addEventListener('visibilitychange', refreshIfStale);
+    window.addEventListener('focus', refreshIfStale);
+
+    return () => {
+      document.removeEventListener('visibilitychange', refreshIfStale);
+      window.removeEventListener('focus', refreshIfStale);
+    };
+  }, [currentUser]);
 
   const initializeDemoUsers = async () => {
     // Create demo users if they don't exist (silently)
@@ -1114,9 +1145,13 @@ export default function App() {
   const handleLogin = async (
     email: string,
     password: string,
+    rememberMe: boolean = true,
   ) => {
     try {
       console.log(`🔐 Attempting login for: ${email}`);
+      // Aplicar la preferencia ANTES de iniciar sesión para que el token se persista
+      // en localStorage (recordar) o sessionStorage (borrar al cerrar el navegador).
+      setRememberSession(rememberMe);
       const {
         data: { session },
         error,

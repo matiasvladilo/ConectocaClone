@@ -12,7 +12,7 @@ import { authAPI } from '../utils/api';
 import { motion } from 'motion/react';
 
 interface LoginScreenProps {
-  onLogin: (email: string, password: string) => Promise<void>;
+  onLogin: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
 }
 
 // Frases motivacionales con emojis (30 frases únicas)
@@ -115,11 +115,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           toast.success('¡Te has unido al negocio exitosamente! Iniciando sesión...');
         }
 
-        // Automatically log in after signup
-        await onLogin(email, password);
+        // Automatically log in after signup (nueva cuenta: mantener sesión por defecto)
+        await onLogin(email, password, true);
       } else {
         // Login
-        await onLogin(email, password);
+        await onLogin(email, password, rememberMe);
       }
     } catch (error: any) {
       console.error('Auth error:', error);

@@ -1,7 +1,32 @@
 import { projectId, publicAnonKey } from './supabase/info';
 import { createClient } from '@supabase/supabase-js';
+import { createClient as getSharedClient } from './supabase/client';
 
 export const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-6d979413`;
+
+// Refresca el access token usando el refresh token (que sigue siendo válido aunque
+// el access token haya expirado). Deduplica llamadas concurrentes: si el polling
+// dispara varios 401 a la vez, todos esperan el mismo refresh en lugar de pelearse.
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const supabase = getSharedClient();
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error || !data.session) return null;
+        return data.session.access_token;
+      } catch {
+        return null;
+      } finally {
+        // Liberar para permitir un futuro refresh; se limpia tras resolver.
+        setTimeout(() => { refreshPromise = null; }, 0);
+      }
+    })();
+  }
+  return refreshPromise;
+}
 
 export interface Category {
   id: string;
@@ -120,22 +145,30 @@ async function fetchAPI(
   options: RequestInit = {},
   token?: string
 ) {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  } else {
-    headers['Authorization'] = `Bearer ${publicAnonKey}`;
-  }
+  // Ejecuta el request con el token dado. Devuelve la respuesta cruda para que el
+  // caller decida si reintentar (401) o procesar el cuerpo.
+  const doFetch = (authToken: string) =>
+    fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers as Record<string, string>),
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
 
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    let response = await doFetch(token || publicAnonKey);
+
+    // Si el request iba autenticado y devolvió 401, lo más probable es que el
+    // access token haya expirado (típico al volver de segundo plano). El refresh
+    // token sigue válido: refrescamos una vez y reintentamos antes de rendirnos.
+    if (response.status === 401 && token) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        response = await doFetch(newToken);
+      }
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Error desconocido' }));
