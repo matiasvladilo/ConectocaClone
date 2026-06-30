@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
 import { Shield, UserIcon as UserCircle, KeyRound, ArrowLeft, Mail, Lock, Sparkles } from 'lucide-react';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo-icon.png';
 import { toast } from 'sonner';
 import { authAPI } from '../utils/api';
 import { motion } from 'motion/react';

@@ -6,7 +6,7 @@ import { Badge } from './ui/badge';
 import { Package, Plus, User as UserIcon, Clock, CheckCircle2, Truck, Sparkles, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo } from '../utils/api';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo-icon.png';
 import { motion } from 'motion/react';
 
 interface HomeScreenProps {

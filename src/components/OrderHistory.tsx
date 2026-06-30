@@ -27,7 +27,7 @@ import {
   Edit
 } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo-icon.png';
 import { EditOrderDialog } from './EditOrderDialog';
 
 interface OrderHistoryProps {

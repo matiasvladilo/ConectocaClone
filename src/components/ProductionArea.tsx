@@ -53,7 +53,7 @@ import {
 } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, ProductionArea as ProductionAreaType, productionAreasAPI } from '../utils/api';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo-icon.png';
 const logoFull = logo;
 import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';

@@ -30,7 +30,7 @@ import {
   Filter
 } from 'lucide-react';
 import { toast } from 'sonner';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { ImageUpload } from './ImageUpload';
 
