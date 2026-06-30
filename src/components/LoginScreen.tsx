@@ -389,15 +389,16 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             >
               {/* Logo */}
               <motion.div
-                className="relative"
+                className="relative rounded-full flex items-center justify-center shadow-lg"
+                style={{ width: '7rem', height: '7rem', backgroundColor: '#0c3c84' }}
                 whileHover={{ scale: 1.05 }}
                 transition={{ duration: 0.2 }}
               >
                 <img
                   src={logo}
                   alt="La Oca Logo"
-                  className="w-28 h-28 object-contain relative z-10"
-                  style={{ imageRendering: 'crisp-edges' }}
+                  className="object-contain relative z-10"
+                  style={{ width: '5rem', height: '5rem', imageRendering: 'crisp-edges' }}
                 />
               </motion.div>
 
