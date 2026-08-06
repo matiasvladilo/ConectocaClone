@@ -49,6 +49,7 @@ export interface Product {
   trackStock?: boolean; // Legacy: If false, stock is not controlled
   category?: string;
   categoryId?: string;
+  sku?: string; // SKU / código de barras (EAN-13, UPC, Code128...). Opcional, único por negocio.
   productionAreaId?: string; // New: ID of production area assigned to this product
   ingredients?: ProductIngredient[]; // New: Recipe ingredients for this product
   laborCost?: number; // Costo de mano de obra (opcional), separado de los ingredientes
