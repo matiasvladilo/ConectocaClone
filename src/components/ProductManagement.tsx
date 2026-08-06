@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, ingredientsAPI, type Ingredient, type ProductIngredient, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
 import { productsAPI } from '../utils/api';
 import { Button } from './ui/button';
@@ -27,12 +27,23 @@ import {
   Folder,
   Factory,
   AlertTriangle,
-  Filter
+  Filter,
+  Barcode,
+  Camera
 } from 'lucide-react';
 import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { ImageUpload } from './ImageUpload';
+
+// Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
+// alguien abre el escáner. Con un import estático entraría en el bundle
+// inicial de toda la app, incluso para quien nunca escanea nada.
+// El `.then(...)` es necesario porque BarcodeScannerDialog es un named export
+// y React.lazy espera un módulo con `default`.
+const BarcodeScannerDialog = lazy(() =>
+  import('./BarcodeScannerDialog').then((m) => ({ default: m.BarcodeScannerDialog }))
+);
 
 
 interface ProductManagementProps {
@@ -49,6 +60,7 @@ interface ProductFormData {
   stock: string;
   category: string;
   categoryId: string;
+  sku: string;
   imageUrl: string;
   productionAreaId: string;
   unlimitedStock: boolean;
@@ -63,6 +75,7 @@ const emptyForm: ProductFormData = {
   stock: '',
   category: 'General',
   categoryId: '',
+  sku: '',
   imageUrl: '',
   productionAreaId: '',
   unlimitedStock: false,
@@ -84,6 +97,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [isDeleting, setIsDeleting] = useState<Product | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [formScannerOpen, setFormScannerOpen] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -178,6 +192,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         stock: product.stock.toString(),
         category: product.category || 'General',
         categoryId: product.categoryId || '',
+        sku: product.sku || '',
         imageUrl: product.imageUrl || '',
         productionAreaId: product.productionAreaId || '',
         unlimitedStock: product.unlimitedStock === true || product.stock === -1,
@@ -232,6 +247,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         allowDecimal: formData.allowDecimal,
         category: formData.category.trim() || 'General',
         categoryId: formData.categoryId || undefined,
+        sku: formData.sku.trim(),
         imageUrl: formData.imageUrl.trim() || undefined,
         productionAreaId: formData.productionAreaId || undefined,
         ingredients: formData.ingredients.map(pi => {
@@ -782,6 +798,40 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
               </div>
 
               <div className="col-span-2">
+                <Label htmlFor="sku" className="flex items-center gap-2">
+                  <Barcode className="w-4 h-4 text-gray-500" />
+                  SKU / Código de barras
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="sku"
+                    value={formData.sku}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                    onKeyDown={(e) => {
+                      // La pistola lectora manda Enter al final del código. Sin esto,
+                      // escanear dentro del form dispararía un submit prematuro.
+                      if (e.key === 'Enter') e.preventDefault();
+                    }}
+                    placeholder="Ej: 7801234567890"
+                    inputMode="numeric"
+                    className="pr-11"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFormScannerOpen(true)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-[#2563EB] hover:bg-blue-50 transition-colors"
+                    aria-label="Escanear código de barras con la cámara"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Opcional. Podés escanearlo con la pistola lectora o con la cámara.
+                </p>
+              </div>
+
+              <div className="col-span-2">
                 <Label htmlFor="description">Descripción</Label>
                 <Textarea
                   id="description"
@@ -1032,6 +1082,20 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Escáner del formulario: completa el campo SKU.
+          Se renderiza solo cuando está abierto para que la carga diferida
+          sirva de algo: el chunk de ZXing se baja recién al primer uso. */}
+      {formScannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScannerDialog
+            open
+            onOpenChange={setFormScannerOpen}
+            onScan={(code) => setFormData((prev) => ({ ...prev, sku: code }))}
+            title="Escanear código del producto"
+          />
+        </Suspense>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!isDeleting} onOpenChange={() => setIsDeleting(null)}>
