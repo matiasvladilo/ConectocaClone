@@ -1,10 +1,17 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, lazy, Suspense } from 'react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Camera, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { projectId } from '../utils/supabase/info';
+
+// Carga diferida: react-easy-crop no hace falta hasta que alguien elige una
+// foto nueva. Con import estático entraría en el bundle inicial del formulario
+// de producto para todo el mundo, incluso quien nunca sube una imagen.
+const ImageCropDialog = lazy(() =>
+  import('./ImageCropDialog').then((m) => ({ default: m.ImageCropDialog }))
+);
 
 interface ImageUploadProps {
   value: string;
@@ -16,6 +23,8 @@ interface ImageUploadProps {
 export function ImageUpload({ value, onChange, label = "Imagen del producto", accessToken }: ImageUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>(value || '');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,9 +84,29 @@ export function ImageUpload({ value, onChange, label = "Imagen del producto", ac
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      uploadImage(file);
+    // Resetear el input inmediatamente: si el usuario cancela el editor y vuelve
+    // a elegir EL MISMO archivo, sin esto el navegador no dispara onChange
+    // (el value no cambió) y no pasaría nada.
+    e.target.value = '';
+    if (!file) return;
+
+    // Misma validación que hacía uploadImage, pero antes de abrir el editor
+    // (no tiene sentido dejar recortar un archivo que se va a rechazar después).
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor selecciona una imagen válida');
+      return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('La imagen no debe superar los 5MB');
+      return;
+    }
+
+    setPendingFile(file);
+    setCropDialogOpen(true);
+  };
+
+  const handleCropComplete = (croppedFile: File) => {
+    uploadImage(croppedFile);
   };
 
   const handleRemoveImage = () => {
@@ -185,6 +214,21 @@ export function ImageUpload({ value, onChange, label = "Imagen del producto", ac
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Editor de recorte: se renderiza solo mientras está abierto para que la
+          carga diferida sirva de algo (el chunk de react-easy-crop se baja
+          recién al elegir una foto). */}
+      {cropDialogOpen && (
+        <Suspense fallback={null}>
+          <ImageCropDialog
+            open
+            onOpenChange={setCropDialogOpen}
+            file={pendingFile}
+            onCropComplete={handleCropComplete}
+            title="Encuadrar imagen del producto"
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
