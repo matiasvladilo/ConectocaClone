@@ -31,24 +31,30 @@ export function ImageCropDialog({
   const [aspect, setAspect] = useState(1);
   const [saving, setSaving] = useState(false);
   const croppedAreaPixelsRef = useRef<Area | null>(null);
+  // Bandera de reentrancia sincrónica: `saving` (estado) recién se refleja en
+  // el próximo render, así que un doble click/tap rápido podría colarse antes
+  // de que el botón se deshabilite. Este ref se lee y escribe en el mismo tick.
+  const confirmingRef = useRef(false);
 
-  // Genera un object URL por cada archivo nuevo y lo libera al desmontar o
-  // cambiar de archivo, para no dejar memoria colgada.
+  // Genera un object URL solo mientras el diálogo está realmente abierto y lo
+  // libera al cerrarse (Cancelar, Escape, clic afuera o confirmar), al
+  // desmontar, o al cambiar de archivo — sin depender de que el padre anule
+  // `file` para liberar memoria.
   useEffect(() => {
-    if (!file) {
+    if (!open || !file) {
       setImageUrl(null);
       return;
     }
     const url = URL.createObjectURL(file);
     setImageUrl(url);
-    // Resetear el editor para el archivo nuevo.
+    // Resetear el editor para el archivo nuevo (o para una apertura nueva).
     setCrop({ x: 0, y: 0 });
     setZoom(1);
     setRotation(0);
     setAspect(1);
     croppedAreaPixelsRef.current = null;
     return () => URL.revokeObjectURL(url);
-  }, [file]);
+  }, [file, open]);
 
   const handleMediaLoaded = useCallback((mediaSize: { naturalWidth: number; naturalHeight: number }) => {
     // Marco = proporción real de la foto. Si la rotación actual es de 90/270,
@@ -75,7 +81,19 @@ export function ImageCropDialog({
   };
 
   const handleConfirm = async () => {
-    if (!file || !imageUrl || !croppedAreaPixelsRef.current) return;
+    // Guardia de reentrancia sincrónica: evita que un doble click/tap dispare
+    // dos recortes en paralelo antes de que `disabled={saving}` surta efecto.
+    if (confirmingRef.current) return;
+    if (!file || !imageUrl) return;
+    if (!croppedAreaPixelsRef.current) {
+      // La librería todavía no emitió onCropComplete (p. ej. el usuario
+      // confirmó antes de que el cropper terminara de montar la imagen).
+      // No hay recorte para aplicar todavía: avisamos en vez de fallar mudo.
+      console.warn('[ImageCropDialog] Se intentó confirmar antes de que el recorte esté listo.');
+      toast.error('Todavía se está preparando la imagen. Esperá un segundo y probá de nuevo.');
+      return;
+    }
+    confirmingRef.current = true;
     try {
       setSaving(true);
       const result = await getCroppedImageFile(imageUrl, croppedAreaPixelsRef.current, rotation, file.name);
@@ -86,6 +104,7 @@ export function ImageCropDialog({
       toast.error('No se pudo procesar la imagen. Probá de nuevo.');
     } finally {
       setSaving(false);
+      confirmingRef.current = false;
     }
   };
 
