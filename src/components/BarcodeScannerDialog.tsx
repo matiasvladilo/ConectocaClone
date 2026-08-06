@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -51,6 +51,15 @@ function ScannerView({ onScan }: { onScan: (code: string) => void }) {
   const scannedRef = useRef(false); // evita disparar onScan más de una vez
   const [error, setError] = useState<string | null>(null);
 
+  // Guardamos la última versión de onScan en un ref para que el efecto de abajo
+  // no dependa de su identidad: si el padre re-renderiza y pasa una nueva
+  // función (p. ej. una arrow function inline), no queremos reiniciar la
+  // cámara — solo actualizamos qué callback se va a invocar.
+  const onScanRef = useRef(onScan);
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
+
   useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -70,7 +79,7 @@ function ScannerView({ onScan }: { onScan: (code: string) => void }) {
           scannedRef.current = true;
           controls.stop();
           controlsRef.current = null;
-          onScan(result.getText().trim());
+          onScanRef.current(result.getText().trim());
         }
       )
       .then((controls) => {
@@ -93,7 +102,11 @@ function ScannerView({ onScan }: { onScan: (code: string) => void }) {
       controlsRef.current?.stop();
       controlsRef.current = null;
     };
-  }, [onScan]);
+    // Sin dependencias a propósito: la cámara arranca una sola vez por montaje
+    // (el diálogo monta/desmonta ScannerView al abrirse/cerrarse) y no se
+    // reinicia por cambios de identidad de onScan. Ver onScanRef arriba.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (error) {
     return (
@@ -123,10 +136,15 @@ export function BarcodeScannerDialog({
   onScan,
   title = 'Escanear código de barras',
 }: BarcodeScannerDialogProps) {
-  const handleScan = (code: string) => {
-    onScan(code);
-    onOpenChange(false);
-  };
+  // Memoizado para no generarle a ScannerView una prop onScan con nueva
+  // identidad en cada render (ver nota Critical de la ronda de revisión 1).
+  const handleScan = useCallback(
+    (code: string) => {
+      onScan(code);
+      onOpenChange(false);
+    },
+    [onScan, onOpenChange]
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
