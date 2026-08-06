@@ -1,5 +1,5 @@
-const CACHE_NAME = 'laoca-v1';
-const RUNTIME_CACHE = 'laoca-runtime-v1';
+const CACHE_NAME = 'laoca-v2';
+const RUNTIME_CACHE = 'laoca-runtime-v2';
 
 // Assets to cache on install
 const PRECACHE_URLS = [
@@ -80,7 +80,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For static assets, use cache-first strategy
+  // For page navigations and index.html, use network-first so deploys are
+  // picked up immediately. Falling back to cache keeps offline support.
+  const url = new URL(event.request.url);
+  const isNavigation = event.request.mode === 'navigate' || url.pathname === '/index.html';
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cachedResponse) => {
+          return cachedResponse || caches.match('/index.html');
+        }))
+    );
+    return;
+  }
+
+  // For other static assets (hashed JS/CSS/images), cache-first is safe
+  // because their filenames change whenever their content changes.
   event.respondWith(
     caches.match(event.request)
       .then((cachedResponse) => {
