@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { Shield, UserIcon as UserCircle, KeyRound, ArrowLeft, Mail, Lock, Sparkles } from 'lucide-react';
+import { Shield, UserIcon as UserCircle, KeyRound, ArrowLeft, Mail, Lock, Sparkles, Eye, EyeOff } from 'lucide-react';
 import logo from '../assets/logo-icon.png';
 import { toast } from 'sonner';
 import { authAPI } from '../utils/api';
@@ -57,6 +57,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPasswordRecovery, setShowPasswordRecovery] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [rememberMe, setRememberMe] = useState(true); // Remember session by default
 
@@ -656,15 +657,24 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <Input
                     id="password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={6}
-                    className="pl-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
+                    className="pl-11 pr-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
                     style={{ borderRadius: '10px' }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#2563EB] transition-colors"
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
                 </div>
                 {isCreatingAccount && (
                   <p className="text-xs text-gray-500 mt-1.5">Mínimo 6 caracteres</p>
