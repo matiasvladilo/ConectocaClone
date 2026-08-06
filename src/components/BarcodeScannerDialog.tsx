@@ -105,6 +105,10 @@ function ScannerView({ onScan }: { onScan: (code: string) => void }) {
     // Sin dependencias a propósito: la cámara arranca una sola vez por montaje
     // (el diálogo monta/desmonta ScannerView al abrirse/cerrarse) y no se
     // reinicia por cambios de identidad de onScan. Ver onScanRef arriba.
+    // OJO: no agregar onScan a este array — onScan cambia de identidad en
+    // cada render del padre (arrow function inline), y agregarlo acá
+    // reinicia la cámara todo el tiempo (bug ya detectado: se apagaba y
+    // prendía cada 5s por el polling de App.tsx).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -136,8 +140,15 @@ export function BarcodeScannerDialog({
   onScan,
   title = 'Escanear código de barras',
 }: BarcodeScannerDialogProps) {
-  // Memoizado para no generarle a ScannerView una prop onScan con nueva
-  // identidad en cada render (ver nota Critical de la ronda de revisión 1).
+  // Este useCallback NO es lo que mantiene estable la cámara: onScan llega
+  // desde ProductManagement.tsx como arrow function inline, así que la
+  // dependencia [onScan, onOpenChange] cambia en cada render del padre y
+  // handleScan también cambia de identidad en cada render.
+  // Lo que realmente evita que la cámara se reinicie es el useEffect de
+  // ScannerView (deps []), que invoca el callback vía onScanRef.current en
+  // vez de depender directamente de onScan. OJO: no agregar onScan a las
+  // deps de ese efecto — eso reintroduce el bug donde la cámara se apagaba
+  // y volvía a prender cada 5s por el polling de App.tsx.
   const handleScan = useCallback(
     (code: string) => {
       onScan(code);

@@ -549,6 +549,7 @@ export const productsAPI = {
     productionAreaId?: string;
     ingredients?: Array<{ ingredientId: string; quantity: number }>;
     laborCost?: number;
+    sku?: string;
   }): Promise<Product> => {
     const response = await fetchAPI('/products', {
       method: 'POST',

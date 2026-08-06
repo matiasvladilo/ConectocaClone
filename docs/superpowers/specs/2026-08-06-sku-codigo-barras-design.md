@@ -117,7 +117,7 @@ Sobre HTTPS: `getUserMedia` solo funciona en contextos seguros. Producción est�
 - Agregar `sku: string` a `ProductFormData` y a `emptyForm`.
 - `handleOpenDialog` lo carga desde `product.sku || ''`; `handleSubmit` lo manda trimmeado dentro de `productData`.
 - Campo etiquetado **"SKU / Código de barras"** con la aclaración de que es opcional, ícono `Barcode` a la izquierda y botón de cámara a la derecha que abre el `BarcodeScannerDialog` y escribe el resultado en el campo.
-- El input tiene `inputMode="numeric"` — en celular abre el teclado numérico, que es lo cómodo para tipear un EAN a mano, sin impedir códigos alfanuméricos (Code 39/128).
+- El input tiene `inputMode="numeric"` — en celular abre el teclado numérico, que es lo cómodo para tipear un EAN a mano (el caso de uso real). Esto es a costa de los códigos alfanuméricos (Code 39/128): en iOS el teclado numérico no ofrece letras y el usuario no puede cambiarlo para este campo, así que cargar un SKU alfanumérico a mano no es viable con esta configuración. Es una decisión consciente porque el caso de uso real son códigos EAN. Si en algún momento hace falta cargar SKUs alfanuméricos a mano, hay que cambiar el input a `inputMode="text"`.
 
 **b) Búsqueda por SKU** (`filteredProducts`, ~línea 318):
 

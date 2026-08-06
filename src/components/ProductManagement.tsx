@@ -352,6 +352,19 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     totalValue: products.reduce((sum, p) => sum + (p.price * (p.unlimitedStock || p.stock === -1 ? 0 : p.stock)), 0)
   };
 
+  // Fallback del Suspense mientras se descarga el chunk de ZXing (~119 kB
+  // comprimidos). Sin esto, en una red lenta tocar el ícono de cámara no
+  // se ve como si hiciera nada y el usuario vuelve a tocar pensando que
+  // falló. Se usa el mismo elemento en los dos Suspense del escáner.
+  const scannerLoadingFallback = (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="flex flex-col items-center gap-3 rounded-xl bg-white px-6 py-5 shadow-lg">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-700">Abriendo cámara…</p>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="min-h-screen relative overflow-hidden"
@@ -1106,7 +1119,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           Se renderiza solo cuando está abierto para que la carga diferida
           sirva de algo: el chunk de ZXing se baja recién al primer uso. */}
       {formScannerOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={scannerLoadingFallback}>
           <BarcodeScannerDialog
             open
             onOpenChange={setFormScannerOpen}
@@ -1118,7 +1131,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
 
       {/* Escáner del buscador: filtra la grilla por el código leído */}
       {searchScannerOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={scannerLoadingFallback}>
           <BarcodeScannerDialog
             open
             onOpenChange={setSearchScannerOpen}

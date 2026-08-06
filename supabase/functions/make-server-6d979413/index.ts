@@ -640,7 +640,13 @@ async function checkDuplicateSku(
 
   if (excludeProductId) query = query.neq('id', excludeProductId);
 
-  const { count } = await query;
+  // Este pre-chequeo es solo una comodidad de UX (mensaje de error más claro);
+  // la garantía real de unicidad la da el índice único de la base, que el
+  // insert/update siguiente respeta igual aunque esta consulta falle.
+  const { count, error } = await query;
+  if (error) {
+    console.error('Error verificando SKU duplicado:', error);
+  }
   return count && count > 0 ? `Ya existe un producto con el SKU "${sku}"` : null;
 }
 
@@ -727,7 +733,10 @@ app.post("/make-server-6d979413/products", async (c) => {
 
     if (insertErr) {
       console.error('Error creating product:', insertErr);
-      if (insertErr.code === '23505') {
+      // Igual que en el PUT: si skuNorm está vacío, el 23505 vino de otro
+      // índice y no del SKU, así que cae al 500 genérico en vez de decir
+      // 'Ya existe un producto con el SKU ""'.
+      if (insertErr.code === '23505' && skuNorm) {
         return c.json({ error: `Ya existe un producto con el SKU "${skuNorm}"` }, 400);
       }
       return c.json({ error: 'Error al crear producto' }, 500);
