@@ -454,6 +454,10 @@ Reemplazar `handleFileSelect` (~línea 76-81) por:
 ```ts
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Resetear el input inmediatamente: si el usuario cancela el editor y vuelve
+    // a elegir EL MISMO archivo, sin esto el navegador no dispara onChange
+    // (el value no cambió) y no pasaría nada.
+    e.target.value = '';
     if (!file) return;
 
     // Misma validación que hacía uploadImage, pero antes de abrir el editor
@@ -575,6 +579,10 @@ Reemplazar la función completa (~línea 360-373):
 ```ts
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Resetear el input inmediatamente: si el usuario cancela el editor y vuelve
+    // a elegir EL MISMO archivo, sin esto el navegador no dispara onChange
+    // (el value no cambió) y no pasaría nada.
+    e.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
