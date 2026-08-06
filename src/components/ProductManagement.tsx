@@ -98,6 +98,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [submitting, setSubmitting] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [formScannerOpen, setFormScannerOpen] = useState(false);
+  const [searchScannerOpen, setSearchScannerOpen] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -332,9 +333,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   };
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.category?.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q ||
+      p.name.toLowerCase().includes(q) ||
+      p.description?.toLowerCase().includes(q) ||
+      p.category?.toLowerCase().includes(q) ||
+      p.sku?.toLowerCase().includes(q);
 
     const matchesCategory = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
 
@@ -552,12 +556,20 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
-                  placeholder="Buscar por nombre, descripción o categoría..."
+                  placeholder="Buscar por nombre, SKU, descripción o categoría..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-11 h-11 bg-white border-[#CBD5E1]"
+                  className="pl-11 pr-11 h-11 bg-white border-[#CBD5E1]"
                   style={{ borderRadius: '10px' }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setSearchScannerOpen(true)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-[#2563EB] hover:bg-blue-50 transition-colors"
+                  aria-label="Buscar escaneando un código de barras"
+                >
+                  <Camera className="w-5 h-5" />
+                </button>
               </div>
               <div className="shrink-0">
                 <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
@@ -686,6 +698,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                     >
                       {product.name}
                     </h3>
+
+                    {product.sku && (
+                      <p className="flex items-center gap-1.5 text-xs text-gray-500 mb-2 font-mono">
+                        <Barcode className="w-3.5 h-3.5 shrink-0" />
+                        {product.sku}
+                      </p>
+                    )}
 
                     {/* Description */}
                     {product.description && (
@@ -1093,6 +1112,18 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             onOpenChange={setFormScannerOpen}
             onScan={(code) => setFormData((prev) => ({ ...prev, sku: code }))}
             title="Escanear código del producto"
+          />
+        </Suspense>
+      )}
+
+      {/* Escáner del buscador: filtra la grilla por el código leído */}
+      {searchScannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScannerDialog
+            open
+            onOpenChange={setSearchScannerOpen}
+            onScan={(code) => setSearchQuery(code)}
+            title="Buscar por código de barras"
           />
         </Suspense>
       )}
