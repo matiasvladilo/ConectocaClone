@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -39,6 +39,13 @@ import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { productsAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
 import { formatCLP } from '../utils/format';
+import { projectId } from '../utils/supabase/info';
+
+// Carga diferida, mismo motivo que en ImageUpload.tsx: no hace falta en la
+// carga inicial de Nuevo Pedido.
+const ImageCropDialog = lazy(() =>
+  import('./ImageCropDialog').then((m) => ({ default: m.ImageCropDialog }))
+);
 
 interface NewOrderFormProps {
   onBack: () => void;
@@ -92,6 +99,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   const [editForm, setEditForm] = useState({ name: '', description: '', price: '', image: '', stock: '', category: '', categoryId: '', trackStock: true, allowDecimal: false });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(true);
   const [cartPreviewOpen, setCartPreviewOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -359,16 +368,59 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
 
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setImagePreview(result);
-        setEditForm({ ...editForm, image: result });
-      };
-      reader.readAsDataURL(file);
-      toast.success('Imagen cargada correctamente');
+    // Resetear el input inmediatamente: si el usuario cancela el editor y vuelve
+    // a elegir EL MISMO archivo, sin esto el navegador no dispara onChange
+    // (el value no cambió) y no pasaría nada.
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor selecciona una imagen válida');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('La imagen no debe superar los 5MB');
+      return;
+    }
+
+    setImageFile(file);
+    setCropDialogOpen(true);
+  };
+
+  const handleCropComplete = async (croppedFile: File) => {
+    try {
+      setUploadingImage(true);
+
+      const formData = new FormData();
+      formData.append('file', croppedFile);
+
+      // Mismo endpoint que usa ImageUpload.tsx — unifica el pipeline de subida
+      // en vez de guardar la imagen como base64 directo en editForm.image.
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-6d979413/upload-product-image`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error al subir la imagen');
+      }
+
+      const data = await response.json();
+      if (!data.url) throw new Error('No se recibió la URL de la imagen');
+
+      setImagePreview(data.url);
+      setEditForm((prev) => ({ ...prev, image: data.url }));
+      toast.success('Imagen subida exitosamente');
+    } catch (error: any) {
+      console.error('Error uploading image:', error);
+      toast.error(error.message || 'Error al subir la imagen');
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -1167,9 +1219,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                     variant="outline"
                     className="w-full gap-2"
                     onClick={() => document.getElementById('image-upload')?.click()}
+                    disabled={uploadingImage}
                   >
                     <Upload className="w-4 h-4" />
-                    Subir Imagen
+                    {uploadingImage ? 'Subiendo...' : 'Subir Imagen'}
                   </Button>
                 </div>
 
@@ -1187,9 +1240,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                     variant="outline"
                     className="w-full gap-2"
                     onClick={() => document.getElementById('camera-capture')?.click()}
+                    disabled={uploadingImage}
                   >
                     <Camera className="w-4 h-4" />
-                    Tomar Foto
+                    {uploadingImage ? 'Subiendo...' : 'Tomar Foto'}
                   </Button>
                 </div>
               </div>
@@ -1222,6 +1276,19 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                 </div>
               </div>
             </div>
+
+            {/* Editor de recorte: se renderiza solo mientras está abierto. */}
+            {cropDialogOpen && (
+              <Suspense fallback={null}>
+                <ImageCropDialog
+                  open
+                  onOpenChange={setCropDialogOpen}
+                  file={imageFile}
+                  onCropComplete={handleCropComplete}
+                  title="Encuadrar imagen del producto"
+                />
+              </Suspense>
+            )}
 
             {/* Name */}
             <div className="space-y-2">
