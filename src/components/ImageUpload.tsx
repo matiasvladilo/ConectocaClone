@@ -103,11 +103,14 @@ export function ImageUpload({ value, onChange, label = "Imagen del producto", ac
             exit={{ opacity: 0, scale: 0.9 }}
             className="relative group"
           >
-            <div className="relative w-40 h-40 mx-auto bg-gray-50 rounded-lg overflow-hidden border-2 border-blue-200 shadow-sm">
+            {/* El cuadro se ajusta a la proporción real de la foto (sin recortar ni
+                forzarla a un cuadrado) — solo se limita la altura máxima para que
+                una foto muy vertical no domine el formulario. */}
+            <div className="relative max-w-[220px] max-h-72 mx-auto bg-gray-50 rounded-lg overflow-hidden border-2 border-blue-200 shadow-sm">
               <img
                 src={previewUrl}
                 alt="Preview"
-                className="w-full h-full object-cover"
+                className="block w-full h-auto max-h-72 object-contain"
               />
               <motion.button
                 type="button"

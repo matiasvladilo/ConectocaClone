@@ -1142,11 +1142,13 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
             {/* Image Preview */}
             <div>
               <Label className="text-sm mb-2 block">Imagen del producto</Label>
-              <div className="relative h-40 bg-white rounded-lg overflow-hidden mb-3">
+              {/* El cuadro se ajusta a la proporción real de la foto (sin recortar);
+                  solo se limita la altura máxima para que no domine el modal. */}
+              <div className="relative w-full max-h-80 bg-white rounded-lg overflow-hidden mb-3 flex items-center justify-center">
                 <ImageWithFallback
                   src={imagePreview || editForm.image}
                   alt="Preview"
-                  className="w-full h-full object-cover"
+                  className="block w-full h-auto max-h-80 object-contain"
                 />
               </div>
 
