@@ -129,7 +129,11 @@ export function ImageCropDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative w-full h-72 bg-gray-900 rounded-lg overflow-hidden">
+        {/* OJO: este proyecto usa src/index.css precompilado (sin build de Tailwind:
+            no hay tailwind.config.js ni postcss.config.js). Solo funcionan las clases
+            que YA existen en ese archivo; una clase nueva no falla ni avisa, simplemente
+            no aplica ningún estilo. Antes de usar una clase, buscala en src/index.css. */}
+        <div className="relative w-full h-64 bg-gray-900 rounded-lg overflow-hidden">
           {imageUrl && (
             <Cropper
               image={imageUrl}
