@@ -108,8 +108,19 @@ export function ImageCropDialog({
     }
   };
 
+  const handleOpenChange = (next: boolean) => {
+    // No dejar cerrar mientras se está procesando el recorte: cerrar revoca
+    // la object URL que getCroppedImageFile todavía está leyendo, y el
+    // recorte fallaría por un motivo que no tiene nada que ver con la imagen.
+    // Cubre los tres caminos de cierre que no pasan por el botón "Cancelar"
+    // (que ya está deshabilitado con `disabled={saving}`): Escape, clic
+    // afuera y el botón X del propio Dialog.
+    if (!next && confirmingRef.current) return;
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
