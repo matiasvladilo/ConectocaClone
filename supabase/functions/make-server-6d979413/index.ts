@@ -90,6 +90,7 @@ function toProduct(r: any) {
     allowDecimal: r.allow_decimal || false,
     category: r.categories?.name || r.category_name || 'General',
     categoryId: r.category_id,
+    sku: r.sku || '', // se normaliza a '' para que los formularios no lidien con null
     productionAreaId: r.production_area_id,
     ingredients,
     laborCost: Number(r.labor_cost) || 0,
@@ -619,6 +620,30 @@ app.get("/make-server-6d979413/business/members", async (c) => {
   }
 });
 
+/**
+ * Verifica si un SKU ya está usado por otro producto del mismo negocio.
+ * `excludeProductId` permite editar un producto sin que choque contra sí mismo.
+ * Devuelve el mensaje de error si hay duplicado, o null si está libre.
+ */
+async function checkDuplicateSku(
+  businessId: string,
+  sku: string,
+  excludeProductId?: string
+): Promise<string | null> {
+  if (!sku) return null; // SKU vacío es válido: el campo es opcional
+
+  let query = supabaseAdmin
+    .from('products')
+    .select('id', { count: 'exact', head: true })
+    .eq('business_id', businessId)
+    .eq('sku', sku);
+
+  if (excludeProductId) query = query.neq('id', excludeProductId);
+
+  const { count } = await query;
+  return count && count > 0 ? `Ya existe un producto con el SKU "${sku}"` : null;
+}
+
 // ─── PRODUCT ROUTES ───────────────────────────────────────────────────────────
 
 app.get("/make-server-6d979413/products", async (c) => {
@@ -669,11 +694,15 @@ app.post("/make-server-6d979413/products", async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const body = await c.req.json();
-    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost } = body;
+    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku } = body;
 
     if (!name || price === undefined || price === null) {
       return c.json({ error: 'Nombre y precio son requeridos' }, 400);
     }
+
+    const skuNorm = (sku || '').trim();
+    const skuError = await checkDuplicateSku(profile.businessId, skuNorm);
+    if (skuError) return c.json({ error: skuError }, 400);
 
     const isUnlimited = unlimitedStock === true || parseInt(stock) === -1;
     const { data: newProduct, error: insertErr } = await supabaseAdmin
@@ -689,6 +718,7 @@ app.post("/make-server-6d979413/products", async (c) => {
         track_stock: !isUnlimited,
         allow_decimal: allowDecimal === true,
         category_id: categoryId || null,
+        sku: skuNorm || null, // null (no '') para que el índice único parcial ignore los vacíos
         production_area_id: productionAreaId || null,
         labor_cost: laborCost !== undefined ? Number(laborCost) : 0,
       })
@@ -697,6 +727,9 @@ app.post("/make-server-6d979413/products", async (c) => {
 
     if (insertErr) {
       console.error('Error creating product:', insertErr);
+      if (insertErr.code === '23505') {
+        return c.json({ error: `Ya existe un producto con el SKU "${skuNorm}"` }, 400);
+      }
       return c.json({ error: 'Error al crear producto' }, 500);
     }
 
@@ -749,7 +782,14 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku } = updates;
+
+    let skuNorm: string | undefined;
+    if (sku !== undefined) {
+      skuNorm = (sku || '').trim();
+      const skuError = await checkDuplicateSku(profile.businessId, skuNorm, productId);
+      if (skuError) return c.json({ error: skuError }, 400);
+    }
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
@@ -777,6 +817,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (trackStock !== undefined) updateData.track_stock = trackStock;
     if (allowDecimal !== undefined) updateData.allow_decimal = allowDecimal === true;
     if (laborCost !== undefined) updateData.labor_cost = Number(laborCost) || 0;
+    if (skuNorm !== undefined) updateData.sku = skuNorm || null;
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('products')
@@ -787,6 +828,11 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
 
     if (updateErr) {
       console.error('Error updating product:', updateErr);
+      // La condición `skuNorm !== undefined` importa: si el request no traía sku,
+      // un 23505 vino de otro índice y el mensaje diría 'SKU "undefined"'.
+      if (updateErr.code === '23505' && skuNorm !== undefined) {
+        return c.json({ error: `Ya existe un producto con el SKU "${skuNorm}"` }, 400);
+      }
       return c.json({ error: 'Error al actualizar producto' }, 500);
     }
 
