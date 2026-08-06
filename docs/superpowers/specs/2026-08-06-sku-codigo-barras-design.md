@@ -95,7 +95,7 @@ Comportamiento:
 - Al abrirse, pide la cámara con `facingMode: 'environment'` (cámara trasera, que es la que se usa para escanear).
 - Muestra el video en vivo dentro de un `Dialog`, con un marco guía superpuesto.
 - Al decodificar un código: dispara `onScan(code)`, detiene la cámara y cierra el diálogo. **Un escaneo por apertura** — sin lecturas repetidas ni acumulación de callbacks.
-- Al cerrarse (por escaneo, por Cancelar o por desmontaje), **libera el stream de la cámara**. Un `MediaStream` sin detener deja la luz de la cámara encendida y consume batería; el `useEffect` de limpieza debe llamar al `reset()` del reader de ZXing.
+- Al cerrarse (por escaneo, por Cancelar o por desmontaje), **libera el stream de la cámara**. Un `MediaStream` sin detener deja la luz de la cámara encendida y consume batería; el `useEffect` de limpieza debe llamar a `stop()` sobre el `IScannerControls` que devuelve `decodeFromConstraints`. (Verificado contra los tipos de `@zxing/browser@0.2.1`: el método es `controls.stop()`, no el `reader.reset()` de la API anterior.)
 
 Formatos habilitados (vía `DecodeHintType.POSSIBLE_FORMATS`): `EAN_13`, `EAN_8`, `UPC_A`, `UPC_E`, `CODE_128`, `CODE_39`, `ITF`. Restringir la lista acelera la decodificación y reduce falsos positivos frente a intentar todos los formatos. Se excluye QR a propósito: acá se escanean códigos de barras de producto.
 
