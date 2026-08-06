@@ -484,6 +484,21 @@ Notas sobre la API usada (verificada contra los tipos de `@zxing/browser@0.2.1`)
 - Para detener se usa **`controls.stop()`** (no `reader.reset()`, que era la API vieja de `@zxing/library`).
 - `result.getText()` devuelve el contenido del código como string.
 
+> ⚠️ **CORRECCIÓN POST-REVISIÓN — el código de arriba tiene un defecto. No lo copies tal cual.**
+>
+> El `useEffect` mostrado depende de `[onScan]`. Como el padre pasa `onScan` como
+> arrow function inline, cada re-render del padre le cambia la identidad y
+> re-ejecuta el efecto, apagando y prendiendo la cámara. No es teórico:
+> [`src/App.tsx:306`](../../../src/App.tsx) hace polling cada 5 segundos y
+> `ProductManagement` no está memoizado, así que la cámara parpadearía cada 5
+> segundos justo mientras el usuario intenta escanear.
+>
+> **La versión implementada y revisada corrige esto** guardando `onScan` en un ref
+> sincronizado en cada render e invocando `onScanRef.current(...)` desde el callback,
+> con el efecto de arranque en `[]`. La fuente de verdad es el archivo real:
+> [`src/components/BarcodeScannerDialog.tsx`](../../../src/components/BarcodeScannerDialog.tsx)
+> (corregido en el commit `f9e4bc59`, desviación del plan aprobada por el dueño).
+
 - [ ] **Step 3: Verificar que compila**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "_redirects"`
