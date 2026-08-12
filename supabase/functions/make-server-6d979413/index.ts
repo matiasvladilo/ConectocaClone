@@ -266,6 +266,16 @@ async function getProfile(userId: string) {
   return data ? toProfile(data) : null;
 }
 
+// Roles habilitados para gestionar materias primas y recetas.
+// Coincide con lo que la app ya muestra en pantalla (App.tsx: los botones de
+// Materias Primas y Recetas solo aparecen para admin y production), así que el
+// permiso real del servidor y lo que ve el usuario van juntos.
+const ROLES_MATERIAS_PRIMAS = ['admin', 'production'];
+
+function puedeGestionarMateriasPrimas(profile: any) {
+  return !!profile?.role && ROLES_MATERIAS_PRIMAS.includes(profile.role);
+}
+
 // ─── Health Check ─────────────────────────────────────────────────────────────
 
 app.get("/make-server-6d979413/health", (c) => {
@@ -845,8 +855,15 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
       return c.json({ error: 'Error al actualizar producto' }, 500);
     }
 
-    // Update product-ingredient relations if provided
+    // Update product-ingredient relations if provided.
+    // El chequeo de rol va acá adentro, no al principio de la ruta: este endpoint
+    // tambien lo usan otros roles para actualizar solo el stock (desde pedidos),
+    // y bloquear la ruta entera les romperia ese flujo.
     if (ingredients !== undefined && Array.isArray(ingredients)) {
+      if (!puedeGestionarMateriasPrimas(profile)) {
+        return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
+      }
+
       await supabaseAdmin.from('product_ingredients').delete().eq('product_id', productId);
 
       if (ingredients.length > 0) {
@@ -951,7 +968,9 @@ app.put('/make-server-6d979413/products/:id/ingredients', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
+    }
 
     const productId = c.req.param('id');
     const { ingredients } = await c.req.json();
@@ -1003,7 +1022,9 @@ app.post('/make-server-6d979413/products/:id/ingredients', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
+    }
 
     const productId = c.req.param('id');
     const { ingredientId, quantity } = await c.req.json();
@@ -1062,7 +1083,9 @@ app.delete('/make-server-6d979413/products/:productId/ingredients/:ingredientId'
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
+    }
 
     const productId = c.req.param('productId');
     const ingredientId = c.req.param('ingredientId');
@@ -2039,6 +2062,9 @@ app.post('/make-server-6d979413/ingredients', async (c) => {
   try {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar materias primas' }, 403);
+    }
 
     const { name, unit, currentStock, minStock, maxStock, costPerUnit, supplier } = await c.req.json();
 
@@ -2089,6 +2115,9 @@ app.put('/make-server-6d979413/ingredients/:id', async (c) => {
     const ingredientId = c.req.param('id');
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar materias primas' }, 403);
+    }
 
     const { data: existing } = await supabaseAdmin
       .from('ingredients')
@@ -2166,6 +2195,9 @@ app.delete('/make-server-6d979413/ingredients/:id', async (c) => {
     const ingredientId = c.req.param('id');
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar materias primas' }, 403);
+    }
 
     const { data: ingredient } = await supabaseAdmin
       .from('ingredients')
@@ -2194,125 +2226,6 @@ app.delete('/make-server-6d979413/ingredients/:id', async (c) => {
   } catch (err: any) {
     console.error('Error deleting ingredient:', err);
     return c.json({ error: 'Failed to delete ingredient' }, 500);
-  }
-});
-
-// ─── PRODUCT-INGREDIENTS ROUTES (standalone endpoint) ────────────────────────
-
-app.get('/make-server-6d979413/product-ingredients/:productId', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
-
-  try {
-    const productId = c.req.param('productId');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
-    const { data: product } = await supabaseAdmin
-      .from('products')
-      .select('id, business_id')
-      .eq('id', productId)
-      .maybeSingle();
-
-    if (!product) return c.json({ error: 'Product not found' }, 404);
-    if (product.business_id !== profile.businessId) return c.json({ error: 'Unauthorized' }, 403);
-
-    const { data: relations } = await supabaseAdmin
-      .from('product_ingredients')
-      .select('*, ingredients(name, unit, current_stock, cost_per_unit)')
-      .eq('product_id', productId);
-
-    const enriched = (relations || []).map((r: any) => ({
-      productId,
-      ingredientId: r.ingredient_id,
-      quantity: r.quantity,
-      ingredientName: r.ingredients?.name || 'Unknown',
-      unit: r.ingredients?.unit || '',
-      currentStock: r.ingredients?.current_stock || 0,
-      costPerUnit: r.ingredients?.cost_per_unit || 0,
-      createdAt: r.created_at,
-    }));
-
-    return c.json({ data: enriched });
-  } catch (err: any) {
-    console.error('Error retrieving product ingredients:', err);
-    return c.json({ error: 'Failed to retrieve product ingredients' }, 500);
-  }
-});
-
-app.post('/make-server-6d979413/product-ingredients/:productId', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
-
-  try {
-    const productId = c.req.param('productId');
-    const { ingredients } = await c.req.json();
-
-    if (!Array.isArray(ingredients)) return c.json({ error: 'Ingredients must be an array' }, 400);
-
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
-    const { data: product } = await supabaseAdmin
-      .from('products')
-      .select('id, business_id')
-      .eq('id', productId)
-      .maybeSingle();
-
-    if (!product) return c.json({ error: 'Product not found' }, 404);
-    if (product.business_id !== profile.businessId) return c.json({ error: 'Unauthorized' }, 403);
-
-    // Replace all ingredients
-    await supabaseAdmin.from('product_ingredients').delete().eq('product_id', productId);
-
-    const piRows = ingredients
-      .filter((ing: any) => ing.ingredientId && ing.quantity !== undefined)
-      .map((ing: any) => ({
-        product_id: productId,
-        ingredient_id: ing.ingredientId,
-        quantity: Number(ing.quantity),
-      }));
-
-    if (piRows.length > 0) {
-      await supabaseAdmin.from('product_ingredients').insert(piRows);
-    }
-
-    return c.json({ data: piRows }, 201);
-  } catch (err: any) {
-    console.error('Error setting product ingredients:', err);
-    return c.json({ error: 'Failed to set product ingredients' }, 500);
-  }
-});
-
-app.delete('/make-server-6d979413/product-ingredients/:productId/:ingredientId', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
-
-  try {
-    const productId = c.req.param('productId');
-    const ingredientId = c.req.param('ingredientId');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
-    const { data: product } = await supabaseAdmin
-      .from('products')
-      .select('id, business_id')
-      .eq('id', productId)
-      .maybeSingle();
-
-    if (!product) return c.json({ error: 'Product not found' }, 404);
-    if (product.business_id !== profile.businessId) return c.json({ error: 'Unauthorized' }, 403);
-
-    await supabaseAdmin
-      .from('product_ingredients')
-      .delete()
-      .eq('product_id', productId)
-      .eq('ingredient_id', ingredientId);
-
-    return c.json({ data: { deleted: true } });
-  } catch (err: any) {
-    console.error('Error deleting product ingredient:', err);
-    return c.json({ error: 'Failed to delete product ingredient' }, 500);
   }
 });
 
