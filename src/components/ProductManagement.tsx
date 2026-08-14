@@ -35,6 +35,7 @@ import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { ImageUpload } from './ImageUpload';
+import { StockAdjustDialog } from './StockAdjustDialog';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -99,6 +100,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [formScannerOpen, setFormScannerOpen] = useState(false);
   const [searchScannerOpen, setSearchScannerOpen] = useState(false);
+  const [stockProduct, setStockProduct] = useState<Product | null>(null);
+  const [savingStock, setSavingStock] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -329,6 +332,26 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     } catch (error: any) {
       console.error('Error deleting product:', error);
       toast.error(error.message || 'Error al eliminar producto');
+    }
+  };
+
+  const handleAjustarStock = async (nuevoStock: number) => {
+    if (!stockProduct) return;
+    try {
+      setSavingStock(true);
+      // Se manda SOLO el stock: el backend actualiza únicamente los campos
+      // presentes, así que la receta y el resto del producto quedan intactos
+      // (y no se dispara el chequeo de permisos de recetas).
+      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock });
+      setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
+      toast.success(`Stock de "${actualizado.name}" actualizado a ${nuevoStock}`);
+      setStockProduct(null);
+    } catch (error: any) {
+      console.error('Error ajustando stock:', error);
+      // El diálogo queda abierto con lo cargado, para poder reintentar.
+      toast.error(error.message || 'Error al actualizar el stock');
+    } finally {
+      setSavingStock(false);
     }
   };
 
@@ -784,6 +807,19 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         <Edit className="w-4 h-4 mr-1" />
                         Editar
                       </Button>
+                      {/* En productos de stock ilimitado no hay nada que ajustar,
+                          así que el botón no se muestra. */}
+                      {!(product.unlimitedStock || product.stock === -1) && (
+                        <Button
+                          onClick={() => setStockProduct(product)}
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+                        >
+                          <BoxIcon className="w-4 h-4 mr-1" />
+                          Stock
+                        </Button>
+                      )}
                       <Button
                         onClick={() => setIsDeleting(product)}
                         variant="outline"
@@ -1166,6 +1202,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <StockAdjustDialog
+        open={!!stockProduct}
+        onOpenChange={(abierto) => { if (!abierto) setStockProduct(null); }}
+        product={stockProduct}
+        onConfirm={handleAjustarStock}
+        saving={savingStock}
+      />
     </div >
   );
 }
