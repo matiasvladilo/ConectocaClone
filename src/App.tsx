@@ -140,26 +140,38 @@ export interface User {
   address?: string;
 }
 
+type Pantalla =
+  | "login"
+  | "home"
+  | "orderDetail"
+  | "production"
+  | "productionDashboard"
+  | "productionOrders"
+  | "dispatch"
+  | "profile"
+  | "newOrder"
+  | "analytics"
+  | "history"
+  | "products"
+  | "categories"
+  | "productionAreas"
+  | "ingredients"
+  | "productIngredients"
+  | "bakeryKds";
+
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<
-    | "login"
-    | "home"
-    | "orderDetail"
-    | "production"
-    | "productionDashboard"
-    | "productionOrders"
-    | "dispatch"
-    | "profile"
-    | "newOrder"
-    | "analytics"
-    | "history"
-    | "products"
-    | "categories"
-    | "productionAreas"
-    | "ingredients"
-    | "productIngredients"
-    | "bakeryKds"
-  >("login");
+  const [currentScreen, setCurrentScreen] = useState<Pantalla>("login");
+
+  // Desde dónde se entró a Materias Primas / Recetas. Esas dos pantallas se
+  // pueden abrir desde Perfil, Órdenes de Producción o el Dashboard de
+  // Producción, así que el botón "volver" no puede tener un destino fijo:
+  // tiene que devolver al lugar del que vino el usuario.
+  const [pantallaAnterior, setPantallaAnterior] = useState<Pantalla>("home");
+
+  const irAPantalla = (destino: Pantalla) => {
+    setPantallaAnterior(currentScreen);
+    setCurrentScreen(destino);
+  };
 
   // Debug: Log screen changes
   useEffect(() => {
@@ -1712,12 +1724,12 @@ export default function App() {
           }
           onManageIngredients={
             currentUser.role === "admin" || currentUser.role === "production"
-              ? () => setCurrentScreen("ingredients")
+              ? () => irAPantalla("ingredients")
               : undefined
           }
           onManageProductIngredients={
             currentUser.role === "admin" || currentUser.role === "production"
-              ? () => setCurrentScreen("productIngredients")
+              ? () => irAPantalla("productIngredients")
               : undefined
           }
           accessToken={accessToken || undefined}
@@ -1761,7 +1773,7 @@ export default function App() {
               setCurrentScreen("categories")
             }
             onManageRecipe={() =>
-              setCurrentScreen("productIngredients")
+              irAPantalla("productIngredients")
             }
           />
         )}
@@ -1792,14 +1804,9 @@ export default function App() {
         accessToken && (
           <IngredientManagement
             accessToken={accessToken}
-            onBack={() => {
-              // Navegación diferenciada por rol
-              if (currentUser.role === "production") {
-                setCurrentScreen("productionOrders");
-              } else {
-                setCurrentScreen("profile");
-              }
-            }}
+            // Vuelve a donde el usuario estaba antes de entrar (Perfil, Órdenes
+            // de Producción o Dashboard de Producción), no a un destino fijo.
+            onBack={() => setCurrentScreen(pantallaAnterior)}
           />
         )}
 
@@ -1809,14 +1816,9 @@ export default function App() {
         accessToken && (
           <ProductIngredientConfig
             accessToken={accessToken}
-            onBack={() => {
-              // Navegación diferenciada por rol
-              if (currentUser.role === "production") {
-                setCurrentScreen("productionOrders");
-              } else {
-                setCurrentScreen("profile");
-              }
-            }}
+            // Igual que Materias Primas: vuelve al origen real, que además puede
+            // ser Gestión de Productos cuando se entra por "Configurar receta".
+            onBack={() => setCurrentScreen(pantallaAnterior)}
           />
         )}
 
@@ -1847,8 +1849,8 @@ export default function App() {
             accessToken={accessToken}
             userName={currentUser.name}
             userRole={currentUser.role}
-            onNavigateToIngredients={() => setCurrentScreen("ingredients")}
-            onNavigateToRecipes={() => setCurrentScreen("productIngredients")}
+            onNavigateToIngredients={() => irAPantalla("ingredients")}
+            onNavigateToRecipes={() => irAPantalla("productIngredients")}
           />
         )}
 
@@ -1861,8 +1863,8 @@ export default function App() {
             accessToken={accessToken}
             userName={currentUser.name}
             onNavigateToOrders={() => setCurrentScreen("productionOrders")}
-            onNavigateToIngredients={() => setCurrentScreen("ingredients")}
-            onNavigateToRecipes={() => setCurrentScreen("productIngredients")}
+            onNavigateToIngredients={() => irAPantalla("ingredients")}
+            onNavigateToRecipes={() => irAPantalla("productIngredients")}
           />
         )}
 
