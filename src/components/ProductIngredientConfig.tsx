@@ -27,9 +27,13 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
   const [loadingIngredients, setLoadingIngredients] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  // La cantidad se guarda como TEXTO, no como número. Un estado numérico no puede
+  // representar "campo vacío": obliga a dibujar un 0 que el usuario no puede borrar,
+  // y al escribir al lado queda "05" —o peor, "50"— guardando un valor equivocado.
+  // Es el mismo patrón que ya usan precio y stock en Gestión de Productos.
   const [newIngredient, setNewIngredient] = useState({
     ingredientId: "",
-    quantity: 0,
+    quantity: "",
   });
   const [inputUnit, setInputUnit] = useState<string>("");
   const [laborCost, setLaborCost] = useState<string>("");
@@ -114,14 +118,15 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
 
   const handleAddIngredient = async () => {
     if (saving) return;
-    if (!selectedProduct || !newIngredient.ingredientId || newIngredient.quantity <= 0) {
+    const cantidad = parseFloat(newIngredient.quantity);
+    if (!selectedProduct || !newIngredient.ingredientId || !Number.isFinite(cantidad) || cantidad <= 0) {
       toast.error("Complete todos los campos");
       return;
     }
 
     try {
       setSaving(true);
-      let quantityToSave = newIngredient.quantity;
+      let quantityToSave = cantidad;
       if (inputUnit === 'g' || inputUnit === 'ml') {
         quantityToSave = quantityToSave / 1000;
       }
@@ -135,7 +140,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
 
       toast.success("Ingrediente agregado al producto");
       setShowAddForm(false);
-      setNewIngredient({ ingredientId: "", quantity: 0 });
+      setNewIngredient({ ingredientId: "", quantity: "" });
       setInputUnit("");
       loadProductIngredients(selectedProduct.id);
     } catch (error: any) {
@@ -462,7 +467,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                                       type="number"
                                       step="0.01"
                                       value={newIngredient.quantity}
-                                      onChange={(e) => setNewIngredient({ ...newIngredient, quantity: parseFloat(e.target.value) || 0 })}
+                                      onChange={(e) => setNewIngredient({ ...newIngredient, quantity: e.target.value })}
                                       className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                       placeholder="0.00"
                                     />
@@ -524,7 +529,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                                     variant="outline"
                                     onClick={() => {
                                       setShowAddForm(false);
-                                      setNewIngredient({ ingredientId: "", quantity: 0 });
+                                      setNewIngredient({ ingredientId: "", quantity: "" });
                                       setInputUnit("");
                                     }}
                                     className="flex-1"
