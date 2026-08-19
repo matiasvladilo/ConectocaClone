@@ -59,6 +59,7 @@ interface ProductFormData {
   description: string;
   price: string;
   stock: string;
+  minStock: string;
   category: string;
   categoryId: string;
   sku: string;
@@ -74,6 +75,7 @@ const emptyForm: ProductFormData = {
   description: '',
   price: '',
   stock: '',
+  minStock: '',
   category: 'General',
   categoryId: '',
   sku: '',
@@ -194,6 +196,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         description: product.description || '',
         price: formatCLP(product.price, false),
         stock: product.stock.toString(),
+        minStock: product.minStock !== undefined ? product.minStock.toString() : '',
         category: product.category || 'General',
         categoryId: product.categoryId || '',
         sku: product.sku || '',
@@ -246,6 +249,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         description: formData.description.trim(),
         price: priceValue,
         stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0),
+        minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
         unlimitedStock: formData.unlimitedStock,
         trackStock: !formData.unlimitedStock,
         allowDecimal: formData.allowDecimal,
@@ -944,6 +948,22 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                     disabled={formData.unlimitedStock}
                   />
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="min-stock">Stock mínimo</Label>
+                <Input
+                  id="min-stock"
+                  type="number"
+                  min="0"
+                  value={formData.minStock}
+                  onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                  placeholder="Ej: 10"
+                  disabled={formData.unlimitedStock}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Cuando el stock llegue a este número, el panel de Distribuidora lo marca como bajo. Si lo dejás vacío se usa 10.
+                </p>
               </div>
 
               {/* Unlimited Stock Checkbox */}

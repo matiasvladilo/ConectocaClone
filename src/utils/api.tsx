@@ -45,6 +45,7 @@ export interface Product {
   image?: string;
   imageUrl?: string;
   stock: number;
+  minStock?: number; // Umbral de "stock bajo" por SKU. undefined = usar el default del panel.
   unlimitedStock?: boolean; // New: If true, stock is not controlled
   trackStock?: boolean; // Legacy: If false, stock is not controlled
   category?: string;

@@ -85,6 +85,7 @@ function toProduct(r: any) {
     image: r.image_url || '',
     imageUrl: r.image_url || '',
     stock: r.stock,
+    minStock: r.min_stock != null ? Number(r.min_stock) : undefined,
     unlimitedStock: r.unlimited_stock,
     trackStock: r.track_stock,
     allowDecimal: r.allow_decimal || false,
@@ -710,7 +711,7 @@ app.post("/make-server-6d979413/products", async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const body = await c.req.json();
-    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku } = body;
+    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku, minStock } = body;
 
     if (!name || price === undefined || price === null) {
       return c.json({ error: 'Nombre y precio son requeridos' }, 400);
@@ -730,6 +731,7 @@ app.post("/make-server-6d979413/products", async (c) => {
         price: parseFloat(price),
         image_url: imageUrl || image || '',
         stock: isUnlimited ? 0 : (stock !== undefined ? parseInt(stock) : 100),
+        min_stock: minStock !== undefined && minStock !== null && minStock !== '' ? Number(minStock) : null,
         unlimited_stock: isUnlimited,
         track_stock: !isUnlimited,
         allow_decimal: allowDecimal === true,
@@ -803,7 +805,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock } = updates;
 
     let skuNorm: string | undefined;
     if (sku !== undefined) {
@@ -838,6 +840,11 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (trackStock !== undefined) updateData.track_stock = trackStock;
     if (allowDecimal !== undefined) updateData.allow_decimal = allowDecimal === true;
     if (laborCost !== undefined) updateData.labor_cost = Number(laborCost) || 0;
+    // '' se guarda como null (sin umbral), no como 0: un umbral de 0 significaría
+    // "avisame solo cuando esté agotado", que es una intención distinta a "no lo configuré".
+    if (minStock !== undefined) {
+      updateData.min_stock = minStock === null || minStock === '' ? null : Number(minStock);
+    }
     if (skuNorm !== undefined) updateData.sku = skuNorm || null;
 
     const { data: updated, error: updateErr } = await supabaseAdmin
