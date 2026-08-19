@@ -123,3 +123,5 @@ build/
 
 # Supabase CLI temp files
 supabase/.temp/
+# Superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/
