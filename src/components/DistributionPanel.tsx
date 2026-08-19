@@ -56,6 +56,34 @@ const ETIQUETA_MOVIMIENTO: Record<StockEvent['type'], string> = {
   reposicion: 'Llegó mercadería',
   merma: 'Merma',
   ajuste: 'Corrección de conteo',
+  devolucion: 'Devolución por pedido borrado',
+};
+
+/**
+ * Cómo se dibuja cada tipo de movimiento en el drawer.
+ *
+ * 'ajuste' es el caso raro: `quantity` en la base es siempre positiva y el signo
+ * lo da el tipo, pero una corrección de conteo puede haber sido para arriba o
+ * para abajo — y ese dato NO existe en la tabla. Antes se mostraba el número sin
+ * signo, que se lee como si fuera un alta. La salida honesta es no fingir un
+ * signo y decir explícitamente que el número es la magnitud de la corrección,
+ * apoyándose en el stock resultante (que sí es un dato real) para saber en qué
+ * quedó el producto.
+ */
+const SIGNO_MOVIMIENTO: Record<StockEvent['type'], '+' | '−' | ''> = {
+  despacho: '−',
+  merma: '−',
+  reposicion: '+',
+  devolucion: '+',
+  ajuste: '',
+};
+
+const COLOR_MOVIMIENTO: Record<StockEvent['type'], string> = {
+  despacho: 'text-red-600',
+  merma: 'text-red-600',
+  reposicion: 'text-green-600',
+  devolucion: 'text-green-600',
+  ajuste: 'text-gray-600',
 };
 
 export function DistributionPanel({ onBack, accessToken }: DistributionPanelProps) {
@@ -66,14 +94,21 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoStock>('todos');
 
+  // Un error de carga NO puede caer en el empty-state: "no hay productos que
+  // controlen stock" se lee como "no hay nada que reponer", que es exactamente
+  // la conclusión opuesta a la verdadera cuando la consulta falló.
+  const [errorCarga, setErrorCarga] = useState(false);
+
   const [productoMovimientos, setProductoMovimientos] = useState<Product | null>(null);
   const [movimientos, setMovimientos] = useState<StockEvent[]>([]);
   const [cargandoMovimientos, setCargandoMovimientos] = useState(false);
+  const [errorMovimientos, setErrorMovimientos] = useState(false);
 
   useEffect(() => {
     const cargar = async () => {
       try {
         setLoading(true);
+        setErrorCarga(false);
         const [respProductos, respCategorias] = await Promise.all([
           productsAPI.getAll(accessToken),
           categoriesAPI.getAll(accessToken),
@@ -92,6 +127,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
         setCategoriaId(sigueExistiendo ? guardada! : elegirCategoriaInicial(respCategorias));
       } catch (error: any) {
         console.error('Error cargando el panel de distribución:', error);
+        setErrorCarga(true);
         toast.error('Error al cargar el panel');
       } finally {
         setLoading(false);
@@ -140,11 +176,13 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   const abrirMovimientos = async (producto: Product) => {
     setProductoMovimientos(producto);
     setMovimientos([]);
+    setErrorMovimientos(false);
     try {
       setCargandoMovimientos(true);
       setMovimientos(await stockEventsAPI.getByProduct(accessToken, producto.id));
     } catch (error: any) {
       console.error('Error cargando movimientos:', error);
+      setErrorMovimientos(true);
       toast.error('Error al cargar los movimientos');
     } finally {
       setCargandoMovimientos(false);
@@ -164,6 +202,9 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
           </div>
         </div>
 
+        {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
+            "—" en vez de 0. Un "0 agotados" con los datos rotos se lee como
+            "está todo bien", que es la conclusión más cara de equivocar acá. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="border-l-4 border-l-red-500 shadow-md">
             <CardHeader className="pb-3">
@@ -173,7 +214,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-semibold text-red-600">{stats.agotados}</div>
+              <div className="text-3xl font-semibold text-red-600">{errorCarga ? '—' : stats.agotados}</div>
             </CardContent>
           </Card>
 
@@ -185,7 +226,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-semibold text-amber-600">{stats.bajos}</div>
+              <div className="text-3xl font-semibold text-amber-600">{errorCarga ? '—' : stats.bajos}</div>
             </CardContent>
           </Card>
 
@@ -197,7 +238,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-semibold text-gray-900">{stats.total}</div>
+              <div className="text-3xl font-semibold text-gray-900">{errorCarga ? '—' : stats.total}</div>
             </CardContent>
           </Card>
 
@@ -206,7 +247,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               <CardDescription className="text-gray-600">Valor del inventario</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-semibold text-green-600">{formatCLP(stats.valor)}</div>
+              <div className="text-2xl font-semibold text-green-600">{errorCarga ? '—' : formatCLP(stats.valor)}</div>
             </CardContent>
           </Card>
         </div>
@@ -250,6 +291,12 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
           <CardContent className="p-0">
             {loading ? (
               <div className="p-4 text-sm text-gray-500">Cargando…</div>
+            ) : errorCarga ? (
+              <div className="p-4 text-sm text-red-600">
+                No se pudieron cargar los productos. Esta lista está vacía porque falló la
+                consulta, no porque no haya stock que reponer. Recargá la página para
+                reintentar.
+              </div>
             ) : filas.length === 0 ? (
               <div className="p-4 text-sm text-gray-500">
                 No hay productos que controlen stock en esta categoría.
@@ -320,6 +367,15 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
 
           {cargandoMovimientos ? (
             <div className="text-sm text-gray-500">Cargando…</div>
+          ) : errorMovimientos ? (
+            // Explícitamente distinto del empty-state: "todavía no hay
+            // movimientos" cuando en realidad la consulta falló haría pasar un
+            // kardex roto por un kardex vacío, y nadie lo investigaría.
+            <div className="text-sm text-red-600">
+              No se pudieron cargar los movimientos. Esto es un error de consulta, no
+              quiere decir que el producto no tenga movimientos. Cerrá y volvé a abrir
+              para reintentar.
+            </div>
           ) : movimientos.length === 0 ? (
             <div className="text-sm text-gray-500">
               Todavía no hay movimientos registrados para este producto.
@@ -332,14 +388,29 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
                     <div className="text-sm text-gray-900">{ETIQUETA_MOVIMIENTO[m.type]}</div>
                     <div className="text-xs text-gray-500">{formatDateCL(m.createdAt)}</div>
                   </div>
-                  <div className="text-right">
-                    <div className={`font-mono ${m.type === 'reposicion' ? 'text-green-600' : m.type === 'ajuste' ? 'text-gray-600' : 'text-red-600'}`}>
-                      {m.type === 'reposicion' ? '+' : m.type === 'ajuste' ? '' : '−'}{m.quantity}
+                  {m.type === 'ajuste' ? (
+                    // En un ajuste el signo no está en los datos (quantity es
+                    // siempre positiva y la tabla no guarda la dirección), así
+                    // que se muestra al frente el stock resultante —que sí es un
+                    // dato real— y la magnitud queda abajo, aclarada como tal.
+                    <div className="text-right">
+                      <div className="font-mono text-gray-900">
+                        {m.stockAfter !== undefined ? `quedó en ${m.stockAfter}` : `corrección de ${m.quantity}`}
+                      </div>
+                      {m.stockAfter !== undefined && (
+                        <div className="text-xs text-gray-500">corrección de {m.quantity}</div>
+                      )}
                     </div>
-                    {m.stockAfter !== undefined && (
-                      <div className="text-xs text-gray-500">queda {m.stockAfter}</div>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="text-right">
+                      <div className={`font-mono ${COLOR_MOVIMIENTO[m.type]}`}>
+                        {SIGNO_MOVIMIENTO[m.type]}{m.quantity}
+                      </div>
+                      {m.stockAfter !== undefined && (
+                        <div className="text-xs text-gray-500">queda {m.stockAfter}</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
