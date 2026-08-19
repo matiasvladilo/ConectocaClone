@@ -1287,8 +1287,134 @@ Con las 3 migraciones aplicadas y el Edge Function redesplegado:
 6. **Stock mínimo** → editar un producto, poner mínimo en 50, guardar.
    Esperado: si su stock es menor a 50, el panel lo marca como "Bajo".
 
+## Invariante del kardex
+
+**Toda escritura a `products.stock` tiene que registrar un evento en `stock_events`.**
+
+Es la regla central de la feature y no hay ningún test que la haga cumplir (el proyecto
+no tiene framework de tests). Si un camino cambia el stock sin registrar, el kardex se ve
+completo sin estarlo, y eso **no se puede detectar ni reconstruir después**: el valor
+anterior de `products.stock` ya se sobrescribió.
+
+En la práctica la regla se aplica así:
+
+- **En el Edge Function**: todo pasa por el helper `registrarStockEvent(...)`
+  (`supabase/functions/make-server-6d979413/index.ts`, cerca de los mappers `toXxx`).
+  Es un único punto de entrada a propósito: la primera versión tenía el INSERT inline en
+  `PUT /products/:id` y por eso los otros tres caminos que mueven stock se olvidaron de
+  registrar. **Si agregás un `update({ stock: ... })` nuevo, agregá la llamada al helper
+  en la misma línea de código, no después.**
+- **Única excepción legítima**: la RPC `create_order_with_stock`, que hace su propio
+  INSERT dentro de la **misma transacción** que el descuento. Ahí el ledger no puede
+  quedar desincronizado del saldo ni aunque falle algo, que es más fuerte que lo que
+  logra el helper.
+
+Caminos cubiertos hoy y con qué tipo:
+
+| Camino | Tipo registrado |
+|---|---|
+| `PUT /products/:id` (ajuste manual, modo "sumar" con delta > 0) | `reposicion` |
+| `PUT /products/:id` (ajuste manual, modo "sumar" con delta < 0) | `merma` |
+| `PUT /products/:id` (modo "corregir total", o sin `modo`) | `ajuste` |
+| RPC `create_order_with_stock` (pedido nuevo) | `despacho` |
+| `POST /orders` (ruta legacy) | `despacho` |
+| `DELETE /orders/:id` (restaura el stock de cada ítem) | `devolucion` |
+| `PATCH /production-orders/:id/status` → `TERMINADA` | `reposicion` |
+
+`devolucion` es el tipo agregado por `20260819_stock_events_add_devolucion.sql`. La
+producción terminada se mapea a `reposicion` y no a un tipo propio porque es stock que
+entra, y porque la Distribuidora **solo compra** — no usa órdenes de producción, así que
+ese camino no afecta a sus productos; se cubre igual para que el kardex no mienta sobre
+los productos de panadería/pastelería.
+
+## Procedimiento de aplicación
+
+El orden importa: hay dependencias entre pasos que, si se invierten, van de "un endpoint
+devuelve 500" a "todo pedido nuevo falla". Aplicar en este orden exacto.
+
+### 0. Chequeos pre-vuelo (SQL editor, antes de aplicar nada)
+
+```sql
+-- (a) Productos sin business_id. Si da > 0 hay que backfillear ANTES:
+--     el INSERT al kardex tiene business_id NOT NULL, y como corre en la misma
+--     transacción que el descuento, aborta la creación de pedidos de esos productos.
+SELECT count(*) FROM products WHERE business_id IS NULL;
+```
+
+```sql
+-- (b) Ownership de la RPC vs. de la tabla del kardex.
+--     SECURITY DEFINER NO bypassea RLS: corre con los privilegios del OWNER de la
+--     función. Lo que evita RLS es que ese owner sea también el owner de la tabla
+--     (sin FORCE ROW LEVEL SECURITY) o que tenga BYPASSRLS.
+--     Si fn_owner <> tbl_owner, el INSERT de la RPC puede fallar y —por la atomicidad
+--     de esa función— tumbar la creación de pedidos entera.
+SELECT p.proowner::regrole AS fn_owner, c.relowner::regrole AS tbl_owner, c.relrowsecurity, c.relforcerowsecurity
+  FROM pg_proc p, pg_class c
+ WHERE p.proname = 'create_order_with_stock' AND c.relname = 'stock_events';
+```
+
+```sql
+-- (c) create_order_kv tiene que existir con esa firma: la RPC la invoca.
+SELECT proname, pg_get_function_identity_arguments(oid) FROM pg_proc WHERE proname = 'create_order_kv';
+```
+
+### 1. Migraciones (PRIMERO, todas, en este orden)
+
+1. `supabase/migrations/20260819_add_product_min_stock.sql`
+2. `supabase/migrations/20260819_create_stock_events.sql`
+3. `supabase/migrations/20260819_stock_events_add_devolucion.sql`
+4. `supabase/migrations/20260819_stock_events_on_order.sql`
+
+**`create_stock_events` tiene que ir antes que `stock_events_on_order`.** No es
+cosmético: `CREATE OR REPLACE FUNCTION` **no valida que las tablas del cuerpo existan**
+al momento de crearla. Si se aplica al revés, la migración "se aplica bien" sin un solo
+error visible y después **todo pedido nuevo falla en runtime** al llegar al INSERT.
+
+`stock_events_add_devolucion` puede ir antes o después de `stock_events_on_order` (son
+independientes), pero siempre después de `create_stock_events`, que es la que crea la
+tabla y el CHECK que reemplaza.
+
+### 2. Deploy del Edge Function (DESPUÉS de las migraciones)
+
+**Nunca antes.** Si el Edge Function se despliega antes de aplicar
+`20260819_add_product_min_stock.sql`, crear y editar productos devuelve **500**: el
+backend escribe `min_stock`, una columna que todavía no existiría.
+
+El orden inverso (migraciones aplicadas, Edge viejo todavía corriendo) es inofensivo: las
+columnas y la tabla nuevas simplemente no se usan hasta que se despliega.
+
+### 3. Rollback
+
+- **Edge Function**: redesplegar la versión anterior.
+- **RPC `create_order_with_stock`**: la versión previa exacta es
+  `supabase/migrations/20260629_create_order_with_stock.sql`. Reaplicarla revierte el
+  `CREATE OR REPLACE` (deja de escribir el kardex y vuelve a descontar stock a secas).
+- **`stock_events` / `min_stock`**: no hace falta revertirlas. Una tabla y una columna
+  sin usar no molestan a nadie, y dropearlas perdería el histórico ya acumulado.
+
 ## Riesgos conocidos
 
-- **`create_order_kv` no está versionada en este repo.** La Task 5 hace `CREATE OR REPLACE` de `create_order_with_stock`, que la invoca. Si esa función no existe con esa firma exacta en Supabase, la creación de pedidos se rompe. Verificar en el SQL editor **antes** de aplicar la migración.
+- **El orden de aplicación no es opcional.** Ver "Procedimiento de aplicación": el peor
+  caso de invertirlo es una caída total de la creación de pedidos, y en el caso de las
+  migraciones **sin ningún error visible al aplicar**.
+- **`create_order_kv` no está versionada en este repo.** La Task 5 hace `CREATE OR REPLACE` de `create_order_with_stock`, que la invoca. Si esa función no existe con esa firma exacta en Supabase, la creación de pedidos se rompe. Verificar en el SQL editor **antes** de aplicar la migración (chequeo pre-vuelo (c)).
+- **El acceso de la RPC al kardex depende del ownership, no del `SECURITY DEFINER`.** Ver chequeo pre-vuelo (b). Si el owner de la función no coincide con el de `stock_events`, el INSERT falla y arrastra la creación del pedido.
 - **Los eventos empiezan en cero.** Ningún movimiento anterior a la fecha de aplicación se puede reconstruir: el histórico de stock arranca el día que se aplica la Task 1.
 - **La categoría se detecta por nombre.** Si la categoría "Distribuidora" se renombra, el panel cae en "Todas las categorías" y el admin la vuelve a elegir a mano (la elección queda guardada). Es intencional: la app es multi-tenant y ningún id fijo sirve para todos los negocios.
+
+## Limitaciones conocidas (documentadas a propósito, NO se arreglan ahora)
+
+- **Ajustes concurrentes se pisan.** `PUT /products/:id` lee el stock actual y escribe un
+  valor absoluto calculado en el cliente, sin lock ni update condicional. Dos ajustes
+  simultáneos sobre el mismo producto pierden uno, y el kardex queda con dos eventos que
+  no cierran contra el saldo final. Es aceptable hoy porque el flujo real es un admin
+  ajustando de a un producto por vez; si en algún momento hay varios usuarios ajustando
+  en paralelo, hay que mover el ajuste a una RPC con `SELECT ... FOR UPDATE`, como ya hace
+  `create_order_with_stock`.
+  (Contraste: la RPC **sí** es segura, porque toma `FOR UPDATE` sobre la fila.)
+- **`EditOrderDialog` clasifica de más.** Mueve stock por cambios de cantidad de un pedido
+  llamando a `PUT /products/:id` **sin `modo`**, así que todo queda registrado como
+  `ajuste`. Es consumo o devolución real clasificado de forma imprecisa: **no deja huecos**
+  en el kardex (el movimiento se registra), pero mete ruido en la señal de demanda, que es
+  justo lo que la feature quiere medir. Arreglarlo requiere que ese diálogo mande el tipo
+  correcto (`despacho` / `devolucion`) o que el ajuste pase por el flujo de pedidos.
