@@ -35,7 +35,7 @@ import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { ImageUpload } from './ImageUpload';
-import { StockAdjustDialog } from './StockAdjustDialog';
+import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -335,14 +335,16 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
-  const handleAjustarStock = async (nuevoStock: number) => {
+  const handleAjustarStock = async (nuevoStock: number, modo: ModoAjuste) => {
     if (!stockProduct) return;
     try {
       setSavingStock(true);
-      // Se manda SOLO el stock: el backend actualiza únicamente los campos
-      // presentes, así que la receta y el resto del producto quedan intactos
-      // (y no se dispara el chequeo de permisos de recetas).
-      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock });
+      // Se manda SOLO el stock + el modo: el backend actualiza únicamente los
+      // campos presentes, así que la receta y el resto del producto quedan
+      // intactos (y no se dispara el chequeo de permisos de recetas).
+      // El `modo` no modifica el producto: le dice al backend si esto fue una
+      // reposición, una merma o una corrección de conteo.
+      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock, modo });
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
       toast.success(`Stock de "${actualizado.name}" actualizado a ${nuevoStock}`);
       setStockProduct(null);

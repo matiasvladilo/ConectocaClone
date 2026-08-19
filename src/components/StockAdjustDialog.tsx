@@ -6,13 +6,15 @@ import { Label } from './ui/label';
 import { BoxIcon } from 'lucide-react';
 import type { Product } from '../utils/api';
 
-type Modo = 'sumar' | 'total';
+// Se exporta porque el backend necesita saber con qué modo se hizo el ajuste
+// para clasificar el movimiento en el kardex (reposición vs corrección).
+export type ModoAjuste = 'sumar' | 'total';
 
 interface StockAdjustDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   product: Product | null;
-  onConfirm: (nuevoStock: number) => Promise<void>;
+  onConfirm: (nuevoStock: number, modo: ModoAjuste) => Promise<void>;
   saving?: boolean;
 }
 
@@ -23,7 +25,7 @@ export function StockAdjustDialog({
   onConfirm,
   saving = false,
 }: StockAdjustDialogProps) {
-  const [modo, setModo] = useState<Modo>('sumar');
+  const [modo, setModo] = useState<ModoAjuste>('sumar');
   const [valor, setValor] = useState('');
 
   const stockActual = product?.stock ?? 0;
@@ -46,7 +48,7 @@ export function StockAdjustDialog({
 
   const handleConfirmar = async () => {
     if (!puedeConfirmar || nuevoStock === null) return;
-    await onConfirm(nuevoStock);
+    await onConfirm(nuevoStock, modo);
   };
 
   // No se puede cerrar mientras guarda, para no perder la operación a mitad.
