@@ -825,7 +825,10 @@ export interface StockEvent {
   id: string;
   productId: string;
   productName: string;
-  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste';
+  // 'devolucion' = stock que volvió porque se borró un pedido. Es una entrada,
+  // igual que 'reposicion', pero se distingue para no inflar la señal de
+  // reposiciones reales.
+  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
   quantity: number;   // siempre positiva: el signo lo da el `type`
   stockAfter?: number;
   orderId?: string;

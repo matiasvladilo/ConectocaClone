@@ -155,6 +155,52 @@ function toStockEvent(r: any) {
   };
 }
 
+/**
+ * Único punto de entrada para escribir en el kardex desde el Edge Function.
+ *
+ * INVARIANTE DE LA FEATURE: toda escritura a `products.stock` tiene que pasar
+ * por acá. Antes este INSERT estaba inline en PUT /products/:id y por eso los
+ * otros tres caminos que mueven stock (borrado de pedido, orden de producción
+ * terminada y la ruta legacy POST /orders) se olvidaron de registrar: el kardex
+ * se veía completo sin estarlo, y eso después no se puede detectar ni
+ * reconstruir. La única excepción legítima es la RPC create_order_with_stock,
+ * que hace su propio INSERT dentro de la misma transacción que el descuento.
+ *
+ * Dos criterios deliberados:
+ *  - `quantity <= 0` se ignora en silencio: no es un movimiento real y además
+ *    violaría el CHECK (quantity > 0) de la tabla.
+ *  - Un error del INSERT se loguea pero NO se lanza: el evento es historia, no
+ *    parte de la operación. Un kardex incompleto es malo, pero tumbar el ajuste
+ *    de stock del usuario es peor.
+ */
+async function registrarStockEvent(params: {
+  businessId: string;
+  productId: string;
+  productName: string;
+  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
+  quantity: number;      // siempre positiva; el signo lo da el type
+  stockAfter: number;
+  createdBy?: string | null;
+  orderId?: string | null;
+}): Promise<void> {
+  if (!(params.quantity > 0)) return;
+
+  const { error } = await supabaseAdmin.from('stock_events').insert({
+    business_id: params.businessId,
+    product_id: params.productId,
+    product_name: params.productName,
+    type: params.type,
+    quantity: params.quantity,
+    stock_after: params.stockAfter,
+    order_id: params.orderId ?? null,
+    created_by: params.createdBy ?? null,
+  });
+
+  if (error) {
+    console.error('Error registrando stock_event:', error);
+  }
+}
+
 function toOrderItem(r: any) {
   return {
     id: r.id,
@@ -909,22 +955,18 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
           ? (delta > 0 ? 'reposicion' : 'merma')
           : 'ajuste';
 
-        const { error: eventoErr } = await supabaseAdmin.from('stock_events').insert({
-          business_id: profile.businessId,
-          product_id: productId,
-          product_name: updated.name,
+        // registrarStockEvent no lanza si el INSERT falla: solo loguea. El
+        // evento es historia, no parte de la operación, así que un kardex
+        // incompleto es mejor que un ajuste de stock que no se guarda.
+        await registrarStockEvent({
+          businessId: profile.businessId,
+          productId,
+          productName: updated.name,
           type: tipo,
           quantity: Math.abs(delta),
-          stock_after: stockNuevo,
-          created_by: userId,
+          stockAfter: stockNuevo,
+          createdBy: userId,
         });
-
-        // El evento es historia, no parte de la operación: si falla, se loguea
-        // pero NO se le devuelve error al usuario ni se revierte el stock. Un
-        // kardex incompleto es mejor que un ajuste de stock que no se guarda.
-        if (eventoErr) {
-          console.error('Error registrando stock_event:', eventoErr);
-        }
       }
     }
 
@@ -1198,17 +1240,31 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
     if (profile.role !== 'admin') return c.json({ error: 'No autorizado' }, 403);
 
     // El tope duro evita que un limit gigante en la query traiga la tabla entera.
-    const limit = Math.min(parseInt(c.req.query('limit') || '50'), 200);
+    // Number.isFinite atrapa el `limit=abc`: sin esto parseInt devuelve NaN,
+    // Math.min(NaN, 200) es NaN y la query sale rota.
+    const limitCrudo = parseInt(c.req.query('limit') || '50');
+    const limit = Number.isFinite(limitCrudo) && limitCrudo > 0
+      ? Math.min(limitCrudo, 200)
+      : 50;
 
     // El filtro por business_id no es redundante con el product_id: evita que
     // un id de otro negocio devuelva datos si se lo pasan a mano.
-    const { data } = await supabaseAdmin
+    const { data, error: queryErr } = await supabaseAdmin
       .from('stock_events')
       .select('*')
       .eq('business_id', profile.businessId)
       .eq('product_id', productId)
       .order('created_at', { ascending: false })
       .limit(limit);
+
+    // Se chequea el error explícitamente: si la tabla no existe o RLS bloquea,
+    // `data` viene null y devolver 200 con [] haría que la UI diga "todavía no
+    // hay movimientos". Ese es el peor mensaje posible acá, porque enmascara un
+    // kardex roto como "todavía no hay datos" y nadie lo va a investigar.
+    if (queryErr) {
+      console.error('Error consultando stock_events:', queryErr);
+      return c.json({ error: 'Error al obtener movimientos' }, 500);
+    }
 
     return c.json({ data: (data || []).map(toStockEvent) });
   } catch (err: any) {
@@ -1395,10 +1451,27 @@ app.post("/make-server-6d979413/orders", async (c) => {
       }
 
       if (!isUnlimited) {
+        const stockNuevo = product.stock - item.quantity;
         await supabaseAdmin
           .from('products')
-          .update({ stock: product.stock - item.quantity })
+          .update({ stock: stockNuevo })
           .eq('id', item.productId);
+
+        // Mismo tipo que usa la RPC create_order_with_stock: es exactamente el
+        // mismo hecho (salida por pedido de un local).
+        // orderId va null a propósito: el pedido todavía no existe (se crea más
+        // abajo). Registrar acá y no después es deliberado: si la creación del
+        // pedido falla, el stock ya se descontó igual, y un evento sin order_id
+        // es mucho mejor que un descuento invisible.
+        await registrarStockEvent({
+          businessId: profile.businessId,
+          productId: product.id,
+          productName: product.name,
+          type: 'despacho',
+          quantity: item.quantity,
+          stockAfter: stockNuevo,
+          createdBy: userId,
+        });
       }
     }
 
@@ -1675,19 +1748,35 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
     // Restore stock for each item
     for (const item of (order.order_items || [])) {
       if (!item.product_id) continue;
+      // name y business_id se traen para poder registrar el evento del kardex.
       const { data: product } = await supabaseAdmin
         .from('products')
-        .select('id, stock, unlimited_stock, track_stock')
+        .select('id, name, business_id, stock, unlimited_stock, track_stock')
         .eq('id', item.product_id)
         .maybeSingle();
 
       if (product) {
         const isUnlimited = product.unlimited_stock === true || product.track_stock === false;
         if (!isUnlimited) {
+          const stockNuevo = product.stock + item.quantity;
           await supabaseAdmin
             .from('products')
-            .update({ stock: product.stock + item.quantity })
+            .update({ stock: stockNuevo })
             .eq('id', item.product_id);
+
+          // Sin este evento el kardex mentía de la peor forma: el 'despacho'
+          // original quedaba registrado y el stock volvía sin dejar rastro, así
+          // que la demanda del producto se veía más alta de lo que fue.
+          await registrarStockEvent({
+            businessId: product.business_id,
+            productId: product.id,
+            productName: product.name,
+            type: 'devolucion',
+            quantity: item.quantity,
+            stockAfter: stockNuevo,
+            createdBy: userId,
+            orderId,
+          });
         }
       }
     }
@@ -2877,18 +2966,35 @@ app.patch('/make-server-6d979413/production-orders/:orderId/status', async (c) =
     // If completing: add produced quantities to product stock
     if (status === 'TERMINADA' && productionOrder.status !== 'TERMINADA') {
       for (const item of updatedProducts) {
+        // name y business_id se traen para poder registrar el evento del kardex.
         const { data: product } = await supabaseAdmin
           .from('products')
-          .select('id, stock')
+          .select('id, name, business_id, stock')
           .eq('id', item.productId)
           .maybeSingle();
 
         if (product) {
           const qtyToAdd = item.producedQuantity !== undefined ? item.producedQuantity : item.quantity;
+          const stockNuevo = (product.stock || 0) + qtyToAdd;
           await supabaseAdmin
             .from('products')
-            .update({ stock: (product.stock || 0) + qtyToAdd })
+            .update({ stock: stockNuevo })
             .eq('id', item.productId);
+
+          // Se registra como 'reposicion' y no como un tipo nuevo: es stock que
+          // entra, igual que la mercadería que llega de un proveedor. La
+          // Distribuidora no usa órdenes de producción (solo compra), así que
+          // este camino no afecta sus productos; se tapa igual para que el
+          // kardex no mienta sobre los productos de panadería/pastelería.
+          await registrarStockEvent({
+            businessId: product.business_id,
+            productId: product.id,
+            productName: product.name,
+            type: 'reposicion',
+            quantity: qtyToAdd,
+            stockAfter: stockNuevo,
+            createdBy: userId,
+          });
         }
       }
     }
