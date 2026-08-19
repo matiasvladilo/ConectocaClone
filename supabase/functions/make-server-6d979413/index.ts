@@ -867,12 +867,16 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     // ajuste que hace EditOrderDialog), se registra como 'ajuste': es el tipo
     // neutro y no ensucia el análisis de reposiciones.
     //
-    // Solo se registra cuando el request cambió el stock Y NO tocó
-    // unlimitedStock: al pasar un producto a stock ilimitado el backend fuerza
-    // stock = 0, y eso no es un movimiento real de mercadería.
+    // Solo se registra cuando el request cambió el stock Y el update resultante
+    // NO tocó unlimited_stock: al pasar un producto a stock ilimitado el backend
+    // fuerza stock = 0, y eso no es un movimiento real de mercadería.
+    // Se mira `updateData.unlimited_stock` (el resultado post-procesamiento) y
+    // no el campo crudo `unlimitedStock` del body: el signal legado `stock: -1`
+    // también setea `updateData.unlimited_stock = true` sin que el body traiga
+    // la clave `unlimitedStock`, y ese caso hay que excluirlo igual.
     const esAjusteDeStock =
       stock !== undefined &&
-      unlimitedStock === undefined &&
+      updateData.unlimited_stock === undefined &&
       existing.unlimited_stock !== true;
 
     if (esAjusteDeStock) {
