@@ -45,8 +45,23 @@ CREATE INDEX IF NOT EXISTS stock_events_product_created_idx
 CREATE INDEX IF NOT EXISTS stock_events_business_created_idx
   ON public.stock_events (business_id, created_at DESC);
 
--- RLS activo sin políticas = nadie puede leer/escribir con la anon key.
--- Los únicos accesos son el Edge Function (service_role, bypassea RLS) y la RPC
--- create_order_with_stock (SECURITY DEFINER). El frontend nunca toca esta tabla
--- directamente.
+-- RLS activo sin políticas = nadie puede leer/escribir con la anon key. El
+-- frontend nunca toca esta tabla directamente. Los únicos accesos son:
+--
+--   1. El Edge Function, con la service_role key. Ese rol tiene BYPASSRLS, así
+--      que efectivamente ignora las políticas.
+--   2. La RPC create_order_with_stock, declarada SECURITY DEFINER.
+--
+-- OJO con el caso 2: SECURITY DEFINER NO "bypassea RLS". Lo único que hace es
+-- correr la función con los privilegios del OWNER de la función en vez de los
+-- del que la llama. Lo que evita RLS es otra cosa: que ese owner sea también el
+-- owner de la tabla (el owner de una tabla no queda sujeto a sus políticas,
+-- salvo que la tabla tenga FORCE ROW LEVEL SECURITY), o que tenga BYPASSRLS.
+--
+-- O sea que el acceso de la RPC depende de que el owner de la función y el de
+-- stock_events coincidan, y eso hay que VERIFICARLO en cada entorno; no se
+-- deduce del SECURITY DEFINER. El chequeo pre-vuelo está documentado en
+-- docs/superpowers/plans/2026-08-19-panel-distribuidora.md. Si no coinciden, el
+-- INSERT del kardex falla y —por ser la misma transacción— tumba la creación
+-- del pedido entero.
 ALTER TABLE public.stock_events ENABLE ROW LEVEL SECURITY;
