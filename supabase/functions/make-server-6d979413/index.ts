@@ -791,9 +791,11 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
+    // Se traen stock y unlimited_stock además de los campos de permisos: el
+    // registro en el kardex necesita el stock PREVIO para calcular el delta.
     const { data: existing } = await supabaseAdmin
       .from('products')
-      .select('id, business_id')
+      .select('id, business_id, stock, unlimited_stock')
       .eq('id', productId)
       .maybeSingle();
 
@@ -801,7 +803,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo } = updates;
 
     let skuNorm: string | undefined;
     if (sku !== undefined) {
@@ -853,6 +855,53 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
         return c.json({ error: `Ya existe un producto con el SKU "${skuNorm}"` }, 400);
       }
       return c.json({ error: 'Error al actualizar producto' }, 500);
+    }
+
+    // Kardex: se registra el movimiento sin pedirle ningún dato nuevo al usuario.
+    // El tipo se deduce del modo con el que hizo el ajuste (lo manda
+    // StockAdjustDialog) más el signo del delta:
+    //   'sumar'  + delta > 0  -> reposicion  (llegó mercadería)
+    //   'sumar'  + delta < 0  -> merma       (rotura / vencimiento)
+    //   'total'               -> ajuste      (corrección de conteo)
+    // Si el request no trae `modo` (ej. el formulario completo de edición, o el
+    // ajuste que hace EditOrderDialog), se registra como 'ajuste': es el tipo
+    // neutro y no ensucia el análisis de reposiciones.
+    //
+    // Solo se registra cuando el request cambió el stock Y NO tocó
+    // unlimitedStock: al pasar un producto a stock ilimitado el backend fuerza
+    // stock = 0, y eso no es un movimiento real de mercadería.
+    const esAjusteDeStock =
+      stock !== undefined &&
+      unlimitedStock === undefined &&
+      existing.unlimited_stock !== true;
+
+    if (esAjusteDeStock) {
+      const stockAnterior = Number(existing.stock);
+      const stockNuevo = Number(updated.stock);
+      const delta = stockNuevo - stockAnterior;
+
+      if (delta !== 0) {
+        const tipo = modo === 'sumar'
+          ? (delta > 0 ? 'reposicion' : 'merma')
+          : 'ajuste';
+
+        const { error: eventoErr } = await supabaseAdmin.from('stock_events').insert({
+          business_id: profile.businessId,
+          product_id: productId,
+          product_name: updated.name,
+          type: tipo,
+          quantity: Math.abs(delta),
+          stock_after: stockNuevo,
+          created_by: userId,
+        });
+
+        // El evento es historia, no parte de la operación: si falla, se loguea
+        // pero NO se le devuelve error al usuario ni se revierte el stock. Un
+        // kardex incompleto es mejor que un ajuste de stock que no se guarda.
+        if (eventoErr) {
+          console.error('Error registrando stock_event:', eventoErr);
+        }
+      }
     }
 
     // Update product-ingredient relations if provided.
