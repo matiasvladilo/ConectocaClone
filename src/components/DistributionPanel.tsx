@@ -84,10 +84,11 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
         setProducts(listaProductos);
         setCategories(respCategorias);
 
-        // La categoría guardada manda, pero solo si todavía existe: si la
-        // borraron, caer en la detección por nombre evita un panel vacío.
+        // La categoría guardada manda, pero solo si todavía existe (o es el
+        // valor especial "todas"): si la borraron, caer en la detección por
+        // nombre evita un panel vacío.
         const guardada = localStorage.getItem(CLAVE_CATEGORIA);
-        const sigueExistiendo = guardada && respCategorias.some(c => c.id === guardada);
+        const sigueExistiendo = guardada === 'all' || (guardada && respCategorias.some(c => c.id === guardada));
         setCategoriaId(sigueExistiendo ? guardada! : elegirCategoriaInicial(respCategorias));
       } catch (error: any) {
         console.error('Error cargando el panel de distribución:', error);
@@ -154,7 +155,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={onBack}>
+          <Button variant="outline" onClick={onBack} aria-label="Volver">
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div>
@@ -288,7 +289,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
                           {producto.minStock ?? MIN_STOCK_POR_DEFECTO}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <Button variant="outline" onClick={() => abrirMovimientos(producto)}>
+                          <Button variant="outline" onClick={() => abrirMovimientos(producto)} aria-label={`Ver movimientos de ${producto.name}`}>
                             <History className="w-4 h-4" />
                           </Button>
                         </td>
