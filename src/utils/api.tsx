@@ -820,3 +820,21 @@ export const productionAreasAPI = {
     return response?.data || response;
   },
 };
+
+export interface StockEvent {
+  id: string;
+  productId: string;
+  productName: string;
+  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste';
+  quantity: number;   // siempre positiva: el signo lo da el `type`
+  stockAfter?: number;
+  orderId?: string;
+  createdAt: string;
+}
+
+export const stockEventsAPI = {
+  getByProduct: async (token: string, productId: string, limit: number = 50): Promise<StockEvent[]> => {
+    const response = await fetchAPI(`/products/${productId}/stock-events?limit=${limit}`, {}, token);
+    return response?.data || [];
+  },
+};

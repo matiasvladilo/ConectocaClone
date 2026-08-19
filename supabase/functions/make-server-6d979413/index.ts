@@ -142,6 +142,19 @@ function toIngredient(r: any) {
   };
 }
 
+function toStockEvent(r: any) {
+  return {
+    id: r.id,
+    productId: r.product_id,
+    productName: r.product_name,
+    type: r.type,
+    quantity: Number(r.quantity),
+    stockAfter: r.stock_after != null ? Number(r.stock_after) : undefined,
+    orderId: r.order_id || undefined,
+    createdAt: r.created_at,
+  };
+}
+
 function toOrderItem(r: any) {
   return {
     id: r.id,
@@ -1169,6 +1182,38 @@ app.delete('/make-server-6d979413/products/:productId/ingredients/:ingredientId'
   } catch (err: any) {
     console.error('Error removing ingredient from product:', err);
     return c.json({ error: 'Failed to remove ingredient from product' }, 500);
+  }
+});
+
+// Movimientos de stock de un producto. Solo admin: es información de gestión,
+// no operativa. No hay ruta GET /products/:id, así que este path no colisiona.
+app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (profile.role !== 'admin') return c.json({ error: 'No autorizado' }, 403);
+
+    // El tope duro evita que un limit gigante en la query traiga la tabla entera.
+    const limit = Math.min(parseInt(c.req.query('limit') || '50'), 200);
+
+    // El filtro por business_id no es redundante con el product_id: evita que
+    // un id de otro negocio devuelva datos si se lo pasan a mano.
+    const { data } = await supabaseAdmin
+      .from('stock_events')
+      .select('*')
+      .eq('business_id', profile.businessId)
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    return c.json({ data: (data || []).map(toStockEvent) });
+  } catch (err: any) {
+    console.error('Error getting stock events:', err);
+    return c.json({ error: 'Error al obtener movimientos' }, 500);
   }
 });
 
