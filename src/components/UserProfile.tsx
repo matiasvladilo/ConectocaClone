@@ -26,7 +26,8 @@ import {
   Factory,
   Warehouse,
   ChefHat,
-  Loader2
+  Loader2,
+  Boxes
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -41,6 +42,7 @@ interface UserProfileProps {
   onLogout: () => void;
   onUpdateProfile?: (updates: Partial<User>) => void;
   onViewAnalytics?: () => void;
+  onViewDistribution?: () => void;
   onManageAttendance?: () => void;
   onManageProducts?: () => void;
   onManageProductionAreas?: () => void;
@@ -49,7 +51,7 @@ interface UserProfileProps {
   accessToken?: string;
 }
 
-export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDistribution, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -739,6 +741,34 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
                 Ver Panel de Analíticas
               </div>
               <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Button>
+          </motion.div>
+        )}
+
+        {/* Panel de Distribuidora (solo admin) */}
+        {user.role === 'admin' && onViewDistribution && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.22 }}
+            whileTap={{ scale: 0.98 }}
+            className="mb-4"
+          >
+            <Button
+              onClick={onViewDistribution}
+              className="w-full h-12 relative overflow-hidden group"
+              style={{
+                background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: 600,
+                boxShadow: '0 4px 14px rgba(0, 89, 255, 0.3)'
+              }}
+            >
+              <div className="flex items-center gap-2 relative z-10 text-white">
+                <Boxes className="w-5 h-5" />
+                Panel de Distribuidora
+              </div>
             </Button>
           </motion.div>
         )}
