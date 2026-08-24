@@ -244,11 +244,24 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
 
       console.log('📝 [DEBUG] Form Ingredients:', formData.ingredients);
 
+      // El stock solo se manda si de verdad se tocó en este formulario (o es un
+      // producto nuevo). Si no, este PUT viajaría con el número con el que se
+      // abrió el diálogo, y pisaría un stock que haya cambiado por otro lado
+      // mientras estuvo abierto (un "Ajustar stock", un pedido, otra sesión) sin
+      // que nadie lo haya pedido. StockAdjustDialog es el único lugar pensado
+      // para tocar stock, mandando solo { stock, modo }; este formulario general
+      // no debe pisarlo de rebote por editar, por ejemplo, la categoría.
+      const eraIlimitadoAntes = editingProduct
+        ? (editingProduct.unlimitedStock === true || editingProduct.stock === -1)
+        : false;
+      const stockSeToco = !editingProduct
+        || formData.unlimitedStock !== eraIlimitadoAntes
+        || parseInt(formData.stock) !== editingProduct.stock;
+
       const productData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         price: priceValue,
-        stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0),
         minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
         unlimitedStock: formData.unlimitedStock,
         trackStock: !formData.unlimitedStock,
@@ -269,7 +282,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             ingredientId: pi.ingredientId,
             quantity: quantityToSave
           };
-        })
+        }),
+        ...(stockSeToco
+          ? { stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0) }
+          : {})
       };
 
       console.log('📦 [DEBUG] Sending Product Data:', JSON.stringify(productData, null, 2));
