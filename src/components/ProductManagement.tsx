@@ -241,7 +241,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       toast.error('El precio debe ser mayor o igual a 0');
       return;
     }
-    if (!formData.unlimitedStock && (!formData.stock || parseInt(formData.stock) < 0)) {
+    // parseFloat acá también: con parseInt, "-0.4" se leía como -0 y pasaba la
+    // validación, y ahora que el valor se guarda con decimales entraría negativo.
+    if (!formData.unlimitedStock && (!formData.stock || parseFloat(formData.stock) < 0)) {
       toast.error('El stock debe ser mayor o igual a 0');
       return;
     }
@@ -261,9 +263,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       const eraIlimitadoAntes = editingProduct
         ? (editingProduct.unlimitedStock === true || editingProduct.stock === -1)
         : false;
+      // parseFloat y no parseInt: `stock` es numeric en Postgres y un producto
+      // con allowDecimal se queda en valores fraccionados (los pedidos le restan
+      // 0.5). Con parseInt, parseInt("9.5") = 9 nunca coincidía con 9.5, así que
+      // para TODO producto por peso este chequeo daba "se tocó" y además mandaba
+      // el 9 truncado: editar solo el precio le comía media unidad.
       const stockSeToco = !editingProduct
         || formData.unlimitedStock !== eraIlimitadoAntes
-        || parseInt(formData.stock) !== editingProduct.stock;
+        || parseFloat(formData.stock) !== editingProduct.stock;
 
       const productData = {
         name: formData.name.trim(),
@@ -291,7 +298,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           };
         }),
         ...(stockSeToco
-          ? { stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0) }
+          ? { stock: formData.unlimitedStock ? 0 : (parseFloat(formData.stock) || 0) }
           : {})
       };
 
