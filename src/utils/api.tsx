@@ -33,6 +33,7 @@ export interface Category {
   name: string;
   description?: string;
   color?: string;
+  parentId?: string | null; // null o ausente = categoría raíz. Un solo nivel de anidamiento.
   createdAt: string;
   updatedAt?: string;
 }
@@ -506,6 +507,7 @@ export const categoriesAPI = {
     name: string;
     description?: string;
     color?: string;
+    parentId?: string | null;
   }): Promise<Category> => {
     const response = await fetchAPI('/categories', {
       method: 'POST',

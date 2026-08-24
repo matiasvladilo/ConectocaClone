@@ -68,6 +68,7 @@
       },
       "scripts": {
             "dev": "vite",
-            "build": "npm exec vite -- build"
+            "build": "npm exec vite -- build",
+            "test": "node --test src/utils/*.test.ts"
       }
 }
