@@ -39,6 +39,7 @@ import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { productsAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
 import { formatCLP } from '../utils/format';
+import { hijasDe, idsDeCategoriaConHijas, raicesDe } from '../utils/categoryTree';
 import { projectId } from '../utils/supabase/info';
 
 // Carga diferida, mismo motivo que en ImageUpload.tsx: no hace falta en la
@@ -104,6 +105,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   const [summaryExpanded, setSummaryExpanded] = useState(true);
   const [cartPreviewOpen, setCartPreviewOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  // 'all' = toda la categoría padre elegida, incluidas sus subcategorías.
+  const [selectedSubcategoryFilter, setSelectedSubcategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [notes, setNotes] = useState(() => {
     return localStorage.getItem('conectoca_orderNotes') || '';
@@ -587,6 +590,34 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     }
   };
 
+  // La fila de chips muestra solo categorías raíz: elegir una trae también lo
+  // etiquetado en sus subcategorías. Con la comparación exacta anterior, tocar
+  // "Distribuidora" dejaba el catálogo vacío y el operador concluía que le
+  // borraron los productos.
+  const categoriasRaiz = raicesDe(categories);
+
+  // Segunda fila: las subcategorías del padre elegido, para afinar. Solo aparece
+  // si ese padre tiene hijas.
+  const subcategoriasVisibles = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
+    ? []
+    : hijasDe(categories, selectedCategoryFilter);
+
+  // Se re-valida contra las hijas visibles y no se confía solo en limpiar el
+  // estado al cambiar de padre: un filtro de subcategoría que sobreviva a un
+  // cambio de padre escondería productos sin que nada en pantalla lo explique.
+  const subcategoriaActiva = subcategoriasVisibles.some(h => h.id === selectedSubcategoryFilter)
+    ? selectedSubcategoryFilter
+    : null;
+
+  const idsDelFiltro = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
+    ? null
+    : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
+
+  const handleSeleccionarCategoria = (valor: string) => {
+    setSelectedCategoryFilter(valor);
+    setSelectedSubcategoryFilter('all');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -735,41 +766,72 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
           <div className="flex items-center justify-between mb-4 flex-wrap gap-4">
             {/* Category Filter */}
             {categories.length > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => setSelectedCategoryFilter('all')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'all'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                >
-                  Todas
-                </button>
-                {categories.map((cat) => (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategoryFilter(cat.id)}
-                    className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${selectedCategoryFilter === cat.id
+                    onClick={() => handleSeleccionarCategoria('all')}
+                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'all'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
                   >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: cat.color }}
-                    />
-                    {cat.name}
+                    Todas
                   </button>
-                ))}
-                <button
-                  onClick={() => setSelectedCategoryFilter('uncategorized')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'uncategorized'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                >
-                  Sin categoría
-                </button>
+                  {categoriasRaiz.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => handleSeleccionarCategoria(cat.id)}
+                      className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${selectedCategoryFilter === cat.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                    >
+                      <div
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                      {cat.name}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => handleSeleccionarCategoria('uncategorized')}
+                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'uncategorized'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                  >
+                    Sin categoría
+                  </button>
+                </div>
+                {subcategoriasVisibles.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => setSelectedSubcategoryFilter('all')}
+                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${subcategoriaActiva === null
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                    >
+                      Todo {categories.find(c => c.id === selectedCategoryFilter)?.name}
+                    </button>
+                    {subcategoriasVisibles.map((sub) => (
+                      <button
+                        key={sub.id}
+                        onClick={() => setSelectedSubcategoryFilter(sub.id)}
+                        className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${subcategoriaActiva === sub.id
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                      >
+                        <div
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: sub.color }}
+                        />
+                        {sub.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -788,7 +850,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                 // Fila de Categoría
                 if (selectedCategoryFilter === 'all') return true;
                 if (selectedCategoryFilter === 'uncategorized') return !product.categoryId;
-                return product.categoryId === selectedCategoryFilter;
+                // Una subcategoría elegida filtra solo por ella; el padre trae
+                // todo lo suyo más lo de sus subcategorías.
+                if (subcategoriaActiva) return product.categoryId === subcategoriaActiva;
+                return idsDelFiltro !== null && !!product.categoryId && idsDelFiltro.has(product.categoryId);
               })
               .map((product) => {
                 const productStock = product.stock ?? 0;
