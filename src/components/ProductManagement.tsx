@@ -10,7 +10,7 @@ import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -34,6 +34,7 @@ import {
 import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
+import { agruparPorPadre } from '../utils/categoryTree';
 import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 
@@ -1072,10 +1073,15 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sin categoría</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </SelectItem>
+                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                      <SelectGroup key={categoria.id}>
+                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
+                        {hijas.map((hija) => (
+                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
+                            {hija.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
