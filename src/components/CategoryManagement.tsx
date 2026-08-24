@@ -8,7 +8,8 @@ import { Label } from './ui/label';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
-import { motion, AnimatePresence } from 'motion/react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { motion } from 'motion/react';
 import {
   ArrowLeft,
   Plus,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
+import { agruparPorPadre, posiblesPadres, puedeTenerPadre } from '../utils/categoryTree';
 
 interface CategoryManagementProps {
   accessToken: string;
@@ -31,12 +33,14 @@ interface CategoryFormData {
   name: string;
   description: string;
   color: string;
+  parentId: string; // '' = categoría raíz
 }
 
 const emptyForm: CategoryFormData = {
   name: '',
   description: '',
-  color: '#0047BA'
+  color: '#0047BA',
+  parentId: ''
 };
 
 const colorOptions = [
@@ -82,7 +86,8 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
       setFormData({
         name: category.name,
         description: category.description || '',
-        color: category.color || '#0047BA'
+        color: category.color || '#0047BA',
+        parentId: category.parentId || ''
       });
     } else {
       setEditingCategory(null);
@@ -108,11 +113,18 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
     try {
       setSubmitting(true);
 
+      const payload = {
+        name: formData.name,
+        description: formData.description,
+        color: formData.color,
+        parentId: formData.parentId || null,
+      };
+
       if (editingCategory) {
-        await categoriesAPI.update(accessToken, editingCategory.id, formData);
+        await categoriesAPI.update(accessToken, editingCategory.id, payload);
         toast.success('Categoría actualizada exitosamente');
       } else {
-        await categoriesAPI.create(accessToken, formData);
+        await categoriesAPI.create(accessToken, payload);
         toast.success('Categoría creada exitosamente');
       }
 
@@ -209,66 +221,76 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
             </Button>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <AnimatePresence mode="popLayout">
-              {categories.map((category) => (
-                <motion.div
-                  key={category.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Card className="hover:shadow-lg transition-shadow">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-12 h-12 rounded-lg flex items-center justify-center"
-                            style={{ backgroundColor: `${category.color}20` }}
-                          >
-                            <Tag
-                              className="w-6 h-6"
-                              style={{ color: category.color }}
-                            />
-                          </div>
-                          <div>
-                            <h3 className="text-gray-900">{category.name}</h3>
-                            {category.description && (
-                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                {category.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
+          <div className="space-y-6">
+            {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+              <div key={categoria.id}>
+                <Card className="hover:shadow-lg transition-shadow">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div
+                        className="w-12 h-12 rounded-lg flex items-center justify-center"
+                        style={{ backgroundColor: `${categoria.color}20` }}
+                      >
+                        <Tag className="w-6 h-6" style={{ color: categoria.color }} />
                       </div>
+                      <div>
+                        <h3 className="text-gray-900">{categoria.name}</h3>
+                        {categoria.description && (
+                          <p className="text-xs text-gray-500 mt-1">{categoria.description}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={() => handleOpenDialog(categoria)} variant="outline" size="sm" className="flex-1 gap-2">
+                        <Edit className="w-3 h-3" />
+                        Editar
+                      </Button>
+                      <Button
+                        onClick={() => setIsDeleting(categoria)}
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Eliminar
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                      <div className="flex gap-2 mt-4">
-                        <Button
-                          onClick={() => handleOpenDialog(category)}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 gap-2"
-                        >
-                          <Edit className="w-3 h-3" />
-                          Editar
-                        </Button>
-                        <Button
-                          onClick={() => setIsDeleting(category)}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          Eliminar
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+                {/* OJO: la indentación va por estilo inline. `pl-6`/`ml-4` NO existen
+                    en el CSS precompilado de este proyecto y no harían nada. */}
+                {hijas.length > 0 && (
+                  <div className="mt-2 space-y-2" style={{ paddingLeft: '2rem' }}>
+                    {hijas.map((hija) => (
+                      <Card key={hija.id}>
+                        <CardContent className="p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <Tag className="w-4 h-4" style={{ color: hija.color }} />
+                              <span className="text-sm text-gray-900">{hija.name}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button onClick={() => handleOpenDialog(hija)} variant="outline" size="sm">
+                                <Edit className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                onClick={() => setIsDeleting(hija)}
+                                variant="outline"
+                                size="sm"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -310,6 +332,32 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
                   placeholder="Describe esta categoría..."
                   rows={3}
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="parentId">Categoría padre</Label>
+                <Select
+                  value={formData.parentId || 'none'}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, parentId: value === 'none' ? '' : value })
+                  }
+                  disabled={!puedeTenerPadre(categories, editingCategory?.id)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Ninguna (categoría principal)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ninguna (categoría principal)</SelectItem>
+                    {posiblesPadres(categories, editingCategory?.id).map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {!puedeTenerPadre(categories, editingCategory?.id)
+                    ? 'Esta categoría ya tiene subcategorías, así que no puede ser subcategoría de otra.'
+                    : 'Elegí una categoría padre para convertirla en subcategoría (ej: Distribuidora → Bebidas).'}
+                </p>
               </div>
 
               <div>
