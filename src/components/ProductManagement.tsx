@@ -10,7 +10,7 @@ import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from './ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -34,7 +34,7 @@ import {
 import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
-import { agruparPorPadre } from '../utils/categoryTree';
+import { agruparPorPadre, idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
@@ -391,6 +391,20 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
+  // El filtro del listado va por id y no por nombre. Por nombre fallaba de dos
+  // maneras: elegir una categoría padre no traía NADA si todos los productos
+  // están etiquetados en sus subcategorías (y el estado vacío afirmaba que no
+  // hay productos), y dos subcategorías homónimas bajo padres distintos —los
+  // nombres no son únicos y "Bebidas" o "Varios" se repiten solos— quedaban
+  // mezcladas en un mismo filtro.
+  const idsDelFiltro = selectedCategoryFilter === 'all'
+    ? null
+    : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
+
+  const nombreDelFiltro = selectedCategoryFilter === 'all'
+    ? 'Filtrar'
+    : (categories.find(c => c.id === selectedCategoryFilter)?.name || 'Filtrar');
+
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch = !q ||
@@ -399,7 +413,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       p.category?.toLowerCase().includes(q) ||
       p.sku?.toLowerCase().includes(q);
 
-    const matchesCategory = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
+    const matchesCategory = idsDelFiltro === null
+      || (!!p.categoryId && idsDelFiltro.has(p.categoryId));
 
     return matchesSearch && matchesCategory;
   });
@@ -649,16 +664,21 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                     <div className="flex items-center gap-2 text-gray-600 overflow-hidden">
                       <Filter className="w-4 h-4 shrink-0" />
                       <span className="truncate font-medium text-sm">
-                        {selectedCategoryFilter === 'all' ? 'Filtrar' : selectedCategoryFilter}
+                        {nombreDelFiltro}
                       </span>
                     </div>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas las categorías</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.name}>
-                        {cat.name}
-                      </SelectItem>
+                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                      <SelectGroup key={categoria.id}>
+                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
+                        {hijas.map((hija) => (
+                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
+                            {hija.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
