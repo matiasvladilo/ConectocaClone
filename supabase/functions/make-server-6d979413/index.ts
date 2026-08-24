@@ -2031,6 +2031,12 @@ app.post('/make-server-6d979413/categories', async (c) => {
     const errorPadre = await validarPadreDeCategoria(profile.businessId, parentId);
     if (errorPadre) return c.json({ error: errorPadre }, 400);
 
+    // `parent_id` solo viaja si de verdad pidieron una subcategoría. Si este
+    // Function se despliega antes de aplicar la migración, la columna no existe
+    // y PostgREST devuelve PGRST204 por cualquier campo desconocido del insert:
+    // mandarlo siempre rompería TODA la creación de categorías, no solo las
+    // subcategorías. Condicionándolo, ese orden de despliegue degrada a "las
+    // subcategorías todavía no andan" en vez de dejar la pantalla inutilizable.
     const { data: category, error: insertErr } = await supabaseAdmin
       .from('categories')
       .insert({
@@ -2038,7 +2044,7 @@ app.post('/make-server-6d979413/categories', async (c) => {
         name,
         description: description || '',
         color: color || '#0047BA',
-        parent_id: parentId || null,
+        ...(parentId ? { parent_id: parentId } : {}),
       })
       .select()
       .single();
@@ -2090,12 +2096,22 @@ app.put('/make-server-6d979413/categories/:id', async (c) => {
       updateData.parent_id = body.parentId || null;
     }
 
-    const { data: updated } = await supabaseAdmin
+    // El error del update se mira: si no, `updated` viene null, toCategory(null)
+    // explota al leer r.id y el usuario recibe un 500 genérico que no dice nada.
+    // El caso más probable es haber desplegado esto antes de aplicar la
+    // migración de parent_id: PostgREST responde PGRST204 y conviene que el
+    // mensaje lo delate en vez de esconderlo.
+    const { data: updated, error: updateErr } = await supabaseAdmin
       .from('categories')
       .update(updateData)
       .eq('id', categoryId)
       .select()
       .single();
+
+    if (updateErr) {
+      console.error('Error updating category:', updateErr);
+      return c.json({ error: `No se pudo actualizar la categoria: ${updateErr.message}` }, 500);
+    }
 
     return c.json({ data: toCategory(updated) });
   } catch (err: any) {
