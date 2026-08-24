@@ -463,12 +463,27 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     const isUnlimited = !editForm.trackStock;
     let stock = 0;
     if (!isUnlimited) {
-      stock = parseInt(editForm.stock);
+      // parseFloat y no parseInt: `stock` es numeric en Postgres y los productos
+      // con allowDecimal viven en valores fraccionados (9.5). parseInt("9.5") da
+      // 9 y guardarlo se comería media unidad sin avisar.
+      stock = parseFloat(editForm.stock);
       if (isNaN(stock) || stock < 0) {
         toast.error('El stock debe ser un número válido mayor o igual a 0');
         return;
       }
     }
+
+    // El stock solo viaja si el usuario lo tocó de verdad en este formulario. El
+    // valor se cargó cuando se abrió el diálogo y esta pantalla refresca los
+    // productos en segundo plano mientras el diálogo sigue abierto, así que el
+    // número puede estar viejo por minutos; encima, cada pedido que se toma
+    // descuenta stock en el servidor al mismo tiempo. Mandarlo siempre pisaba ese
+    // stock real con el viejo, sin error y sin dejar rastro. StockAdjustDialog es
+    // el único camino pensado para cambiar stock (manda solo { stock, modo });
+    // editar la descripción o el precio no debe tocarlo de rebote.
+    const eraIlimitadoAntes = editingProduct.trackStock === false || editingProduct.stock === -1;
+    const stockSeToco = isUnlimited !== eraIlimitadoAntes
+      || (!isUnlimited && stock !== editingProduct.stock);
 
     try {
       const updatedProduct = await productsAPI.update(accessToken, editingProduct.id, {
@@ -476,12 +491,12 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
         description: editForm.description,
         price,
         image: editForm.image,
-        stock: isUnlimited ? 0 : stock,
         category: editForm.category || 'General',
         categoryId: editForm.categoryId || undefined,
         trackStock: editForm.trackStock,
         unlimitedStock: isUnlimited,
-        allowDecimal: editForm.allowDecimal
+        allowDecimal: editForm.allowDecimal,
+        ...(stockSeToco ? { stock: isUnlimited ? 0 : stock } : {})
       });
 
       setProducts(products.map(p =>
