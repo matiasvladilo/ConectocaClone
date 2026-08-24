@@ -107,6 +107,7 @@ function toCategory(r: any) {
     name: r.name,
     description: r.description || '',
     color: r.color || '#0047BA',
+    parentId: r.parent_id || null,
     businessId: r.business_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -1938,6 +1939,50 @@ app.delete('/make-server-6d979413/notifications/:id', async (c) => {
 
 // ─── CATEGORIES ROUTES ────────────────────────────────────────────────────────
 
+/**
+ * Valida que `parentId` sirva como padre. Devuelve el mensaje de error a mostrar,
+ * o null si está todo bien.
+ *
+ * La regla "un solo nivel" vive acá y no en la base: Postgres no permite un CHECK
+ * con subconsulta, así que no hay forma de expresarla como constraint. Este es el
+ * único punto que la hace cumplir — si se agrega otra ruta que escriba parent_id,
+ * tiene que llamar a esta función.
+ */
+async function validarPadreDeCategoria(
+  businessId: string,
+  parentId: string | null | undefined,
+  categoriaId?: string,
+): Promise<string | null> {
+  if (!parentId) return null; // sin padre = categoría raíz, siempre válido
+
+  if (categoriaId && parentId === categoriaId) {
+    return 'Una categoría no puede ser su propia categoría padre';
+  }
+
+  const { data: padre } = await supabaseAdmin
+    .from('categories')
+    .select('id, business_id, parent_id')
+    .eq('id', parentId)
+    .maybeSingle();
+
+  if (!padre) return 'La categoría padre no existe';
+  if (padre.business_id !== businessId) return 'La categoría padre no es de este negocio';
+  if (padre.parent_id) return 'No se pueden crear subcategorías dentro de una subcategoría';
+
+  // Mover bajo un padre algo que ya tiene hijas dejaría un árbol de tres niveles.
+  if (categoriaId) {
+    const { count } = await supabaseAdmin
+      .from('categories')
+      .select('id', { count: 'exact', head: true })
+      .eq('parent_id', categoriaId);
+    if (count && count > 0) {
+      return 'Esta categoría tiene subcategorías: no se puede convertir en subcategoría';
+    }
+  }
+
+  return null;
+}
+
 app.get('/make-server-6d979413/categories', async (c) => {
   const { error, userId } = await verifyAuth(c.req.header('Authorization'));
   if (error) return c.json({ error }, 401);
@@ -1968,8 +2013,11 @@ app.post('/make-server-6d979413/categories', async (c) => {
     if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
     if (!profile.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
-    const { name, description, color } = await c.req.json();
+    const { name, description, color, parentId } = await c.req.json();
     if (!name) return c.json({ error: 'Missing required field: name' }, 400);
+
+    const errorPadre = await validarPadreDeCategoria(profile.businessId, parentId);
+    if (errorPadre) return c.json({ error: errorPadre }, 400);
 
     const { data: category, error: insertErr } = await supabaseAdmin
       .from('categories')
@@ -1978,6 +2026,7 @@ app.post('/make-server-6d979413/categories', async (c) => {
         name,
         description: description || '',
         color: color || '#0047BA',
+        parent_id: parentId || null,
       })
       .select()
       .single();
@@ -2015,6 +2064,17 @@ app.put('/make-server-6d979413/categories/:id', async (c) => {
     if (body.description !== undefined) updateData.description = body.description;
     if (body.color !== undefined) updateData.color = body.color;
 
+    // `null` es un valor válido y significa "convertirla en categoría raíz", así
+    // que se distingue de `undefined` (= no se tocó el padre).
+    if (body.parentId !== undefined) {
+      // Se usa existing.business_id y no profile.businessId: el PUT no valida
+      // que el perfil tenga negocio, pero ya comprobó que el de la categoría
+      // coincide, así que este es el valor que seguro existe.
+      const errorPadre = await validarPadreDeCategoria(existing.business_id, body.parentId, categoryId);
+      if (errorPadre) return c.json({ error: errorPadre }, 400);
+      updateData.parent_id = body.parentId || null;
+    }
+
     const { data: updated } = await supabaseAdmin
       .from('categories')
       .update(updateData)
@@ -2046,6 +2106,20 @@ app.delete('/make-server-6d979413/categories/:id', async (c) => {
 
     if (!category) return c.json({ error: 'Category not found' }, 404);
     if (category.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    // Va antes del chequeo de productos: una categoría padre normalmente no
+    // tiene productos propios, así que sin esto el borrado pasaría el único
+    // chequeo que hay y la FK RESTRICT tiraría un 500 sin explicar nada.
+    const { count: hijas } = await supabaseAdmin
+      .from('categories')
+      .select('id', { count: 'exact', head: true })
+      .eq('parent_id', categoryId);
+
+    if (hijas && hijas > 0) {
+      return c.json({
+        error: `No se puede eliminar la categoria porque tiene ${hijas} subcategoria(s)`
+      }, 400);
+    }
 
     // Check if any products use this category
     const { count } = await supabaseAdmin
