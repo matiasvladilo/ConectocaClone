@@ -37,6 +37,8 @@ import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { agruparPorPadre } from '../utils/categoryTree';
 import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
+import { ProductNameFields } from './ProductNameFields';
+import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -105,6 +107,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [searchScannerOpen, setSearchScannerOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [savingStock, setSavingStock] = useState(false);
+  // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
+  const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
 
   useEffect(() => {
     loadProducts();
@@ -164,6 +168,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   };
 
   const handleOpenDialog = (product?: Product) => {
+    setNameParts(partesVacias);
     if (product) {
       setEditingProduct(product);
 
@@ -218,6 +223,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     setIsDialogOpen(false);
     setEditingProduct(null);
     setFormData(emptyForm);
+    setNameParts(partesVacias);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -878,14 +884,29 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           <form onSubmit={handleSubmit} className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <Label htmlFor="name">Nombre del Producto *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ej: Cajas de Cartón Premium"
-                  required
-                />
+                {editingProduct ? (
+                  <>
+                    <Label htmlFor="name">Nombre del Producto *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="Ej: Cajas de Cartón Premium"
+                      required
+                    />
+                  </>
+                ) : (
+                  <ProductNameFields
+                    value={nameParts}
+                    onChange={(partes) => {
+                      setNameParts(partes);
+                      // formData.name queda siempre igual al nombre compuesto, así
+                      // la validación y el payload de handleSubmit no cambian nada.
+                      setFormData(f => ({ ...f, name: componerNombre(partes) }));
+                    }}
+                    productosExistentes={products}
+                  />
+                )}
               </div>
 
               <div className="col-span-2">
