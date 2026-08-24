@@ -40,6 +40,7 @@ import logo from '../assets/logo-icon.png';
 const logoFull = logo;
 import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';
+import { idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { parseDate } from '../utils/dateUtils';
 
 interface BakeryKDSProps {
@@ -95,11 +96,27 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
       const categories = await categoriesAPI.getAll(accessToken);
       const pastryCategory = categories.find(c => c.name.toLowerCase().includes('pasteler'));
 
+      // Con subcategorías, comparar contra el id de Pastelería a secas dejaba
+      // fuera todo lo que se organizara en "Tortas" o "Galletas": esos pedidos
+      // no llegaban nunca a la pantalla de quien los prepara. Se acepta la
+      // categoría y sus hijas. Los fallbacks por nombre siguen, porque cubren
+      // productos sin categoryId.
+      const idsDePasteleria = pastryCategory
+        ? idsDeCategoriaConHijas(categories, pastryCategory.id)
+        : null;
+
       const allProducts = await productsAPI.getAll(accessToken);
       const pastryIds = new Set<string>();
 
       allProducts.forEach(p => {
-        if (p.categoryId === pastryCategory?.id || p.category?.toLowerCase() === 'pastelería' || p.category?.toLowerCase() === 'pasteleria') {
+        // Si ninguna categoría se llama "pasteler...", se conserva tal cual la
+        // comparación de antes (`p.categoryId === undefined`): peca de incluir
+        // de más, y en una pantalla de cocina mostrar un pedido de sobra es
+        // mucho menos grave que perderlo. Cambiarlo acá sería otra decisión.
+        const porCategoria = idsDePasteleria !== null
+          ? (!!p.categoryId && idsDePasteleria.has(p.categoryId))
+          : p.categoryId === undefined;
+        if (porCategoria || p.category?.toLowerCase() === 'pastelería' || p.category?.toLowerCase() === 'pasteleria') {
           pastryIds.add(p.id);
         }
       });
