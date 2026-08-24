@@ -1955,10 +1955,6 @@ async function validarPadreDeCategoria(
 ): Promise<string | null> {
   if (!parentId) return null; // sin padre = categoría raíz, siempre válido
 
-  if (categoriaId && parentId === categoriaId) {
-    return 'Una categoría no puede ser su propia categoría padre';
-  }
-
   const { data: padre } = await supabaseAdmin
     .from('categories')
     .select('id, business_id, parent_id')
@@ -1966,15 +1962,31 @@ async function validarPadreDeCategoria(
     .maybeSingle();
 
   if (!padre) return 'La categoría padre no existe';
+
+  // El autopadre se compara con el id que devolvió la consulta (canónico para
+  // Postgres), no con el `parentId` crudo del body: `uuid` normaliza mayúsculas
+  // y la forma con llaves, así que dos strings distintos en JS ("===" los deja
+  // pasar) pueden resolver a la misma fila. Comparar acá, después del lookup,
+  // cierra ese hueco.
+  if (categoriaId && padre.id === categoriaId) {
+    return 'Una categoría no puede ser su propia categoría padre';
+  }
+
   if (padre.business_id !== businessId) return 'La categoría padre no es de este negocio';
   if (padre.parent_id) return 'No se pueden crear subcategorías dentro de una subcategoría';
 
   // Mover bajo un padre algo que ya tiene hijas dejaría un árbol de tres niveles.
   if (categoriaId) {
-    const { count } = await supabaseAdmin
+    const { count, error: countErr } = await supabaseAdmin
       .from('categories')
       .select('id', { count: 'exact', head: true })
       .eq('parent_id', categoriaId);
+    // Este chequeo falla cerrado (a diferencia del resto del archivo): es el
+    // único lugar que hace cumplir la regla de un solo nivel, y un error acá
+    // que se trate como "no tiene hijas" deja pasar un árbol de tres niveles
+    // sin que nada lo vuelva a validar después. El chequeo de productos, en
+    // cambio, puede fallar abierto porque la FK RESTRICT lo frena igual.
+    if (countErr) return 'No se pudo verificar si la categoría tiene subcategorías';
     if (count && count > 0) {
       return 'Esta categoría tiene subcategorías: no se puede convertir en subcategoría';
     }
@@ -2069,8 +2081,11 @@ app.put('/make-server-6d979413/categories/:id', async (c) => {
     if (body.parentId !== undefined) {
       // Se usa existing.business_id y no profile.businessId: el PUT no valida
       // que el perfil tenga negocio, pero ya comprobó que el de la categoría
-      // coincide, así que este es el valor que seguro existe.
-      const errorPadre = await validarPadreDeCategoria(existing.business_id, body.parentId, categoryId);
+      // coincide, así que este es el valor que seguro existe. Por la misma
+      // razón se pasa existing.id (canónico, salió de la consulta) y no el
+      // categoryId crudo del route param, para que la comparación de autopadre
+      // sea consistente con el id que Postgres realmente usa.
+      const errorPadre = await validarPadreDeCategoria(existing.business_id, body.parentId, existing.id);
       if (errorPadre) return c.json({ error: errorPadre }, 400);
       updateData.parent_id = body.parentId || null;
     }
