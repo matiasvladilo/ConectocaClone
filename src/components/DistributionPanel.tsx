@@ -11,6 +11,7 @@ import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
 import type { Product, Category, StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
+import { idsDeCategoriaConHijas } from '../utils/categoryTree';
 
 interface DistributionPanelProps {
   onBack: () => void;
@@ -141,14 +142,23 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     localStorage.setItem(CLAVE_CATEGORIA, valor);
   };
 
-  // Productos del ámbito del panel: los de la categoría elegida que además
-  // controlan stock (los ilimitados devuelven estado null y se descartan).
+  // Productos del ámbito del panel: los de la categoría elegida —incluidas sus
+  // subcategorías— que además controlan stock (los ilimitados devuelven estado
+  // null y se descartan).
+  //
+  // El filtro NO puede ser `categoryId === categoriaId`: con subcategorías, un
+  // producto etiquetado "Bebidas" quedaría fuera del ámbito de "Distribuidora" y
+  // el panel mostraría un total que se lee como completo sin serlo.
   const productosDelAmbito = useMemo(() => {
+    const idsValidos = categoriaId === 'all'
+      ? null
+      : idsDeCategoriaConHijas(categories, categoriaId);
+
     return products
       .map(p => ({ producto: p, estado: calcularEstadoStock(p) }))
       .filter((x): x is { producto: Product; estado: EstadoStock } => x.estado !== null)
-      .filter(x => categoriaId === 'all' || x.producto.categoryId === categoriaId);
-  }, [products, categoriaId]);
+      .filter(x => idsValidos === null || (!!x.producto.categoryId && idsValidos.has(x.producto.categoryId)));
+  }, [products, categories, categoriaId]);
 
   const stats = useMemo(() => ({
     total: productosDelAmbito.length,
