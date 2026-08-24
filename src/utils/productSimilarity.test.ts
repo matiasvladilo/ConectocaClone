@@ -62,3 +62,10 @@ test('ignora productos con nombre vacio', () => {
   const conVacio: any[] = [{ id: 'x', name: '' }, { id: 'y', name: '---' }];
   assert.deepEqual(buscarSimilares('coca cola', conVacio), []);
 });
+
+// Caso crítico: la búsqueda está en el MEDIO del nombre, no como prefijo.
+// Solo la rama de substring (includes) lo detecta; el prefijo tiene distancia
+// de edición muy alta. Si se elimina la rama includes, este test falla.
+test('encuentra consulta en el medio del nombre (solo substring)', () => {
+  assert.deepEqual(buscarSimilares('coca cola', [{ id: 'x', name: 'Bebida Coca Cola Fria' }]).map(p => p.id), ['x']);
+});
