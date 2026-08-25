@@ -736,12 +736,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
       </div>
 
       <div className="max-w-6xl mx-auto p-4 space-y-6 pb-32">
-        {/* Title Section */}
-        <div className="text-center space-y-2">
-          <h1 className="text-gray-900">Selecciona los productos para tu pedido</h1>
-          <p className="text-gray-600">Haz click en cualquier producto para agregarlo al carrito</p>
-        </div>
-
         {/* Product Catalog */}
         <div className="space-y-4">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-4">
