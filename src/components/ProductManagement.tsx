@@ -862,11 +862,21 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         <span className="text-[#0047BA]" style={{ fontSize: '13px', fontWeight: 700 }}>
                           {formatCLP(product.price)}
                         </span>
-                        <span
-                          className="text-[10px] font-medium truncate"
-                          style={{ color: colorEstado }}
-                        >
-                          {esIlimitado ? '∞' : product.stock === 0 ? 'Sin stock' : product.stock}
+                        {/* La etiqueta "Stock" va separada del número y en gris: sin ella,
+                            un número de 10px pelado no se leía como stock a simple vista.
+                            El número sube a text-xs (12px) para que se note más.
+                            No se muestra la etiqueta cuando el texto ya es "Sin stock":
+                            la palabra "stock" ya está ahí, y "Stock Sin stock" se lee mal. */}
+                        <span className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                          {!(!esIlimitado && product.stock === 0) && (
+                            <span className="text-[10px] text-gray-500">Stock</span>
+                          )}
+                          <span
+                            className="text-xs font-medium truncate"
+                            style={{ color: colorEstado }}
+                          >
+                            {esIlimitado ? '∞' : product.stock === 0 ? 'Sin stock' : product.stock}
+                          </span>
                         </span>
                       </div>
                     </CardContent>
