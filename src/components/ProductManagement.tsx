@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
-import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
@@ -22,7 +21,6 @@ import {
   BoxIcon,
   Sparkles,
   Search,
-  Tag,
   Image as ImageIcon,
   Folder,
   Factory,
@@ -362,6 +360,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       await productsAPI.delete(accessToken, isDeleting.id);
       setProducts(products.filter(p => p.id !== isDeleting.id));
       toast.success('Producto eliminado exitosamente');
+
+      // Si el borrado se disparó desde el diálogo de edición, hay que cerrarlo:
+      // si no, queda un formulario abierto sobre un producto que ya no existe y
+      // guardarlo devolvería un error del servidor.
+      if (editingProduct?.id === isDeleting.id) {
+        handleCloseDialog();
+      }
+
       setIsDeleting(null);
     } catch (error: any) {
       console.error('Error deleting product:', error);
@@ -380,6 +386,17 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       // reposición, una merma o una corrección de conteo.
       const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock, modo });
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
+
+      // Si el ajuste salió del diálogo de edición, ese formulario sigue mostrando
+      // el stock viejo. Hay que sincronizar LAS DOS cosas: lo que se ve
+      // (formData.stock) y la referencia contra la que se compara al guardar
+      // (editingProduct). Si solo se actualizara una, guardar volvería a mandar
+      // un stock desactualizado y pisaría este ajuste.
+      if (editingProduct?.id === actualizado.id) {
+        setEditingProduct(actualizado);
+        setFormData(prev => ({ ...prev, stock: actualizado.stock.toString() }));
+      }
+
       toast.success(`Stock de "${actualizado.name}" actualizado a ${nuevoStock}`);
       setStockProduct(null);
     } catch (error: any) {
@@ -756,160 +773,81 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             </Card>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map((product, index) => (
-              <motion.div
-                key={product.id}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3 + (index * 0.05) }}
-              >
-                <Card
-                  className="border-2 hover:shadow-xl transition-all duration-300 group h-full"
-                  style={{
-                    borderRadius: '16px',
-                    borderTopWidth: '4px',
-                    borderTopColor: (product.unlimitedStock || product.stock === -1) ? '#6B7280' : product.stock === 0 ? '#EF4444' : product.stock < 10 ? '#F59E0B' : '#10B981',
-                    borderLeftColor: '#E0EDFF',
-                    borderRightColor: '#E0EDFF',
-                    borderBottomColor: '#E0EDFF'
-                  }}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {filteredProducts.map((product, index) => {
+              const esIlimitado = product.unlimitedStock || product.stock === -1;
+              const colorEstado = esIlimitado ? '#6B7280'
+                : product.stock === 0 ? '#EF4444'
+                : product.stock < 10 ? '#F59E0B'
+                : '#10B981';
+
+              return (
+                <motion.div
+                  key={product.id}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  // El delay se acota: con 249 productos, escalonar cada uno
+                  // dejaría los últimos apareciendo más de 10 segundos después.
+                  transition={{ delay: Math.min(index * 0.02, 0.4) }}
                 >
-                  <CardContent className="p-5">
-                    {/* Product Image/Icon */}
-                    <div className="w-full h-40 sm:h-48 shrink-0 rounded-xl mb-4 overflow-hidden bg-gray-100/50 relative group flex items-center justify-center border border-gray-100">
-                      {product.imageUrl ? (
-                        <img
-                          src={product.imageUrl}
-                          alt={product.name}
-                          className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <Package className="w-16 h-16 text-blue-300" />
-                      )}
-                    </div>
-
-                    {/* Category Badge */}
-                    {product.category && (
-                      <Badge
-                        className="mb-2 text-xs px-2 py-0.5"
-                        style={{
-                          background: 'rgba(0, 71, 186, 0.1)',
-                          color: '#0047BA',
-                          border: '1px solid rgba(0, 71, 186, 0.2)'
-                        }}
+                  {/* Todo el cuadrado abre Editar: los tres botones que había antes
+                      no entran en ~150px de ancho, así que Ajustar Stock y Eliminar
+                      viven ahora dentro de ese diálogo. */}
+                  <Card
+                    onClick={() => handleOpenDialog(product)}
+                    className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
+                    style={{
+                      borderRadius: '12px',
+                      borderTopWidth: '3px',
+                      borderTopColor: colorEstado,
+                      borderLeftColor: '#E0EDFF',
+                      borderRightColor: '#E0EDFF',
+                      borderBottomColor: '#E0EDFF'
+                    }}
+                  >
+                    <CardContent className="p-2">
+                      {/* Altura fija y no `aspect-square`: esa clase NO existe en el
+                          CSS precompilado de este proyecto y no haría nada. */}
+                      {/* El fondo va inline: `bg-gray-100/50` (la que usaba la
+                          tarjeta vieja) NO existe en el CSS y nunca se aplicó. */}
+                      <div
+                        className="w-full h-28 rounded-lg mb-1 overflow-hidden flex items-center justify-center"
+                        style={{ background: 'rgba(243, 244, 246, 0.5)' }}
                       >
-                        <Tag className="w-3 h-3 mr-1" />
-                        {product.category}
-                      </Badge>
-                    )}
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Package className="w-8 h-8 text-blue-300" />
+                        )}
+                      </div>
 
-                    {/* Product Name */}
-                    <h3
-                      className="text-[#0047BA] mb-2 line-clamp-2"
-                      style={{ fontSize: '16px', fontWeight: 600 }}
-                    >
-                      {product.name}
-                    </h3>
+                      <h3
+                        className="text-[#0047BA] line-clamp-2 leading-tight mb-1"
+                        style={{ fontSize: '12px', fontWeight: 600, minHeight: '30px' }}
+                      >
+                        {product.name}
+                      </h3>
 
-                    {product.sku && (
-                      <p className="flex items-center gap-1.5 text-xs text-gray-500 mb-2 font-mono">
-                        <Barcode className="w-3.5 h-3.5 shrink-0" />
-                        {product.sku}
-                      </p>
-                    )}
-
-                    {/* Description */}
-                    {product.description && (
-                      <p className="text-gray-600 text-xs mb-3 line-clamp-2">
-                        {product.description}
-                      </p>
-                    )}
-
-                    {/* Price & Stock */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <p className="text-xs text-gray-500">Precio</p>
-                        <p className="text-[#0047BA]" style={{ fontSize: '18px', fontWeight: 600 }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#0047BA]" style={{ fontSize: '13px', fontWeight: 700 }}>
                           {formatCLP(product.price)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Stock</p>
-                        <p
-                          className={`${(product.unlimitedStock || product.stock === -1) ? 'text-blue-500' :
-                            product.stock === 0 ? 'text-red-600' :
-                            product.stock < 10 ? 'text-amber-600' :
-                            'text-green-600'
-                          }`}
-                          style={{ fontSize: '18px', fontWeight: 600 }}
+                        </span>
+                        <span
+                          className="text-[10px] font-medium truncate"
+                          style={{ color: colorEstado }}
                         >
-                          {(product.unlimitedStock || product.stock === -1) ? '∞ Ilimitado' :
-                            product.stock === 0 ? 'Sin stock' :
-                            product.stock}
-                        </p>
+                          {esIlimitado ? '∞' : product.stock === 0 ? 'Sin stock' : product.stock}
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Cost & Margin */}
-                    <div className="flex items-center justify-between mb-4 pt-2 border-t border-gray-100">
-                      <div>
-                        <p className="text-xs text-gray-400">Costo</p>
-                        <p className="text-gray-600 font-semibold" style={{ fontSize: '14px' }}>
-                          {formatCLP((product.ingredients || []).reduce((sum, pi) => {
-                            const ing = ingredients.find(i => i.id === pi.ingredientId);
-                            // Auto-detect if quantity is in sub-units based on magnitude or usage pattern in form
-                            // But here we rely on the saved data which is normalized to base unit in DB??
-                            // Wait, in handleSubmit we divide by 1000 if inputUnit is g/ml.
-                            // So stored quantity IS in base unit (kg/l).
-                            // So we just multiply by costPerUnit directly.
-                            return sum + ((ing?.costPerUnit || 0) * pi.quantity);
-                          }, 0))}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        {/* Optional: Margin calculation could go here */}
-                      </div>
-                    </div>
-
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={() => handleOpenDialog(product)}
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                      >
-                        <Edit className="w-4 h-4 mr-1" />
-                        Editar
-                      </Button>
-                      {/* En productos de stock ilimitado no hay nada que ajustar,
-                          así que el botón no se muestra. */}
-                      {!(product.unlimitedStock || product.stock === -1) && (
-                        <Button
-                          onClick={() => setStockProduct(product)}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                        >
-                          <BoxIcon className="w-4 h-4 mr-1" />
-                          Stock
-                        </Button>
-                      )}
-                      <Button
-                        onClick={() => setIsDeleting(product)}
-                        variant="outline"
-                        size="sm"
-                        className="border-red-500 text-red-500 hover:bg-red-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1232,6 +1170,36 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             </div>
 
             <DialogFooter>
+              {/* Estas dos acciones vivían en la tarjeta del listado. Con la grilla
+                  compacta ya no entran ahí, así que se movieron acá.
+                  `type="button"` es obligatorio: el contenido del diálogo es un
+                  <form> y sin eso dispararían un submit. */}
+              {editingProduct && (
+                <>
+                  {!(editingProduct.unlimitedStock || editingProduct.stock === -1) && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStockProduct(editingProduct)}
+                      disabled={submitting}
+                      className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+                    >
+                      <BoxIcon className="w-4 h-4 mr-1" />
+                      Ajustar Stock
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDeleting(editingProduct)}
+                    disabled={submitting}
+                    className="border-red-500 text-red-500 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Eliminar
+                  </Button>
+                </>
+              )}
               <Button
                 type="button"
                 variant="outline"
