@@ -786,7 +786,27 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             </Card>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <>
+          {/* Estilo local para el desktop grande: subir tamaño de imagen/texto y mostrar
+              el botón de Stock solo desde 1024px necesita reglas @media que Tailwind no
+              tiene precompiladas acá (ver nota más abajo sobre clases arbitrarias que no
+              existen). Estas propiedades quedan TODAS acá adentro (no en `style` inline
+              del elemento): un `style` inline le gana en especificidad a cualquier clase
+              externa, así que si la altura o el tamaño de fuente quedaran mitad en
+              `style` y mitad acá, la regla de acá nunca se aplicaría. */}
+          <style>{`
+            .tarjeta-producto-img { height: 112px; }
+            .tarjeta-producto-nombre { font-size: 12px; font-weight: 600; min-height: 30px; }
+            .tarjeta-producto-precio { font-size: 13px; font-weight: 700; }
+            .tarjeta-producto-stock-btn { display: none; }
+            @media (min-width: 1024px) {
+              .tarjeta-producto-img { height: 220px; }
+              .tarjeta-producto-nombre { font-size: 15px; min-height: 38px; }
+              .tarjeta-producto-precio { font-size: 18px; }
+              .tarjeta-producto-stock-btn { display: inline-flex; }
+            }
+          `}</style>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
             {filteredProducts.map((product, index) => {
               const esIlimitado = product.unlimitedStock || product.stock === -1;
               const colorEstado = esIlimitado ? '#6B7280'
@@ -837,7 +857,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                       {/* El fondo va inline: `bg-gray-100/50` (la que usaba la
                           tarjeta vieja) NO existe en el CSS y nunca se aplicó. */}
                       <div
-                        className="w-full h-28 rounded-lg mb-1 overflow-hidden flex items-center justify-center"
+                        className="tarjeta-producto-img w-full rounded-lg mb-1 overflow-hidden flex items-center justify-center"
                         style={{ background: 'rgba(243, 244, 246, 0.5)' }}
                       >
                         {product.imageUrl ? (
@@ -851,15 +871,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         )}
                       </div>
 
-                      <h3
-                        className="text-[#0047BA] line-clamp-2 leading-tight mb-1"
-                        style={{ fontSize: '12px', fontWeight: 600, minHeight: '30px' }}
-                      >
+                      <h3 className="tarjeta-producto-nombre text-[#0047BA] line-clamp-2 leading-tight mb-1">
                         {product.name}
                       </h3>
 
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[#0047BA]" style={{ fontSize: '13px', fontWeight: 700 }}>
+                        <span className="tarjeta-producto-precio text-[#0047BA]">
                           {formatCLP(product.price)}
                         </span>
                         {/* La etiqueta "Stock" va separada del número y en gris: sin ella,
@@ -879,12 +896,33 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                           </span>
                         </span>
                       </div>
+
+                      {/* Solo visible desde 1024px (ver .tarjeta-producto-stock-btn más
+                          arriba): en celular el cuadrado sigue chico a propósito, y
+                          Ajustar Stock ya está a un toque de distancia dentro de Editar.
+                          `stopPropagation` es obligatorio: el botón vive adentro de la
+                          tarjeta clickeable que abre Editar, y sin esto un click acá
+                          abriría los dos diálogos a la vez. */}
+                      {!esIlimitado && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setStockProduct(product);
+                          }}
+                          className="tarjeta-producto-stock-btn w-full items-center justify-center gap-1 mt-2 py-1 rounded-md border-[#0059FF] text-[#0059FF] hover:bg-blue-50 text-xs"
+                        >
+                          <BoxIcon className="w-4 h-4" />
+                          Stock
+                        </button>
+                      )}
                     </CardContent>
                   </Card>
                 </motion.div>
               );
             })}
           </div>
+          </>
         )}
       </div>
 
