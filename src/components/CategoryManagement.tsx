@@ -338,7 +338,7 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
                 <Label htmlFor="parentId">Categoría padre</Label>
                 <Select
                   value={formData.parentId || 'none'}
-                  onValueChange={(value) =>
+                  onValueChange={(value: string) =>
                     setFormData({ ...formData, parentId: value === 'none' ? '' : value })
                   }
                   disabled={!puedeTenerPadre(categories, editingCategory?.id)}
