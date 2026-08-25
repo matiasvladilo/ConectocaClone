@@ -11,6 +11,7 @@ import { DispatchOrders } from "./components/DispatchOrders";
 import { UserProfile } from "./components/UserProfile";
 import { NewOrderForm } from "./components/NewOrderForm";
 import { Analytics } from "./components/Analytics";
+import { DistributionPanel } from "./components/DistributionPanel";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 import { OrderHistory } from "./components/OrderHistory";
 import { ProductManagement } from "./components/ProductManagement";
@@ -151,6 +152,7 @@ type Pantalla =
   | "profile"
   | "newOrder"
   | "analytics"
+  | "distribucion"
   | "history"
   | "products"
   | "categories"
@@ -1716,6 +1718,11 @@ export default function App() {
           onLogout={handleLogout}
           onUpdateProfile={handleUpdateProfile}
           onViewAnalytics={() => setCurrentScreen("analytics")}
+          onViewDistribution={
+            currentUser.role === "admin"
+              ? () => setCurrentScreen("distribucion")
+              : undefined
+          }
           onManageProducts={() => setCurrentScreen("products")}
           onManageProductionAreas={
             currentUser.role === "admin"
@@ -1742,6 +1749,13 @@ export default function App() {
           orders={orders}
           onBack={() => setCurrentScreen("profile")}
           accessToken={accessToken || undefined}
+        />
+      )}
+
+      {currentScreen === "distribucion" && currentUser && accessToken && (
+        <DistributionPanel
+          onBack={() => setCurrentScreen("profile")}
+          accessToken={accessToken}
         />
       )}
 

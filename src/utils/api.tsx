@@ -33,6 +33,7 @@ export interface Category {
   name: string;
   description?: string;
   color?: string;
+  parentId?: string | null; // null o ausente = categoría raíz. Un solo nivel de anidamiento.
   createdAt: string;
   updatedAt?: string;
 }
@@ -45,6 +46,7 @@ export interface Product {
   image?: string;
   imageUrl?: string;
   stock: number;
+  minStock?: number; // Umbral de "stock bajo" por SKU. undefined = usar el default del panel.
   unlimitedStock?: boolean; // New: If true, stock is not controlled
   trackStock?: boolean; // Legacy: If false, stock is not controlled
   category?: string;
@@ -505,6 +507,7 @@ export const categoriesAPI = {
     name: string;
     description?: string;
     color?: string;
+    parentId?: string | null;
   }): Promise<Category> => {
     const response = await fetchAPI('/categories', {
       method: 'POST',
@@ -558,7 +561,9 @@ export const productsAPI = {
     return response?.data || response;
   },
 
-  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }> }): Promise<Product> => {
+  // `modo` no es un campo del producto: es metadato del ajuste que el backend
+  // usa para clasificar el movimiento en el kardex. No se persiste en products.
+  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }>; modo?: 'sumar' | 'total' }): Promise<Product> => {
     const response = await fetchAPI(`/products/${productId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
@@ -815,5 +820,26 @@ export const productionAreasAPI = {
       method: 'DELETE',
     }, token);
     return response?.data || response;
+  },
+};
+
+export interface StockEvent {
+  id: string;
+  productId: string;
+  productName: string;
+  // 'devolucion' = stock que volvió porque se borró un pedido. Es una entrada,
+  // igual que 'reposicion', pero se distingue para no inflar la señal de
+  // reposiciones reales.
+  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
+  quantity: number;   // siempre positiva: el signo lo da el `type`
+  stockAfter?: number;
+  orderId?: string;
+  createdAt: string;
+}
+
+export const stockEventsAPI = {
+  getByProduct: async (token: string, productId: string, limit: number = 50): Promise<StockEvent[]> => {
+    const response = await fetchAPI(`/products/${productId}/stock-events?limit=${limit}`, {}, token);
+    return response?.data || [];
   },
 };

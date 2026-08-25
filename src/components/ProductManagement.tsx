@@ -6,11 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
-import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -22,7 +21,6 @@ import {
   BoxIcon,
   Sparkles,
   Search,
-  Tag,
   Image as ImageIcon,
   Folder,
   Factory,
@@ -34,8 +32,11 @@ import {
 import { toast } from 'sonner';
 import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
+import { agruparPorPadre, idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { ImageUpload } from './ImageUpload';
-import { StockAdjustDialog } from './StockAdjustDialog';
+import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
+import { ProductNameFields } from './ProductNameFields';
+import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -59,6 +60,7 @@ interface ProductFormData {
   description: string;
   price: string;
   stock: string;
+  minStock: string;
   category: string;
   categoryId: string;
   sku: string;
@@ -74,6 +76,7 @@ const emptyForm: ProductFormData = {
   description: '',
   price: '',
   stock: '',
+  minStock: '',
   category: 'General',
   categoryId: '',
   sku: '',
@@ -102,6 +105,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [searchScannerOpen, setSearchScannerOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [savingStock, setSavingStock] = useState(false);
+  // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
+  const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
 
   useEffect(() => {
     loadProducts();
@@ -161,6 +166,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   };
 
   const handleOpenDialog = (product?: Product) => {
+    setNameParts(partesVacias);
     if (product) {
       setEditingProduct(product);
 
@@ -194,6 +200,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         description: product.description || '',
         price: formatCLP(product.price, false),
         stock: product.stock.toString(),
+        minStock: product.minStock !== undefined ? product.minStock.toString() : '',
         category: product.category || 'General',
         categoryId: product.categoryId || '',
         sku: product.sku || '',
@@ -214,6 +221,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     setIsDialogOpen(false);
     setEditingProduct(null);
     setFormData(emptyForm);
+    setNameParts(partesVacias);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -231,7 +239,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       toast.error('El precio debe ser mayor o igual a 0');
       return;
     }
-    if (!formData.unlimitedStock && (!formData.stock || parseInt(formData.stock) < 0)) {
+    // parseFloat acá también: con parseInt, "-0.4" se leía como -0 y pasaba la
+    // validación, y ahora que el valor se guarda con decimales entraría negativo.
+    if (!formData.unlimitedStock && (!formData.stock || parseFloat(formData.stock) < 0)) {
       toast.error('El stock debe ser mayor o igual a 0');
       return;
     }
@@ -241,11 +251,30 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
 
       console.log('📝 [DEBUG] Form Ingredients:', formData.ingredients);
 
+      // El stock solo se manda si de verdad se tocó en este formulario (o es un
+      // producto nuevo). Si no, este PUT viajaría con el número con el que se
+      // abrió el diálogo, y pisaría un stock que haya cambiado por otro lado
+      // mientras estuvo abierto (un "Ajustar stock", un pedido, otra sesión) sin
+      // que nadie lo haya pedido. StockAdjustDialog es el único lugar pensado
+      // para tocar stock, mandando solo { stock, modo }; este formulario general
+      // no debe pisarlo de rebote por editar, por ejemplo, la categoría.
+      const eraIlimitadoAntes = editingProduct
+        ? (editingProduct.unlimitedStock === true || editingProduct.stock === -1)
+        : false;
+      // parseFloat y no parseInt: `stock` es numeric en Postgres y un producto
+      // con allowDecimal se queda en valores fraccionados (los pedidos le restan
+      // 0.5). Con parseInt, parseInt("9.5") = 9 nunca coincidía con 9.5, así que
+      // para TODO producto por peso este chequeo daba "se tocó" y además mandaba
+      // el 9 truncado: editar solo el precio le comía media unidad.
+      const stockSeToco = !editingProduct
+        || formData.unlimitedStock !== eraIlimitadoAntes
+        || parseFloat(formData.stock) !== editingProduct.stock;
+
       const productData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         price: priceValue,
-        stock: formData.unlimitedStock ? 0 : (parseInt(formData.stock) || 0),
+        minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
         unlimitedStock: formData.unlimitedStock,
         trackStock: !formData.unlimitedStock,
         allowDecimal: formData.allowDecimal,
@@ -265,7 +294,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             ingredientId: pi.ingredientId,
             quantity: quantityToSave
           };
-        })
+        }),
+        ...(stockSeToco
+          ? { stock: formData.unlimitedStock ? 0 : (parseFloat(formData.stock) || 0) }
+          : {})
       };
 
       console.log('📦 [DEBUG] Sending Product Data:', JSON.stringify(productData, null, 2));
@@ -292,7 +324,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         }
       } else {
         // Create new product
-        const created = await productsAPI.create(accessToken, productData);
+        // `stock` queda opcional en el tipo de productData porque el spread de
+        // más arriba es condicional (así el guardado de edición no pisa el stock
+        // con un valor viejo). Pero en esta rama `editingProduct` es null, así que
+        // `stockSeToco` da `true` siempre (ver su definición) y `stock` SIEMPRE
+        // está presente acá: el assert solo hace explícito para TS lo que ya es
+        // cierto en runtime, sin tocar el tipo de Product ni el de la API.
+        const created = await productsAPI.create(accessToken, productData as typeof productData & { stock: number });
         setProducts([created, ...products]);
         toast.success('Producto creado exitosamente');
 
@@ -328,6 +366,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       await productsAPI.delete(accessToken, isDeleting.id);
       setProducts(products.filter(p => p.id !== isDeleting.id));
       toast.success('Producto eliminado exitosamente');
+
+      // Si el borrado se disparó desde el diálogo de edición, hay que cerrarlo:
+      // si no, queda un formulario abierto sobre un producto que ya no existe y
+      // guardarlo devolvería un error del servidor.
+      if (editingProduct?.id === isDeleting.id) {
+        handleCloseDialog();
+      }
+
       setIsDeleting(null);
     } catch (error: any) {
       console.error('Error deleting product:', error);
@@ -335,15 +381,28 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
-  const handleAjustarStock = async (nuevoStock: number) => {
+  const handleAjustarStock = async (nuevoStock: number, modo: ModoAjuste) => {
     if (!stockProduct) return;
     try {
       setSavingStock(true);
-      // Se manda SOLO el stock: el backend actualiza únicamente los campos
-      // presentes, así que la receta y el resto del producto quedan intactos
-      // (y no se dispara el chequeo de permisos de recetas).
-      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock });
+      // Se manda SOLO el stock + el modo: el backend actualiza únicamente los
+      // campos presentes, así que la receta y el resto del producto quedan
+      // intactos (y no se dispara el chequeo de permisos de recetas).
+      // El `modo` no modifica el producto: le dice al backend si esto fue una
+      // reposición, una merma o una corrección de conteo.
+      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock, modo });
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
+
+      // Si el ajuste salió del diálogo de edición, ese formulario sigue mostrando
+      // el stock viejo. Hay que sincronizar LAS DOS cosas: lo que se ve
+      // (formData.stock) y la referencia contra la que se compara al guardar
+      // (editingProduct). Si solo se actualizara una, guardar volvería a mandar
+      // un stock desactualizado y pisaría este ajuste.
+      if (editingProduct?.id === actualizado.id) {
+        setEditingProduct(actualizado);
+        setFormData(prev => ({ ...prev, stock: actualizado.stock.toString() }));
+      }
+
       toast.success(`Stock de "${actualizado.name}" actualizado a ${nuevoStock}`);
       setStockProduct(null);
     } catch (error: any) {
@@ -355,6 +414,31 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
+  // El filtro del listado va por id y no por nombre. Por nombre fallaba de dos
+  // maneras: elegir una categoría padre no traía NADA si todos los productos
+  // están etiquetados en sus subcategorías (y el estado vacío afirmaba que no
+  // hay productos), y dos subcategorías homónimas bajo padres distintos —los
+  // nombres no son únicos y "Bebidas" o "Varios" se repiten solos— quedaban
+  // mezcladas en un mismo filtro.
+  const idsDelFiltro = selectedCategoryFilter === 'all'
+    ? null
+    : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
+
+  // El disparador muestra SIEMPRE la palabra "Categoría" (se renderiza aparte) y
+  // este valor al lado. Antes este texto REEMPLAZABA a "Filtrar", así que el
+  // control nunca decía qué filtraba: o decía "Filtrar" (vago) o el nombre de una
+  // categoría (sin contexto).
+  const nombreDelFiltro = selectedCategoryFilter === 'all'
+    ? 'Todas'
+    : (categories.find(c => c.id === selectedCategoryFilter)?.name || 'Todas');
+
+  // El estado vacío no puede mirar solo la búsqueda: filtrar por una categoría
+  // sin productos (con el buscador vacío) también da una lista vacía, y antes
+  // el mensaje decía "no hay productos aún" e invitaba a crear el primero
+  // aunque el catálogo tuviera cientos. Mismo problema que ya se corrigió a
+  // nivel de filtro (ver comentario de idsDelFiltro), pero acá no había llegado.
+  const hayFiltroActivo = !!searchQuery || selectedCategoryFilter !== 'all';
+
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch = !q ||
@@ -363,7 +447,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       p.category?.toLowerCase().includes(q) ||
       p.sku?.toLowerCase().includes(q);
 
-    const matchesCategory = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
+    const matchesCategory = idsDelFiltro === null
+      || (!!p.categoryId && idsDelFiltro.has(p.categoryId));
 
     return matchesSearch && matchesCategory;
   });
@@ -588,7 +673,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             className="border-2 shadow-lg"
             style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
           >
-            <CardContent className="p-4 flex flex-row gap-3">
+            <CardContent className="p-4 flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
@@ -607,22 +692,44 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   <Camera className="w-5 h-5" />
                 </button>
               </div>
+              {/* `sm:w-auto` y `sm:shrink-0` no existen en el CSS precompilado
+                  (verificado: 0 matches), así que no se puede alternar el ancho
+                  por breakpoint con clases ni con `style` (los estilos inline de
+                  React no soportan media queries). En su lugar se usa el
+                  comportamiento por defecto del flex: el contenedor no fija
+                  "align-items", así que su valor inicial "stretch" ya estira
+                  este div a lo ancho completo cuando el layout es columna
+                  (celular, "flex-col") y "shrink-0" evita que se comprima
+                  cuando el layout es fila (escritorio, "sm:flex-row") — el
+                  mismo resultado que buscaba "w-full sm:w-auto sm:shrink-0". */}
               <div className="shrink-0">
                 <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
-                  <SelectTrigger className="h-11 bg-white border-[#CBD5E1] w-[130px] sm:w-[180px]" style={{ borderRadius: '10px' }}>
+                  {/* El ancho va inline y no por `w-[...]`: las clases de valor
+                      arbitrario no existen en el CSS precompilado de este proyecto.
+                      Las que había acá antes (w-[130px] sm:w-[180px]) no hacían nada. */}
+                  <SelectTrigger
+                    className="h-11 bg-white border-[#CBD5E1] w-full"
+                    style={{ borderRadius: '10px', minWidth: '190px' }}
+                  >
                     <div className="flex items-center gap-2 text-gray-600 overflow-hidden">
                       <Filter className="w-4 h-4 shrink-0" />
-                      <span className="truncate font-medium text-sm">
-                        {selectedCategoryFilter === 'all' ? 'Filtrar' : selectedCategoryFilter}
-                      </span>
+                      {/* "Categoría" no se trunca nunca: es lo que le dice al
+                          usuario qué hace este control. Se trunca solo el valor. */}
+                      <span className="font-medium text-sm shrink-0">Categoría</span>
+                      <span className="text-sm truncate">· {nombreDelFiltro}</span>
                     </div>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas las categorías</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.name}>
-                        {cat.name}
-                      </SelectItem>
+                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                      <SelectGroup key={categoria.id}>
+                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
+                        {hijas.map((hija) => (
+                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
+                            {hija.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -657,12 +764,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   <Package className="w-10 h-10 text-blue-300" />
                 </div>
                 <p className="text-gray-600 mb-2" style={{ fontSize: '16px', fontWeight: 500 }}>
-                  {searchQuery ? 'No se encontraron productos' : 'No hay productos aún'}
+                  {hayFiltroActivo ? 'No se encontraron productos' : 'No hay productos aún'}
                 </p>
                 <p className="text-gray-400 text-sm mb-4">
-                  {searchQuery ? 'Intenta con otra búsqueda' : 'Crea tu primer producto para comenzar'}
+                  {hayFiltroActivo ? 'Intenta con otra búsqueda o categoría' : 'Crea tu primer producto para comenzar'}
                 </p>
-                {!searchQuery && (
+                {!hayFiltroActivo && (
                   <Button
                     onClick={() => handleOpenDialog()}
                     className="mt-2"
@@ -679,161 +786,143 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             </Card>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map((product, index) => (
-              <motion.div
-                key={product.id}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3 + (index * 0.05) }}
-              >
-                <Card
-                  className="border-2 hover:shadow-xl transition-all duration-300 group h-full"
-                  style={{
-                    borderRadius: '16px',
-                    borderTopWidth: '4px',
-                    borderTopColor: (product.unlimitedStock || product.stock === -1) ? '#6B7280' : product.stock === 0 ? '#EF4444' : product.stock < 10 ? '#F59E0B' : '#10B981',
-                    borderLeftColor: '#E0EDFF',
-                    borderRightColor: '#E0EDFF',
-                    borderBottomColor: '#E0EDFF'
-                  }}
+          <>
+          {/* Estilo local para el desktop grande: subir tamaño de imagen/texto y mostrar
+              el botón de Stock solo desde 1024px necesita reglas @media que Tailwind no
+              tiene precompiladas acá (ver nota más abajo sobre clases arbitrarias que no
+              existen). Estas propiedades quedan TODAS acá adentro (no en `style` inline
+              del elemento): un `style` inline le gana en especificidad a cualquier clase
+              externa, así que si la altura o el tamaño de fuente quedaran mitad en
+              `style` y mitad acá, la regla de acá nunca se aplicaría. */}
+          <style>{`
+            .tarjeta-producto-img { height: 112px; }
+            .tarjeta-producto-nombre { font-size: 12px; font-weight: 600; min-height: 30px; }
+            .tarjeta-producto-precio { font-size: 13px; font-weight: 700; }
+            .tarjeta-producto-stock-btn { display: none; }
+            @media (min-width: 1024px) {
+              .tarjeta-producto-img { height: 220px; }
+              .tarjeta-producto-nombre { font-size: 15px; min-height: 38px; }
+              .tarjeta-producto-precio { font-size: 18px; }
+              .tarjeta-producto-stock-btn { display: inline-flex; }
+            }
+          `}</style>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
+            {filteredProducts.map((product, index) => {
+              const esIlimitado = product.unlimitedStock || product.stock === -1;
+              const colorEstado = esIlimitado ? '#6B7280'
+                : product.stock === 0 ? '#EF4444'
+                : product.stock < 10 ? '#F59E0B'
+                : '#10B981';
+
+              return (
+                <motion.div
+                  key={product.id}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  // El delay se acota: con 249 productos, escalonar cada uno
+                  // dejaría los últimos apareciendo más de 10 segundos después.
+                  transition={{ delay: Math.min(index * 0.02, 0.4) }}
                 >
-                  <CardContent className="p-5">
-                    {/* Product Image/Icon */}
-                    <div className="w-full h-40 sm:h-48 shrink-0 rounded-xl mb-4 overflow-hidden bg-gray-100/50 relative group flex items-center justify-center border border-gray-100">
-                      {product.imageUrl ? (
-                        <img
-                          src={product.imageUrl}
-                          alt={product.name}
-                          className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <Package className="w-16 h-16 text-blue-300" />
-                      )}
-                    </div>
-
-                    {/* Category Badge */}
-                    {product.category && (
-                      <Badge
-                        className="mb-2 text-xs px-2 py-0.5"
-                        style={{
-                          background: 'rgba(0, 71, 186, 0.1)',
-                          color: '#0047BA',
-                          border: '1px solid rgba(0, 71, 186, 0.2)'
-                        }}
+                  {/* Todo el cuadrado abre Editar: los tres botones que había antes
+                      no entran en ~150px de ancho, así que Ajustar Stock y Eliminar
+                      viven ahora dentro de ese diálogo. */}
+                  {/* La tarjeta reemplazó a tres botones (Editar/Ajustar Stock/Eliminar)
+                      que eran focuseables por naturaleza. Como ahora es la ÚNICA forma
+                      de llegar a esas acciones, necesita comportarse como un botón real
+                      para teclado y lectores de pantalla: rol, foco y activación con
+                      Enter/Espacio (el div no los da gratis). */}
+                  <Card
+                    onClick={() => handleOpenDialog(product)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleOpenDialog(product);
+                      }
+                    }}
+                    className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
+                    style={{
+                      borderRadius: '12px',
+                      borderTopWidth: '3px',
+                      borderTopColor: colorEstado,
+                      borderLeftColor: '#E0EDFF',
+                      borderRightColor: '#E0EDFF',
+                      borderBottomColor: '#E0EDFF'
+                    }}
+                  >
+                    <CardContent className="p-2">
+                      {/* Altura fija y no `aspect-square`: esa clase NO existe en el
+                          CSS precompilado de este proyecto y no haría nada. */}
+                      {/* El fondo va inline: `bg-gray-100/50` (la que usaba la
+                          tarjeta vieja) NO existe en el CSS y nunca se aplicó. */}
+                      <div
+                        className="tarjeta-producto-img w-full rounded-lg mb-1 overflow-hidden flex items-center justify-center"
+                        style={{ background: 'rgba(243, 244, 246, 0.5)' }}
                       >
-                        <Tag className="w-3 h-3 mr-1" />
-                        {product.category}
-                      </Badge>
-                    )}
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Package className="w-8 h-8 text-blue-300" />
+                        )}
+                      </div>
 
-                    {/* Product Name */}
-                    <h3
-                      className="text-[#0047BA] mb-2 line-clamp-2"
-                      style={{ fontSize: '16px', fontWeight: 600 }}
-                    >
-                      {product.name}
-                    </h3>
+                      <h3 className="tarjeta-producto-nombre text-[#0047BA] line-clamp-2 leading-tight mb-1">
+                        {product.name}
+                      </h3>
 
-                    {product.sku && (
-                      <p className="flex items-center gap-1.5 text-xs text-gray-500 mb-2 font-mono">
-                        <Barcode className="w-3.5 h-3.5 shrink-0" />
-                        {product.sku}
-                      </p>
-                    )}
-
-                    {/* Description */}
-                    {product.description && (
-                      <p className="text-gray-600 text-xs mb-3 line-clamp-2">
-                        {product.description}
-                      </p>
-                    )}
-
-                    {/* Price & Stock */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <p className="text-xs text-gray-500">Precio</p>
-                        <p className="text-[#0047BA]" style={{ fontSize: '18px', fontWeight: 600 }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="tarjeta-producto-precio text-[#0047BA]">
                           {formatCLP(product.price)}
-                        </p>
+                        </span>
+                        {/* La etiqueta "Stock" va separada del número y en gris: sin ella,
+                            un número de 10px pelado no se leía como stock a simple vista.
+                            El número sube a text-xs (12px) para que se note más.
+                            No se muestra la etiqueta cuando el texto ya es "Sin stock":
+                            la palabra "stock" ya está ahí, y "Stock Sin stock" se lee mal. */}
+                        <span className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                          {!(!esIlimitado && product.stock === 0) && (
+                            <span className="text-[10px] text-gray-500">Stock</span>
+                          )}
+                          <span
+                            className="text-xs font-medium truncate"
+                            style={{ color: colorEstado }}
+                          >
+                            {esIlimitado ? '∞' : product.stock === 0 ? 'Sin stock' : product.stock}
+                          </span>
+                        </span>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Stock</p>
-                        <p
-                          className={`${(product.unlimitedStock || product.stock === -1) ? 'text-blue-500' :
-                            product.stock === 0 ? 'text-red-600' :
-                            product.stock < 10 ? 'text-amber-600' :
-                            'text-green-600'
-                          }`}
-                          style={{ fontSize: '18px', fontWeight: 600 }}
+
+                      {/* Solo visible desde 1024px (ver .tarjeta-producto-stock-btn más
+                          arriba): en celular el cuadrado sigue chico a propósito, y
+                          Ajustar Stock ya está a un toque de distancia dentro de Editar.
+                          `stopPropagation` es obligatorio: el botón vive adentro de la
+                          tarjeta clickeable que abre Editar, y sin esto un click acá
+                          abriría los dos diálogos a la vez. */}
+                      {!esIlimitado && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setStockProduct(product);
+                          }}
+                          className="tarjeta-producto-stock-btn w-full items-center justify-center gap-1 mt-2 py-1 rounded-md border-[#0059FF] text-[#0059FF] hover:bg-blue-50 text-xs"
                         >
-                          {(product.unlimitedStock || product.stock === -1) ? '∞ Ilimitado' :
-                            product.stock === 0 ? 'Sin stock' :
-                            product.stock}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Cost & Margin */}
-                    <div className="flex items-center justify-between mb-4 pt-2 border-t border-gray-100">
-                      <div>
-                        <p className="text-xs text-gray-400">Costo</p>
-                        <p className="text-gray-600 font-semibold" style={{ fontSize: '14px' }}>
-                          {formatCLP((product.ingredients || []).reduce((sum, pi) => {
-                            const ing = ingredients.find(i => i.id === pi.ingredientId);
-                            // Auto-detect if quantity is in sub-units based on magnitude or usage pattern in form
-                            // But here we rely on the saved data which is normalized to base unit in DB??
-                            // Wait, in handleSubmit we divide by 1000 if inputUnit is g/ml.
-                            // So stored quantity IS in base unit (kg/l).
-                            // So we just multiply by costPerUnit directly.
-                            return sum + ((ing?.costPerUnit || 0) * pi.quantity);
-                          }, 0))}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        {/* Optional: Margin calculation could go here */}
-                      </div>
-                    </div>
-
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={() => handleOpenDialog(product)}
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                      >
-                        <Edit className="w-4 h-4 mr-1" />
-                        Editar
-                      </Button>
-                      {/* En productos de stock ilimitado no hay nada que ajustar,
-                          así que el botón no se muestra. */}
-                      {!(product.unlimitedStock || product.stock === -1) && (
-                        <Button
-                          onClick={() => setStockProduct(product)}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                        >
-                          <BoxIcon className="w-4 h-4 mr-1" />
+                          <BoxIcon className="w-4 h-4" />
                           Stock
-                        </Button>
+                        </button>
                       )}
-                      <Button
-                        onClick={() => setIsDeleting(product)}
-                        variant="outline"
-                        size="sm"
-                        className="border-red-500 text-red-500 hover:bg-red-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
           </div>
+          </>
         )}
       </div>
 
@@ -855,14 +944,29 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
           <form onSubmit={handleSubmit} className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <Label htmlFor="name">Nombre del Producto *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ej: Cajas de Cartón Premium"
-                  required
-                />
+                {editingProduct ? (
+                  <>
+                    <Label htmlFor="name">Nombre del Producto *</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="Ej: Cajas de Cartón Premium"
+                      required
+                    />
+                  </>
+                ) : (
+                  <ProductNameFields
+                    value={nameParts}
+                    onChange={(partes) => {
+                      setNameParts(partes);
+                      // formData.name queda siempre igual al nombre compuesto, así
+                      // la validación y el payload de handleSubmit no cambian nada.
+                      setFormData(f => ({ ...f, name: componerNombre(partes) }));
+                    }}
+                    productosExistentes={products}
+                  />
+                )}
               </div>
 
               <div className="col-span-2">
@@ -942,6 +1046,22 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                     disabled={formData.unlimitedStock}
                   />
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="min-stock">Stock mínimo</Label>
+                <Input
+                  id="min-stock"
+                  type="number"
+                  min="0"
+                  value={formData.minStock}
+                  onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                  placeholder="Ej: 10"
+                  disabled={formData.unlimitedStock}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Cuando el stock llegue a este número, el panel de Distribuidora lo marca como bajo. Si lo dejás vacío se usa 10.
+                </p>
               </div>
 
               {/* Unlimited Stock Checkbox */}
@@ -1034,10 +1154,15 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Sin categoría</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </SelectItem>
+                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                      <SelectGroup key={categoria.id}>
+                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
+                        {hijas.map((hija) => (
+                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
+                            {hija.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1119,6 +1244,36 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             </div>
 
             <DialogFooter>
+              {/* Estas dos acciones vivían en la tarjeta del listado. Con la grilla
+                  compacta ya no entran ahí, así que se movieron acá.
+                  `type="button"` es obligatorio: el contenido del diálogo es un
+                  <form> y sin eso dispararían un submit. */}
+              {editingProduct && (
+                <>
+                  {!(editingProduct.unlimitedStock || editingProduct.stock === -1) && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStockProduct(editingProduct)}
+                      disabled={submitting}
+                      className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+                    >
+                      <BoxIcon className="w-4 h-4 mr-1" />
+                      Ajustar Stock
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDeleting(editingProduct)}
+                    disabled={submitting}
+                    className="border-red-500 text-red-500 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Eliminar
+                  </Button>
+                </>
+              )}
               <Button
                 type="button"
                 variant="outline"

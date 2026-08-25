@@ -39,6 +39,7 @@ import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { productsAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
 import { formatCLP } from '../utils/format';
+import { hijasDe, idsDeCategoriaConHijas, raicesDe } from '../utils/categoryTree';
 import { projectId } from '../utils/supabase/info';
 
 // Carga diferida, mismo motivo que en ImageUpload.tsx: no hace falta en la
@@ -104,6 +105,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   const [summaryExpanded, setSummaryExpanded] = useState(true);
   const [cartPreviewOpen, setCartPreviewOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  // 'all' = toda la categoría padre elegida, incluidas sus subcategorías.
+  const [selectedSubcategoryFilter, setSelectedSubcategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [notes, setNotes] = useState(() => {
     return localStorage.getItem('conectoca_orderNotes') || '';
@@ -463,12 +466,27 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     const isUnlimited = !editForm.trackStock;
     let stock = 0;
     if (!isUnlimited) {
-      stock = parseInt(editForm.stock);
+      // parseFloat y no parseInt: `stock` es numeric en Postgres y los productos
+      // con allowDecimal viven en valores fraccionados (9.5). parseInt("9.5") da
+      // 9 y guardarlo se comería media unidad sin avisar.
+      stock = parseFloat(editForm.stock);
       if (isNaN(stock) || stock < 0) {
         toast.error('El stock debe ser un número válido mayor o igual a 0');
         return;
       }
     }
+
+    // El stock solo viaja si el usuario lo tocó de verdad en este formulario. El
+    // valor se cargó cuando se abrió el diálogo y esta pantalla refresca los
+    // productos en segundo plano mientras el diálogo sigue abierto, así que el
+    // número puede estar viejo por minutos; encima, cada pedido que se toma
+    // descuenta stock en el servidor al mismo tiempo. Mandarlo siempre pisaba ese
+    // stock real con el viejo, sin error y sin dejar rastro. StockAdjustDialog es
+    // el único camino pensado para cambiar stock (manda solo { stock, modo });
+    // editar la descripción o el precio no debe tocarlo de rebote.
+    const eraIlimitadoAntes = editingProduct.trackStock === false || editingProduct.stock === -1;
+    const stockSeToco = isUnlimited !== eraIlimitadoAntes
+      || (!isUnlimited && stock !== editingProduct.stock);
 
     try {
       const updatedProduct = await productsAPI.update(accessToken, editingProduct.id, {
@@ -476,12 +494,12 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
         description: editForm.description,
         price,
         image: editForm.image,
-        stock: isUnlimited ? 0 : stock,
         category: editForm.category || 'General',
         categoryId: editForm.categoryId || undefined,
         trackStock: editForm.trackStock,
         unlimitedStock: isUnlimited,
-        allowDecimal: editForm.allowDecimal
+        allowDecimal: editForm.allowDecimal,
+        ...(stockSeToco ? { stock: isUnlimited ? 0 : stock } : {})
       });
 
       setProducts(products.map(p =>
@@ -570,6 +588,34 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // La fila de chips muestra solo categorías raíz: elegir una trae también lo
+  // etiquetado en sus subcategorías. Con la comparación exacta anterior, tocar
+  // "Distribuidora" dejaba el catálogo vacío y el operador concluía que le
+  // borraron los productos.
+  const categoriasRaiz = raicesDe(categories);
+
+  // Segunda fila: las subcategorías del padre elegido, para afinar. Solo aparece
+  // si ese padre tiene hijas.
+  const subcategoriasVisibles = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
+    ? []
+    : hijasDe(categories, selectedCategoryFilter);
+
+  // Se re-valida contra las hijas visibles y no se confía solo en limpiar el
+  // estado al cambiar de padre: un filtro de subcategoría que sobreviva a un
+  // cambio de padre escondería productos sin que nada en pantalla lo explique.
+  const subcategoriaActiva = subcategoriasVisibles.some(h => h.id === selectedSubcategoryFilter)
+    ? selectedSubcategoryFilter
+    : null;
+
+  const idsDelFiltro = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
+    ? null
+    : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
+
+  const handleSeleccionarCategoria = (valor: string) => {
+    setSelectedCategoryFilter(valor);
+    setSelectedSubcategoryFilter('all');
   };
 
   return (
@@ -690,12 +736,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
       </div>
 
       <div className="max-w-6xl mx-auto p-4 space-y-6 pb-32">
-        {/* Title Section */}
-        <div className="text-center space-y-2">
-          <h1 className="text-gray-900">Selecciona los productos para tu pedido</h1>
-          <p className="text-gray-600">Haz click en cualquier producto para agregarlo al carrito</p>
-        </div>
-
         {/* Product Catalog */}
         <div className="space-y-4">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-4">
@@ -720,46 +760,79 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
           <div className="flex items-center justify-between mb-4 flex-wrap gap-4">
             {/* Category Filter */}
             {categories.length > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => setSelectedCategoryFilter('all')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'all'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                >
-                  Todas
-                </button>
-                {categories.map((cat) => (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategoryFilter(cat.id)}
-                    className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${selectedCategoryFilter === cat.id
+                    onClick={() => handleSeleccionarCategoria('all')}
+                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'all'
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
                   >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: cat.color }}
-                    />
-                    {cat.name}
+                    Todas
                   </button>
-                ))}
-                <button
-                  onClick={() => setSelectedCategoryFilter('uncategorized')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'uncategorized'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                >
-                  Sin categoría
-                </button>
+                  {categoriasRaiz.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => handleSeleccionarCategoria(cat.id)}
+                      className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${selectedCategoryFilter === cat.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                    >
+                      <div
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                      {cat.name}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => handleSeleccionarCategoria('uncategorized')}
+                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'uncategorized'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                  >
+                    Sin categoría
+                  </button>
+                </div>
+                {subcategoriasVisibles.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => setSelectedSubcategoryFilter('all')}
+                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${subcategoriaActiva === null
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                    >
+                      Todo {categories.find(c => c.id === selectedCategoryFilter)?.name}
+                    </button>
+                    {subcategoriasVisibles.map((sub) => (
+                      <button
+                        key={sub.id}
+                        onClick={() => setSelectedSubcategoryFilter(sub.id)}
+                        className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${subcategoriaActiva === sub.id
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                      >
+                        <div
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: sub.color }}
+                        />
+                        {sub.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* 2 columnas desde el celular más angosto (antes era 1 por fila, "una por
+              pantalla"), subiendo a 3-4 en pantallas más grandes. */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {products
               .filter((product: any) => {
                 // Fila de Búsqueda de Texto
@@ -773,7 +846,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                 // Fila de Categoría
                 if (selectedCategoryFilter === 'all') return true;
                 if (selectedCategoryFilter === 'uncategorized') return !product.categoryId;
-                return product.categoryId === selectedCategoryFilter;
+                // Una subcategoría elegida filtra solo por ella; el padre trae
+                // todo lo suyo más lo de sus subcategorías.
+                if (subcategoriaActiva) return product.categoryId === subcategoriaActiva;
+                return idsDelFiltro !== null && !!product.categoryId && idsDelFiltro.has(product.categoryId);
               })
               .map((product) => {
                 const productStock = product.stock ?? 0;
@@ -802,7 +878,11 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                         }
                       }}
                     >
-                      <div className="relative w-full h-40 sm:h-48 bg-gray-100/50 flex items-center justify-center overflow-hidden group shrink-0">
+                      {/* `sm:h-48` no existe en el CSS precompilado de este proyecto y
+                          nunca se aplicó (verificado: 0 matches) — la imagen siempre
+                          quedó en h-40. Se reemplaza por h-28, el mismo alto ya probado
+                          en la grilla compacta de Gestión de Productos. */}
+                      <div className="relative w-full h-28 bg-gray-100/50 flex items-center justify-center overflow-hidden group shrink-0">
                         <ImageWithFallback
                           src={product.image}
                           alt={product.name}
@@ -833,23 +913,18 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                         )}
                       </div>
 
-                      <CardContent className="p-4 space-y-3">
+                      <CardContent className="p-2 space-y-2">
                         <div>
-                          <h3 className="text-gray-900 mb-1">{product.name}</h3>
-                          <p className="text-xs text-gray-500 line-clamp-2">{product.description}</p>
+                          <h3 className="text-gray-900 text-sm line-clamp-2 leading-tight mb-1">{product.name}</h3>
                         </div>
 
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            <DollarSign className="w-4 h-4 text-blue-600" />
-                            <span className="text-blue-700">${product.price.toFixed(2)}</span>
-                            <span className="text-xs text-gray-500">/unidad</span>
-                          </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-blue-700 text-sm">${product.price.toFixed(2)}</span>
                           <Badge
                             variant={isOutOfStock ? "destructive" : (!isUnlimitedProduct && remainingStock < 10) ? "outline" : "secondary"}
                             className="text-xs"
                           >
-                            {isUnlimitedProduct ? '∞ Ilimitado' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
+                            {isUnlimitedProduct ? '∞' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
                           </Badge>
                         </div>
 

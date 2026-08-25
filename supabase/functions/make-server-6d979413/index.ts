@@ -85,6 +85,7 @@ function toProduct(r: any) {
     image: r.image_url || '',
     imageUrl: r.image_url || '',
     stock: r.stock,
+    minStock: r.min_stock != null ? Number(r.min_stock) : undefined,
     unlimitedStock: r.unlimited_stock,
     trackStock: r.track_stock,
     allowDecimal: r.allow_decimal || false,
@@ -106,6 +107,7 @@ function toCategory(r: any) {
     name: r.name,
     description: r.description || '',
     color: r.color || '#0047BA',
+    parentId: r.parent_id || null,
     businessId: r.business_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -139,6 +141,65 @@ function toIngredient(r: any) {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+function toStockEvent(r: any) {
+  return {
+    id: r.id,
+    productId: r.product_id,
+    productName: r.product_name,
+    type: r.type,
+    quantity: Number(r.quantity),
+    stockAfter: r.stock_after != null ? Number(r.stock_after) : undefined,
+    orderId: r.order_id || undefined,
+    createdAt: r.created_at,
+  };
+}
+
+/**
+ * Único punto de entrada para escribir en el kardex desde el Edge Function.
+ *
+ * INVARIANTE DE LA FEATURE: toda escritura a `products.stock` tiene que pasar
+ * por acá. Antes este INSERT estaba inline en PUT /products/:id y por eso los
+ * otros tres caminos que mueven stock (borrado de pedido, orden de producción
+ * terminada y la ruta legacy POST /orders) se olvidaron de registrar: el kardex
+ * se veía completo sin estarlo, y eso después no se puede detectar ni
+ * reconstruir. La única excepción legítima es la RPC create_order_with_stock,
+ * que hace su propio INSERT dentro de la misma transacción que el descuento.
+ *
+ * Dos criterios deliberados:
+ *  - `quantity <= 0` se ignora en silencio: no es un movimiento real y además
+ *    violaría el CHECK (quantity > 0) de la tabla.
+ *  - Un error del INSERT se loguea pero NO se lanza: el evento es historia, no
+ *    parte de la operación. Un kardex incompleto es malo, pero tumbar el ajuste
+ *    de stock del usuario es peor.
+ */
+async function registrarStockEvent(params: {
+  businessId: string;
+  productId: string;
+  productName: string;
+  type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
+  quantity: number;      // siempre positiva; el signo lo da el type
+  stockAfter: number;
+  createdBy?: string | null;
+  orderId?: string | null;
+}): Promise<void> {
+  if (!(params.quantity > 0)) return;
+
+  const { error } = await supabaseAdmin.from('stock_events').insert({
+    business_id: params.businessId,
+    product_id: params.productId,
+    product_name: params.productName,
+    type: params.type,
+    quantity: params.quantity,
+    stock_after: params.stockAfter,
+    order_id: params.orderId ?? null,
+    created_by: params.createdBy ?? null,
+  });
+
+  if (error) {
+    console.error('Error registrando stock_event:', error);
+  }
 }
 
 function toOrderItem(r: any) {
@@ -710,7 +771,7 @@ app.post("/make-server-6d979413/products", async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const body = await c.req.json();
-    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku } = body;
+    const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku, minStock } = body;
 
     if (!name || price === undefined || price === null) {
       return c.json({ error: 'Nombre y precio son requeridos' }, 400);
@@ -730,6 +791,7 @@ app.post("/make-server-6d979413/products", async (c) => {
         price: parseFloat(price),
         image_url: imageUrl || image || '',
         stock: isUnlimited ? 0 : (stock !== undefined ? parseInt(stock) : 100),
+        min_stock: minStock !== undefined && minStock !== null && minStock !== '' ? Number(minStock) : null,
         unlimited_stock: isUnlimited,
         track_stock: !isUnlimited,
         allow_decimal: allowDecimal === true,
@@ -791,9 +853,11 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
+    // Se traen stock y unlimited_stock además de los campos de permisos: el
+    // registro en el kardex necesita el stock PREVIO para calcular el delta.
     const { data: existing } = await supabaseAdmin
       .from('products')
-      .select('id, business_id')
+      .select('id, business_id, stock, unlimited_stock')
       .eq('id', productId)
       .maybeSingle();
 
@@ -801,7 +865,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock } = updates;
 
     let skuNorm: string | undefined;
     if (sku !== undefined) {
@@ -836,6 +900,11 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (trackStock !== undefined) updateData.track_stock = trackStock;
     if (allowDecimal !== undefined) updateData.allow_decimal = allowDecimal === true;
     if (laborCost !== undefined) updateData.labor_cost = Number(laborCost) || 0;
+    // '' se guarda como null (sin umbral), no como 0: un umbral de 0 significaría
+    // "avisame solo cuando esté agotado", que es una intención distinta a "no lo configuré".
+    if (minStock !== undefined) {
+      updateData.min_stock = minStock === null || minStock === '' ? null : Number(minStock);
+    }
     if (skuNorm !== undefined) updateData.sku = skuNorm || null;
 
     const { data: updated, error: updateErr } = await supabaseAdmin
@@ -853,6 +922,59 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
         return c.json({ error: `Ya existe un producto con el SKU "${skuNorm}"` }, 400);
       }
       return c.json({ error: 'Error al actualizar producto' }, 500);
+    }
+
+    // Kardex: se registra el movimiento sin pedirle ningún dato nuevo al usuario.
+    // El tipo se deduce del modo con el que hizo el ajuste (lo manda
+    // StockAdjustDialog) más el signo del delta:
+    //   'sumar'  + delta > 0  -> reposicion  (llegó mercadería)
+    //   'sumar'  + delta < 0  -> merma       (rotura / vencimiento)
+    //   'total'               -> ajuste      (corrección de conteo)
+    // Si el request no trae `modo` (ej. el formulario completo de edición, o el
+    // ajuste que hace EditOrderDialog), se registra como 'ajuste': es el tipo
+    // neutro y no ensucia el análisis de reposiciones.
+    //
+    // Solo se registra cuando el request cambió el stock Y el update resultante
+    // NO vuelve ilimitado al producto: al pasar a stock ilimitado el backend
+    // fuerza stock = 0, y eso no es un movimiento real de mercadería.
+    // Se mira `updateData.unlimited_stock !== true` (el VALOR post-procesamiento)
+    // y no `=== undefined` (si la CLAVE está presente): el formulario general de
+    // edición manda `unlimitedStock: false` en cada guardado de un producto que
+    // sigue con stock controlado, así que la clave siempre está presente aunque
+    // nada se esté volviendo ilimitado. Con `=== undefined` eso bloqueaba el
+    // registro en el kardex de cualquier ajuste de stock hecho desde ese
+    // formulario — el único camino que sí queda sin rastro es el de
+    // StockAdjustDialog, que nunca manda la clave `unlimitedStock`.
+    // El signal legado `stock: -1` sigue excluido igual: setea
+    // `updateData.unlimited_stock = true`, y `true !== true` da false.
+    const esAjusteDeStock =
+      stock !== undefined &&
+      updateData.unlimited_stock !== true &&
+      existing.unlimited_stock !== true;
+
+    if (esAjusteDeStock) {
+      const stockAnterior = Number(existing.stock);
+      const stockNuevo = Number(updated.stock);
+      const delta = stockNuevo - stockAnterior;
+
+      if (delta !== 0) {
+        const tipo = modo === 'sumar'
+          ? (delta > 0 ? 'reposicion' : 'merma')
+          : 'ajuste';
+
+        // registrarStockEvent no lanza si el INSERT falla: solo loguea. El
+        // evento es historia, no parte de la operación, así que un kardex
+        // incompleto es mejor que un ajuste de stock que no se guarda.
+        await registrarStockEvent({
+          businessId: profile.businessId,
+          productId,
+          productName: updated.name,
+          type: tipo,
+          quantity: Math.abs(delta),
+          stockAfter: stockNuevo,
+          createdBy: userId,
+        });
+      }
     }
 
     // Update product-ingredient relations if provided.
@@ -1112,6 +1234,52 @@ app.delete('/make-server-6d979413/products/:productId/ingredients/:ingredientId'
   }
 });
 
+// Movimientos de stock de un producto. Solo admin: es información de gestión,
+// no operativa. No hay ruta GET /products/:id, así que este path no colisiona.
+app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (profile.role !== 'admin') return c.json({ error: 'No autorizado' }, 403);
+
+    // El tope duro evita que un limit gigante en la query traiga la tabla entera.
+    // Number.isFinite atrapa el `limit=abc`: sin esto parseInt devuelve NaN,
+    // Math.min(NaN, 200) es NaN y la query sale rota.
+    const limitCrudo = parseInt(c.req.query('limit') || '50');
+    const limit = Number.isFinite(limitCrudo) && limitCrudo > 0
+      ? Math.min(limitCrudo, 200)
+      : 50;
+
+    // El filtro por business_id no es redundante con el product_id: evita que
+    // un id de otro negocio devuelva datos si se lo pasan a mano.
+    const { data, error: queryErr } = await supabaseAdmin
+      .from('stock_events')
+      .select('*')
+      .eq('business_id', profile.businessId)
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    // Se chequea el error explícitamente: si la tabla no existe o RLS bloquea,
+    // `data` viene null y devolver 200 con [] haría que la UI diga "todavía no
+    // hay movimientos". Ese es el peor mensaje posible acá, porque enmascara un
+    // kardex roto como "todavía no hay datos" y nadie lo va a investigar.
+    if (queryErr) {
+      console.error('Error consultando stock_events:', queryErr);
+      return c.json({ error: 'Error al obtener movimientos' }, 500);
+    }
+
+    return c.json({ data: (data || []).map(toStockEvent) });
+  } catch (err: any) {
+    console.error('Error getting stock events:', err);
+    return c.json({ error: 'Error al obtener movimientos' }, 500);
+  }
+});
+
 // ─── UPLOAD PRODUCT IMAGE ─────────────────────────────────────────────────────
 
 app.post("/make-server-6d979413/upload-product-image", async (c) => {
@@ -1290,10 +1458,27 @@ app.post("/make-server-6d979413/orders", async (c) => {
       }
 
       if (!isUnlimited) {
+        const stockNuevo = product.stock - item.quantity;
         await supabaseAdmin
           .from('products')
-          .update({ stock: product.stock - item.quantity })
+          .update({ stock: stockNuevo })
           .eq('id', item.productId);
+
+        // Mismo tipo que usa la RPC create_order_with_stock: es exactamente el
+        // mismo hecho (salida por pedido de un local).
+        // orderId va null a propósito: el pedido todavía no existe (se crea más
+        // abajo). Registrar acá y no después es deliberado: si la creación del
+        // pedido falla, el stock ya se descontó igual, y un evento sin order_id
+        // es mucho mejor que un descuento invisible.
+        await registrarStockEvent({
+          businessId: profile.businessId,
+          productId: product.id,
+          productName: product.name,
+          type: 'despacho',
+          quantity: item.quantity,
+          stockAfter: stockNuevo,
+          createdBy: userId,
+        });
       }
     }
 
@@ -1570,19 +1755,35 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
     // Restore stock for each item
     for (const item of (order.order_items || [])) {
       if (!item.product_id) continue;
+      // name y business_id se traen para poder registrar el evento del kardex.
       const { data: product } = await supabaseAdmin
         .from('products')
-        .select('id, stock, unlimited_stock, track_stock')
+        .select('id, name, business_id, stock, unlimited_stock, track_stock')
         .eq('id', item.product_id)
         .maybeSingle();
 
       if (product) {
         const isUnlimited = product.unlimited_stock === true || product.track_stock === false;
         if (!isUnlimited) {
+          const stockNuevo = product.stock + item.quantity;
           await supabaseAdmin
             .from('products')
-            .update({ stock: product.stock + item.quantity })
+            .update({ stock: stockNuevo })
             .eq('id', item.product_id);
+
+          // Sin este evento el kardex mentía de la peor forma: el 'despacho'
+          // original quedaba registrado y el stock volvía sin dejar rastro, así
+          // que la demanda del producto se veía más alta de lo que fue.
+          await registrarStockEvent({
+            businessId: product.business_id,
+            productId: product.id,
+            productName: product.name,
+            type: 'devolucion',
+            quantity: item.quantity,
+            stockAfter: stockNuevo,
+            createdBy: userId,
+            orderId,
+          });
         }
       }
     }
@@ -1744,6 +1945,62 @@ app.delete('/make-server-6d979413/notifications/:id', async (c) => {
 
 // ─── CATEGORIES ROUTES ────────────────────────────────────────────────────────
 
+/**
+ * Valida que `parentId` sirva como padre. Devuelve el mensaje de error a mostrar,
+ * o null si está todo bien.
+ *
+ * La regla "un solo nivel" vive acá y no en la base: Postgres no permite un CHECK
+ * con subconsulta, así que no hay forma de expresarla como constraint. Este es el
+ * único punto que la hace cumplir — si se agrega otra ruta que escriba parent_id,
+ * tiene que llamar a esta función.
+ */
+async function validarPadreDeCategoria(
+  businessId: string,
+  parentId: string | null | undefined,
+  categoriaId?: string,
+): Promise<string | null> {
+  if (!parentId) return null; // sin padre = categoría raíz, siempre válido
+
+  const { data: padre } = await supabaseAdmin
+    .from('categories')
+    .select('id, business_id, parent_id')
+    .eq('id', parentId)
+    .maybeSingle();
+
+  if (!padre) return 'La categoría padre no existe';
+
+  // El autopadre se compara con el id que devolvió la consulta (canónico para
+  // Postgres), no con el `parentId` crudo del body: `uuid` normaliza mayúsculas
+  // y la forma con llaves, así que dos strings distintos en JS ("===" los deja
+  // pasar) pueden resolver a la misma fila. Comparar acá, después del lookup,
+  // cierra ese hueco.
+  if (categoriaId && padre.id === categoriaId) {
+    return 'Una categoría no puede ser su propia categoría padre';
+  }
+
+  if (padre.business_id !== businessId) return 'La categoría padre no es de este negocio';
+  if (padre.parent_id) return 'No se pueden crear subcategorías dentro de una subcategoría';
+
+  // Mover bajo un padre algo que ya tiene hijas dejaría un árbol de tres niveles.
+  if (categoriaId) {
+    const { count, error: countErr } = await supabaseAdmin
+      .from('categories')
+      .select('id', { count: 'exact', head: true })
+      .eq('parent_id', categoriaId);
+    // Este chequeo falla cerrado (a diferencia del resto del archivo): es el
+    // único lugar que hace cumplir la regla de un solo nivel, y un error acá
+    // que se trate como "no tiene hijas" deja pasar un árbol de tres niveles
+    // sin que nada lo vuelva a validar después. El chequeo de productos, en
+    // cambio, puede fallar abierto porque la FK RESTRICT lo frena igual.
+    if (countErr) return 'No se pudo verificar si la categoría tiene subcategorías';
+    if (count && count > 0) {
+      return 'Esta categoría tiene subcategorías: no se puede convertir en subcategoría';
+    }
+  }
+
+  return null;
+}
+
 app.get('/make-server-6d979413/categories', async (c) => {
   const { error, userId } = await verifyAuth(c.req.header('Authorization'));
   if (error) return c.json({ error }, 401);
@@ -1774,9 +2031,18 @@ app.post('/make-server-6d979413/categories', async (c) => {
     if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
     if (!profile.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
-    const { name, description, color } = await c.req.json();
+    const { name, description, color, parentId } = await c.req.json();
     if (!name) return c.json({ error: 'Missing required field: name' }, 400);
 
+    const errorPadre = await validarPadreDeCategoria(profile.businessId, parentId);
+    if (errorPadre) return c.json({ error: errorPadre }, 400);
+
+    // `parent_id` solo viaja si de verdad pidieron una subcategoría. Si este
+    // Function se despliega antes de aplicar la migración, la columna no existe
+    // y PostgREST devuelve PGRST204 por cualquier campo desconocido del insert:
+    // mandarlo siempre rompería TODA la creación de categorías, no solo las
+    // subcategorías. Condicionándolo, ese orden de despliegue degrada a "las
+    // subcategorías todavía no andan" en vez de dejar la pantalla inutilizable.
     const { data: category, error: insertErr } = await supabaseAdmin
       .from('categories')
       .insert({
@@ -1784,6 +2050,7 @@ app.post('/make-server-6d979413/categories', async (c) => {
         name,
         description: description || '',
         color: color || '#0047BA',
+        ...(parentId ? { parent_id: parentId } : {}),
       })
       .select()
       .single();
@@ -1821,12 +2088,36 @@ app.put('/make-server-6d979413/categories/:id', async (c) => {
     if (body.description !== undefined) updateData.description = body.description;
     if (body.color !== undefined) updateData.color = body.color;
 
-    const { data: updated } = await supabaseAdmin
+    // `null` es un valor válido y significa "convertirla en categoría raíz", así
+    // que se distingue de `undefined` (= no se tocó el padre).
+    if (body.parentId !== undefined) {
+      // Se usa existing.business_id y no profile.businessId: el PUT no valida
+      // que el perfil tenga negocio, pero ya comprobó que el de la categoría
+      // coincide, así que este es el valor que seguro existe. Por la misma
+      // razón se pasa existing.id (canónico, salió de la consulta) y no el
+      // categoryId crudo del route param, para que la comparación de autopadre
+      // sea consistente con el id que Postgres realmente usa.
+      const errorPadre = await validarPadreDeCategoria(existing.business_id, body.parentId, existing.id);
+      if (errorPadre) return c.json({ error: errorPadre }, 400);
+      updateData.parent_id = body.parentId || null;
+    }
+
+    // El error del update se mira: si no, `updated` viene null, toCategory(null)
+    // explota al leer r.id y el usuario recibe un 500 genérico que no dice nada.
+    // El caso más probable es haber desplegado esto antes de aplicar la
+    // migración de parent_id: PostgREST responde PGRST204 y conviene que el
+    // mensaje lo delate en vez de esconderlo.
+    const { data: updated, error: updateErr } = await supabaseAdmin
       .from('categories')
       .update(updateData)
       .eq('id', categoryId)
       .select()
       .single();
+
+    if (updateErr) {
+      console.error('Error updating category:', updateErr);
+      return c.json({ error: `No se pudo actualizar la categoria: ${updateErr.message}` }, 500);
+    }
 
     return c.json({ data: toCategory(updated) });
   } catch (err: any) {
@@ -1852,6 +2143,20 @@ app.delete('/make-server-6d979413/categories/:id', async (c) => {
 
     if (!category) return c.json({ error: 'Category not found' }, 404);
     if (category.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    // Va antes del chequeo de productos: una categoría padre normalmente no
+    // tiene productos propios, así que sin esto el borrado pasaría el único
+    // chequeo que hay y la FK RESTRICT tiraría un 500 sin explicar nada.
+    const { count: hijas } = await supabaseAdmin
+      .from('categories')
+      .select('id', { count: 'exact', head: true })
+      .eq('parent_id', categoryId);
+
+    if (hijas && hijas > 0) {
+      return c.json({
+        error: `No se puede eliminar la categoria porque tiene ${hijas} subcategoria(s)`
+      }, 400);
+    }
 
     // Check if any products use this category
     const { count } = await supabaseAdmin
@@ -2772,18 +3077,35 @@ app.patch('/make-server-6d979413/production-orders/:orderId/status', async (c) =
     // If completing: add produced quantities to product stock
     if (status === 'TERMINADA' && productionOrder.status !== 'TERMINADA') {
       for (const item of updatedProducts) {
+        // name y business_id se traen para poder registrar el evento del kardex.
         const { data: product } = await supabaseAdmin
           .from('products')
-          .select('id, stock')
+          .select('id, name, business_id, stock')
           .eq('id', item.productId)
           .maybeSingle();
 
         if (product) {
           const qtyToAdd = item.producedQuantity !== undefined ? item.producedQuantity : item.quantity;
+          const stockNuevo = (product.stock || 0) + qtyToAdd;
           await supabaseAdmin
             .from('products')
-            .update({ stock: (product.stock || 0) + qtyToAdd })
+            .update({ stock: stockNuevo })
             .eq('id', item.productId);
+
+          // Se registra como 'reposicion' y no como un tipo nuevo: es stock que
+          // entra, igual que la mercadería que llega de un proveedor. La
+          // Distribuidora no usa órdenes de producción (solo compra), así que
+          // este camino no afecta sus productos; se tapa igual para que el
+          // kardex no mienta sobre los productos de panadería/pastelería.
+          await registrarStockEvent({
+            businessId: product.business_id,
+            productId: product.id,
+            productName: product.name,
+            type: 'reposicion',
+            quantity: qtyToAdd,
+            stockAfter: stockNuevo,
+            createdBy: userId,
+          });
         }
       }
     }
