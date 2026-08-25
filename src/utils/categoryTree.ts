@@ -56,6 +56,27 @@ export function puedeTenerPadre(categories: Category[], editandoId?: string): bo
   return !tieneHijas(categories, editandoId);
 }
 
+/**
+ * Nombre de la categoría RAÍZ de `categoryId`: si es una subcategoría, el
+ * nombre de su padre; si ya es raíz (o no tiene padre en la lista, ej. un
+ * padre borrado), su propio nombre. `undefined`/producto sin categoría o
+ * categoría no encontrada (ej. se borró) caen en 'Sin categoría'.
+ *
+ * Pensada para agregaciones por categoría (desglose de totales, etiquetas de
+ * pedido) donde mezclar subcategorías con su padre en la misma lista
+ * ensuciaría el resultado.
+ */
+export function nombreCategoriaRaiz(categories: Category[], categoryId: string | undefined): string {
+  if (!categoryId) return 'Sin categoría';
+  const cat = categories.find(c => c.id === categoryId);
+  if (!cat) return 'Sin categoría';
+  if (cat.parentId) {
+    const padre = categories.find(c => c.id === cat.parentId);
+    return padre?.name || cat.name;
+  }
+  return cat.name;
+}
+
 export function agruparPorPadre(categories: Category[]): CategoriaConHijas[] {
   const ids = new Set(categories.map(c => c.id));
   // Una hija cuyo padre no está en la lista se trata como raíz. No debería

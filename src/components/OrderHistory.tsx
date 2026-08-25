@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Order } from '../App';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
@@ -31,6 +31,7 @@ import logo from '../assets/logo-icon.png';
 import { EditOrderDialog } from './EditOrderDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { productsAPI, Product, categoriesAPI, Category } from '../utils/api';
+import { nombreCategoriaRaiz } from '../utils/categoryTree';
 
 interface OrderHistoryProps {
   orders: Order[];
@@ -103,32 +104,55 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
   const [dateTo, setDateTo] = useState('');
   const [dateFilterType, setDateFilterType] = useState<DateFilterType>('createdAt');
 
-  // Desglose del Total por categoría: se abre en un modal aparte, a pedido.
-  // Los productos se piden recién al primer click (no hace falta si nunca se
-  // abre) y se cachean para no repetir el fetch en los clicks siguientes.
+  // Catálogo (productos + categorías) para dos usos: la etiqueta de categoría
+  // en cada tarjeta de pedido, y el desglose del Total por categoría del modal.
+  // Se pide una sola vez al entrar a la pantalla, no al abrir el modal: las
+  // etiquetas de las tarjetas lo necesitan apenas se pinta la lista.
+  const [catalogProducts, setCatalogProducts] = useState<Product[] | null>(null);
+  const [catalogCategories, setCatalogCategories] = useState<Category[] | null>(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
-  const [breakdownProducts, setBreakdownProducts] = useState<Product[] | null>(null);
-  const [breakdownCategories, setBreakdownCategories] = useState<Category[] | null>(null);
-  const [loadingBreakdown, setLoadingBreakdown] = useState(false);
 
-  const openBreakdown = async () => {
-    setShowBreakdown(true);
-    if (breakdownProducts !== null) return; // ya se cargaron una vez
-    try {
-      setLoadingBreakdown(true);
-      const [products, categories] = await Promise.all([
-        productsAPI.getAll(accessToken),
-        categoriesAPI.getAll(accessToken),
-      ]);
-      setBreakdownProducts(products);
-      setBreakdownCategories(categories);
-    } catch (err) {
-      console.error('Error cargando datos para el desglose:', err);
-      setBreakdownProducts([]); // evita reintentar en loop si falla
-      setBreakdownCategories([]);
-    } finally {
-      setLoadingBreakdown(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [products, categories] = await Promise.all([
+          productsAPI.getAll(accessToken),
+          categoriesAPI.getAll(accessToken),
+        ]);
+        setCatalogProducts(products);
+        setCatalogCategories(categories);
+      } catch (err) {
+        console.error('Error cargando catálogo para categorizar pedidos:', err);
+        setCatalogProducts([]); // evita reintentar en loop si falla
+        setCatalogCategories([]);
+      }
+    })();
+  }, [accessToken]);
+
+  // productId -> nombre de categoría RAÍZ (subcategorías ya resueltas a su padre).
+  const categoriaPorProducto = useMemo(() => {
+    const mapa = new Map<string, string>();
+    if (!catalogProducts || !catalogCategories) return mapa;
+    for (const p of catalogProducts) {
+      mapa.set(p.id, nombreCategoriaRaiz(catalogCategories, p.categoryId));
     }
+    return mapa;
+  }, [catalogProducts, catalogCategories]);
+
+  // Categorías distintas de un pedido, en el orden en que aparecen sus items.
+  // Un producto borrado del catálogo (ya no está en categoriaPorProducto) no
+  // aporta nada: mejor omitirlo que etiquetar todo el pedido "Sin categoría".
+  const categoriasDePedido = (order: Order): string[] => {
+    const vistas = new Set<string>();
+    const resultado: string[] = [];
+    for (const item of order.products || []) {
+      const categoria = categoriaPorProducto.get(item.productId);
+      if (categoria && !vistas.has(categoria)) {
+        vistas.add(categoria);
+        resultado.push(categoria);
+      }
+    }
+    return resultado;
   };
 
   const itemsPerPage = 10;
@@ -236,30 +260,10 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
   // filteredOrders que ya usa el Total (mismos filtros de búsqueda/estado/fecha
   // activos), sumando precio*cantidad de cada item del pedido en vez de
   // order.total, porque el pedido no guarda la categoría de cada producto:
-  // hay que cruzar cada item con el catálogo (breakdownProducts) por productId.
-  // Si la categoría del producto es una subcategoría (tiene parentId), el monto
-  // se suma bajo el nombre de la categoría padre, no de la subcategoría, para
-  // que "Bebidas"/"Abarrotes" no aparezcan sueltos de "Distribuidora".
+  // hay que cruzar cada item con el catálogo (categoriaPorProducto) por productId.
   // Un producto que ya no existe en el catálogo (borrado) cae en "Sin categoría".
   const categoryBreakdown = useMemo(() => {
-    if (!breakdownProducts || !breakdownCategories) return [];
-
-    const categoriaPorId = new Map(breakdownCategories.map(c => [c.id, c]));
-    const nombreCategoriaRaiz = (categoryId: string | undefined): string => {
-      if (!categoryId) return 'Sin categoría';
-      const cat = categoriaPorId.get(categoryId);
-      if (!cat) return 'Sin categoría';
-      if (cat.parentId) {
-        const padre = categoriaPorId.get(cat.parentId);
-        return padre?.name || cat.name;
-      }
-      return cat.name;
-    };
-
-    const categoriaPorProducto = new Map<string, string>();
-    for (const p of breakdownProducts) {
-      categoriaPorProducto.set(p.id, nombreCategoriaRaiz(p.categoryId));
-    }
+    if (categoriaPorProducto.size === 0) return [];
 
     const montoPorCategoria = new Map<string, number>();
     for (const order of filteredOrders) {
@@ -273,7 +277,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
     return Array.from(montoPorCategoria.entries())
       .map(([categoria, monto]) => ({ categoria, monto }))
       .sort((a, b) => b.monto - a.monto);
-  }, [filteredOrders, breakdownProducts, breakdownCategories]);
+  }, [filteredOrders, categoriaPorProducto]);
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -535,8 +539,8 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
               transition={{ delay: 0.45 }}
               role="button"
               tabIndex={0}
-              onClick={openBreakdown}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBreakdown(); } }}
+              onClick={() => setShowBreakdown(true)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBreakdown(true); } }}
             >
               <div className="flex items-center gap-2 mb-1">
                 <DollarSign className="w-4 h-4 text-yellow-200" />
@@ -847,12 +851,22 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                         {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-3 mb-2">
-                            <h3
-                              className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors"
-                              style={{ fontSize: '16px', fontWeight: 600 }}
-                            >
-                              {truncateProducts(order.productName)}
-                            </h3>
+                            <div className="min-w-0">
+                              <h3
+                                className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors"
+                                style={{ fontSize: '16px', fontWeight: 600 }}
+                              >
+                                {truncateProducts(order.productName)}
+                              </h3>
+                              {categoriasDePedido(order).length > 0 && (
+                                <Badge
+                                  className="bg-blue-50 text-blue-700 border-blue-200 border mt-1"
+                                  style={{ fontSize: '10px', fontWeight: 600 }}
+                                >
+                                  {categoriasDePedido(order).join(', ')}
+                                </Badge>
+                              )}
+                            </div>
                             <Badge
                               className={`${config.bgColor} ${config.color} border px-2.5 py-1 flex items-center gap-1.5`}
                               style={{ fontSize: '11px', fontWeight: 500 }}
@@ -988,11 +1002,19 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                       </div>
 
                       <h3
-                        className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors mb-3 line-clamp-2"
+                        className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors mb-1 line-clamp-2"
                         style={{ fontSize: '15px', fontWeight: 600 }}
                       >
                         {truncateProducts(order.productName)}
                       </h3>
+                      {categoriasDePedido(order).length > 0 && (
+                        <Badge
+                          className="bg-blue-50 text-blue-700 border-blue-200 border mb-3"
+                          style={{ fontSize: '10px', fontWeight: 600 }}
+                        >
+                          {categoriasDePedido(order).join(', ')}
+                        </Badge>
+                      )}
 
                       <div className="space-y-2 mb-4">
                         <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -1107,7 +1129,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
               </DialogDescription>
             </DialogHeader>
 
-            {loadingBreakdown ? (
+            {catalogProducts === null ? (
               <div className="py-8 text-center text-gray-500 text-sm">Cargando...</div>
             ) : categoryBreakdown.length === 0 ? (
               <div className="py-8 text-center text-gray-500 text-sm">No hay productos para desglosar.</div>

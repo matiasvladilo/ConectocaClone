@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Badge } from './ui/badge';
 import { Package, Plus, User as UserIcon, Clock, CheckCircle2, Truck, Sparkles, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
-import { PaginationInfo } from '../utils/api';
+import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
+import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import logo from '../assets/logo-icon.png';
 import { motion } from 'motion/react';
 
@@ -23,6 +24,7 @@ interface HomeScreenProps {
   pagination?: PaginationInfo;
   onPageChange?: (page: number) => void;
   isLoading?: boolean;
+  accessToken: string;
 }
 
 const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: any }> = {
@@ -66,8 +68,54 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 
 const SCROLL_KEY = 'ordersScrollPosition';
 
-export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, pagination, onPageChange, isLoading = false }: HomeScreenProps) {
+export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
   const [showFutureOrders, setShowFutureOrders] = React.useState(true);
+
+  // Catálogo para poder mostrar la categoría de cada pedido en su tarjeta
+  // (pedido de un trabajador: cuesta encontrar el pedido correcto a simple
+  // vista cuando hay varios en pantalla). Los pedidos no guardan la categoría
+  // de sus productos, así que hay que cruzar por productId contra el catálogo.
+  const [catalogProducts, setCatalogProducts] = React.useState<Product[] | null>(null);
+  const [catalogCategories, setCatalogCategories] = React.useState<Category[] | null>(null);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const [products, categories] = await Promise.all([
+          productsAPI.getAll(accessToken),
+          categoriesAPI.getAll(accessToken),
+        ]);
+        setCatalogProducts(products);
+        setCatalogCategories(categories);
+      } catch (err) {
+        console.error('Error cargando catálogo para categorizar pedidos:', err);
+        setCatalogProducts([]);
+        setCatalogCategories([]);
+      }
+    })();
+  }, [accessToken]);
+
+  const categoriaPorProducto = React.useMemo(() => {
+    const mapa = new Map<string, string>();
+    if (!catalogProducts || !catalogCategories) return mapa;
+    for (const p of catalogProducts) {
+      mapa.set(p.id, nombreCategoriaRaiz(catalogCategories, p.categoryId));
+    }
+    return mapa;
+  }, [catalogProducts, catalogCategories]);
+
+  const categoriasDePedido = (order: Order): string[] => {
+    const vistas = new Set<string>();
+    const resultado: string[] = [];
+    for (const item of order.products || []) {
+      const categoria = categoriaPorProducto.get(item.productId);
+      if (categoria && !vistas.has(categoria)) {
+        vistas.add(categoria);
+        resultado.push(categoria);
+      }
+    }
+    return resultado;
+  };
 
   // Restore scroll position when returning from an order detail
   React.useEffect(() => {
@@ -744,6 +792,14 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                     {config.label}
                                   </Badge>
                                 </div>
+                                {categoriasDePedido(order).length > 0 && (
+                                  <Badge
+                                    className="bg-blue-50 text-blue-700 border-blue-200 border mt-2"
+                                    style={{ fontSize: '11px', fontWeight: 600 }}
+                                  >
+                                    {categoriasDePedido(order).join(', ')}
+                                  </Badge>
+                                )}
                                 <CardDescription className="flex items-center gap-3 text-xs mt-2 flex-wrap">
                                   <span className="flex items-center gap-1">
                                     <Package className="w-3.5 h-3.5" />

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   esRaiz, raicesDe, hijasDe, tieneHijas,
   idsDeCategoriaConHijas, posiblesPadres, puedeTenerPadre, agruparPorPadre,
+  nombreCategoriaRaiz,
 } from './categoryTree.ts';
 
 // Categorías de prueba: "distri" es raíz con dos hijas; "postres" es raíz sola.
@@ -71,4 +72,30 @@ test('agruparPorPadre trata como raiz a una hija huerfana', () => {
   const huerfana: any[] = [{ id: 'x', name: 'X', parentId: 'no-existe' }];
   const grupos = agruparPorPadre(huerfana);
   assert.deepEqual(grupos.map(g => g.categoria.id), ['x']);
+});
+
+// Usado para agregaciones (desglose de totales, etiqueta de categoria en la
+// tarjeta de pedido): una subcategoria siempre resuelve al nombre de su padre.
+test('nombreCategoriaRaiz de una subcategoria devuelve el nombre del padre', () => {
+  assert.equal(nombreCategoriaRaiz(cats, 'bebidas'), 'Distribuidora');
+});
+
+test('nombreCategoriaRaiz de una categoria raiz devuelve su propio nombre', () => {
+  assert.equal(nombreCategoriaRaiz(cats, 'postres'), 'Postres');
+});
+
+test('nombreCategoriaRaiz sin categoryId devuelve "Sin categoria"', () => {
+  assert.equal(nombreCategoriaRaiz(cats, undefined), 'Sin categoría');
+});
+
+test('nombreCategoriaRaiz de un id que no existe (producto/categoria borrada) devuelve "Sin categoria"', () => {
+  assert.equal(nombreCategoriaRaiz(cats, 'no-existe'), 'Sin categoría');
+});
+
+// Si el padre referenciado ya no esta en la lista (borrado), no debe explotar:
+// cae al nombre de la propia subcategoria en vez de "Sin categoria", porque
+// sigue siendo mas informativo que perder el dato por completo.
+test('nombreCategoriaRaiz con padre huerfano usa el nombre de la propia categoria', () => {
+  const huerfana: any[] = [{ id: 'x', name: 'X', parentId: 'no-existe' }];
+  assert.equal(nombreCategoriaRaiz(huerfana, 'x'), 'X');
 });

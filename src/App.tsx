@@ -1643,6 +1643,7 @@ export default function App() {
         <HomeScreen
           user={currentUser}
           orders={userOrders}
+          accessToken={accessToken}
           onViewOrder={handleViewOrder}
           onNewOrder={() => {
             // Production users go to production orders, others go to new order form
