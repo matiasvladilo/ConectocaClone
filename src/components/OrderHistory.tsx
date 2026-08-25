@@ -29,6 +29,8 @@ import {
 import { PaginationControls } from './PaginationControls';
 import logo from '../assets/logo-icon.png';
 import { EditOrderDialog } from './EditOrderDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { productsAPI, Product, categoriesAPI, Category } from '../utils/api';
 
 interface OrderHistoryProps {
   orders: Order[];
@@ -100,6 +102,34 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [dateFilterType, setDateFilterType] = useState<DateFilterType>('createdAt');
+
+  // Desglose del Total por categoría: se abre en un modal aparte, a pedido.
+  // Los productos se piden recién al primer click (no hace falta si nunca se
+  // abre) y se cachean para no repetir el fetch en los clicks siguientes.
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [breakdownProducts, setBreakdownProducts] = useState<Product[] | null>(null);
+  const [breakdownCategories, setBreakdownCategories] = useState<Category[] | null>(null);
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false);
+
+  const openBreakdown = async () => {
+    setShowBreakdown(true);
+    if (breakdownProducts !== null) return; // ya se cargaron una vez
+    try {
+      setLoadingBreakdown(true);
+      const [products, categories] = await Promise.all([
+        productsAPI.getAll(accessToken),
+        categoriesAPI.getAll(accessToken),
+      ]);
+      setBreakdownProducts(products);
+      setBreakdownCategories(categories);
+    } catch (err) {
+      console.error('Error cargando datos para el desglose:', err);
+      setBreakdownProducts([]); // evita reintentar en loop si falla
+      setBreakdownCategories([]);
+    } finally {
+      setLoadingBreakdown(false);
+    }
+  };
 
   const itemsPerPage = 10;
 
@@ -201,6 +231,49 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
 
     return { total, pending, inProgress, completed, dispatched, delivered, cancelled, totalAmount };
   }, [filteredOrders]);
+
+  // Desglosa stats.totalAmount por categoría PADRE. Se arma sobre los mismos
+  // filteredOrders que ya usa el Total (mismos filtros de búsqueda/estado/fecha
+  // activos), sumando precio*cantidad de cada item del pedido en vez de
+  // order.total, porque el pedido no guarda la categoría de cada producto:
+  // hay que cruzar cada item con el catálogo (breakdownProducts) por productId.
+  // Si la categoría del producto es una subcategoría (tiene parentId), el monto
+  // se suma bajo el nombre de la categoría padre, no de la subcategoría, para
+  // que "Bebidas"/"Abarrotes" no aparezcan sueltos de "Distribuidora".
+  // Un producto que ya no existe en el catálogo (borrado) cae en "Sin categoría".
+  const categoryBreakdown = useMemo(() => {
+    if (!breakdownProducts || !breakdownCategories) return [];
+
+    const categoriaPorId = new Map(breakdownCategories.map(c => [c.id, c]));
+    const nombreCategoriaRaiz = (categoryId: string | undefined): string => {
+      if (!categoryId) return 'Sin categoría';
+      const cat = categoriaPorId.get(categoryId);
+      if (!cat) return 'Sin categoría';
+      if (cat.parentId) {
+        const padre = categoriaPorId.get(cat.parentId);
+        return padre?.name || cat.name;
+      }
+      return cat.name;
+    };
+
+    const categoriaPorProducto = new Map<string, string>();
+    for (const p of breakdownProducts) {
+      categoriaPorProducto.set(p.id, nombreCategoriaRaiz(p.categoryId));
+    }
+
+    const montoPorCategoria = new Map<string, number>();
+    for (const order of filteredOrders) {
+      for (const item of order.products) {
+        const categoria = categoriaPorProducto.get(item.productId) || 'Sin categoría';
+        const monto = (item.price || 0) * (item.quantity || 0);
+        montoPorCategoria.set(categoria, (montoPorCategoria.get(categoria) || 0) + monto);
+      }
+    }
+
+    return Array.from(montoPorCategoria.entries())
+      .map(([categoria, monto]) => ({ categoria, monto }))
+      .sort((a, b) => b.monto - a.monto);
+  }, [filteredOrders, breakdownProducts, breakdownCategories]);
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -452,7 +525,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
             </motion.div>
 
             <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
+              className="p-4 rounded-xl backdrop-blur-md cursor-pointer hover:bg-white/5 transition-colors"
               style={{
                 background: 'rgba(255, 212, 59, 0.2)',
                 border: '1px solid rgba(255, 212, 59, 0.3)'
@@ -460,6 +533,10 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.45 }}
+              role="button"
+              tabIndex={0}
+              onClick={openBreakdown}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBreakdown(); } }}
             >
               <div className="flex items-center gap-2 mb-1">
                 <DollarSign className="w-4 h-4 text-yellow-200" />
@@ -468,6 +545,9 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
               <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
                 {formatCLP(stats.totalAmount)}
               </p>
+              <span className="text-xs text-yellow-100 flex items-center gap-1">
+                Ver por categoría <ChevronRight className="w-3 h-3" />
+              </span>
             </motion.div>
           </div>
         </div>
@@ -1015,6 +1095,41 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
             }}
           />
         )}
+
+        {/* Desglose del Total por categoría */}
+        <Dialog open={showBreakdown} onOpenChange={setShowBreakdown}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Total por categoría</DialogTitle>
+              <DialogDescription>
+                Calculado sobre los {stats.total} pedido(s) que ves ahora en pantalla
+                {hasActiveFilters ? ' (con los filtros aplicados)' : ''}.
+              </DialogDescription>
+            </DialogHeader>
+
+            {loadingBreakdown ? (
+              <div className="py-8 text-center text-gray-500 text-sm">Cargando...</div>
+            ) : categoryBreakdown.length === 0 ? (
+              <div className="py-8 text-center text-gray-500 text-sm">No hay productos para desglosar.</div>
+            ) : (
+              <div className="space-y-2 py-2">
+                {categoryBreakdown.map(({ categoria, monto }) => (
+                  <div key={categoria} className="flex items-center justify-between py-1">
+                    <span className="text-sm text-gray-700">{categoria}</span>
+                    <span className="text-sm font-semibold text-gray-900">{formatCLP(monto)}</span>
+                  </div>
+                ))}
+                <Separator />
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm font-semibold text-gray-900">Total</span>
+                  <span className="text-sm font-semibold text-gray-900">
+                    {formatCLP(categoryBreakdown.reduce((sum, c) => sum + c.monto, 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
