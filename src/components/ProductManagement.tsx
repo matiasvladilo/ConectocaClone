@@ -120,10 +120,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }).catch(err => console.error("Error loading profile", err));
   }, []);
 
-  const loadProducts = async () => {
+  // `silent` evita el spinner de pantalla completa: se usa para recargar tras
+  // guardar un producto, donde reemplazar toda la grilla por el spinner
+  // colapsa la altura de la página y el navegador tira el scroll arriba,
+  // obligando a volver a bajar cada vez que se edita un producto.
+  const loadProducts = async (silent = false) => {
     try {
-      setLoading(true);
-      console.log('🔵 [ProductManagement] Loading products...');
+      if (!silent) setLoading(true);
+      console.log('🔵 [ProductManagement] Loading products...', silent ? '(silent)' : '');
       const data = await productsAPI.getAll(accessToken);
       console.log('🔵 [ProductManagement] Products received:', data?.length || 0, 'products');
       if (data && data.length > 0) {
@@ -134,7 +138,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       console.error('❌ [ProductManagement] Error loading products:', error);
       toast.error('Error al cargar productos');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -349,8 +353,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       }
 
       handleCloseDialog();
-      // Reload everything to ensure local state matches server exactly (including ingredients)
-      loadProducts();
+      // Reload everything to ensure local state matches server exactly (including
+      // ingredients). Silencioso para no perder la posición de scroll en la grilla.
+      loadProducts(true);
     } catch (error: any) {
       console.error('Error saving product:', error);
       toast.error(error.message || 'Error al guardar producto');
