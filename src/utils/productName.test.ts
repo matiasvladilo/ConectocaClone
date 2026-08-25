@@ -57,9 +57,10 @@ test('kg y decimales funcionan', () => {
   );
 });
 
-// No se ofrece 'cc': tener ml y cc como opciones distintas para lo mismo
-// reintroduce la inconsistencia que este formulario viene a eliminar.
-test('la lista de unidades es cerrada y no incluye cc', () => {
+// No se ofrece 'cc' porque duplicaría a 'ml' para la misma magnitud, ni 'un'
+// porque se solapa con el campo "Unidades por paquete": un producto sin medida
+// física se carga dejando la presentación vacía.
+test('la lista de unidades es cerrada, sin cc ni un', () => {
   const valores = UNIDADES_PRESENTACION.map(u => u.value);
-  assert.deepEqual(valores, ['ml', 'L', 'g', 'kg', 'un', 'otro']);
+  assert.deepEqual(valores, ['ml', 'L', 'g', 'kg', 'otro']);
 });

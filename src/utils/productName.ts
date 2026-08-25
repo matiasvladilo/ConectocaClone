@@ -29,12 +29,14 @@ export const partesVacias: ProductNameParts = {
 // Lista CERRADA a propósito. No se ofrece 'cc' aunque se use en la práctica:
 // tener 'ml' y 'cc' como opciones distintas para la misma magnitud reintroduce
 // exactamente la inconsistencia que este formulario viene a eliminar.
+// Tampoco se ofrece 'un': se solapaba con el campo "Unidades por paquete" y
+// nadie entendía cuál llenar. Un producto sin medida física (un encendedor, una
+// caja de café) se carga dejando la presentación vacía y usando solo ese campo.
 export const UNIDADES_PRESENTACION = [
   { value: 'ml', label: 'ml' },
   { value: 'L', label: 'L' },
   { value: 'g', label: 'g' },
   { value: 'kg', label: 'kg' },
-  { value: 'un', label: 'un' },
   { value: 'otro', label: 'Otro…' },
 ];
 
