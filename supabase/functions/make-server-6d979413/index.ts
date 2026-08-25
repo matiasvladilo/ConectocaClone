@@ -739,7 +739,10 @@ app.get("/make-server-6d979413/products", async (c) => {
       .from('products')
       .select('*, categories(name), product_ingredients(ingredient_id, quantity)', { count: 'exact' })
       .eq('business_id', profile.businessId)
-      .order('created_at', { ascending: false })
+      // Alfabético en vez de por fecha de creación: así los productos de una
+      // misma categoría/marca (ej. todos los "Café...", todos los "Confort...")
+      // quedan agrupados sin importar cuándo se cargó cada uno.
+      .order('name', { ascending: true })
       .range(offset, offset + limit - 1);
 
     const total = count ?? 0;
