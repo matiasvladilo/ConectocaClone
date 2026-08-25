@@ -324,7 +324,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         }
       } else {
         // Create new product
-        const created = await productsAPI.create(accessToken, productData);
+        // `stock` queda opcional en el tipo de productData porque el spread de
+        // más arriba es condicional (así el guardado de edición no pisa el stock
+        // con un valor viejo). Pero en esta rama `editingProduct` es null, así que
+        // `stockSeToco` da `true` siempre (ver su definición) y `stock` SIEMPRE
+        // está presente acá: el assert solo hace explícito para TS lo que ya es
+        // cierto en runtime, sin tocar el tipo de Product ni el de la API.
+        const created = await productsAPI.create(accessToken, productData as typeof productData & { stock: number });
         setProducts([created, ...products]);
         toast.success('Producto creado exitosamente');
 
@@ -425,6 +431,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const nombreDelFiltro = selectedCategoryFilter === 'all'
     ? 'Todas'
     : (categories.find(c => c.id === selectedCategoryFilter)?.name || 'Todas');
+
+  // El estado vacío no puede mirar solo la búsqueda: filtrar por una categoría
+  // sin productos (con el buscador vacío) también da una lista vacía, y antes
+  // el mensaje decía "no hay productos aún" e invitaba a crear el primero
+  // aunque el catálogo tuviera cientos. Mismo problema que ya se corrigió a
+  // nivel de filtro (ver comentario de idsDelFiltro), pero acá no había llegado.
+  const hayFiltroActivo = !!searchQuery || selectedCategoryFilter !== 'all';
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -751,12 +764,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   <Package className="w-10 h-10 text-blue-300" />
                 </div>
                 <p className="text-gray-600 mb-2" style={{ fontSize: '16px', fontWeight: 500 }}>
-                  {searchQuery ? 'No se encontraron productos' : 'No hay productos aún'}
+                  {hayFiltroActivo ? 'No se encontraron productos' : 'No hay productos aún'}
                 </p>
                 <p className="text-gray-400 text-sm mb-4">
-                  {searchQuery ? 'Intenta con otra búsqueda' : 'Crea tu primer producto para comenzar'}
+                  {hayFiltroActivo ? 'Intenta con otra búsqueda o categoría' : 'Crea tu primer producto para comenzar'}
                 </p>
-                {!searchQuery && (
+                {!hayFiltroActivo && (
                   <Button
                     onClick={() => handleOpenDialog()}
                     className="mt-2"
@@ -793,8 +806,21 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   {/* Todo el cuadrado abre Editar: los tres botones que había antes
                       no entran en ~150px de ancho, así que Ajustar Stock y Eliminar
                       viven ahora dentro de ese diálogo. */}
+                  {/* La tarjeta reemplazó a tres botones (Editar/Ajustar Stock/Eliminar)
+                      que eran focuseables por naturaleza. Como ahora es la ÚNICA forma
+                      de llegar a esas acciones, necesita comportarse como un botón real
+                      para teclado y lectores de pantalla: rol, foco y activación con
+                      Enter/Espacio (el div no los da gratis). */}
                   <Card
                     onClick={() => handleOpenDialog(product)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleOpenDialog(product);
+                      }
+                    }}
                     className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
                     style={{
                       borderRadius: '12px',
