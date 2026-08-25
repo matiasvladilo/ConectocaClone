@@ -935,15 +935,21 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     // neutro y no ensucia el análisis de reposiciones.
     //
     // Solo se registra cuando el request cambió el stock Y el update resultante
-    // NO tocó unlimited_stock: al pasar un producto a stock ilimitado el backend
+    // NO vuelve ilimitado al producto: al pasar a stock ilimitado el backend
     // fuerza stock = 0, y eso no es un movimiento real de mercadería.
-    // Se mira `updateData.unlimited_stock` (el resultado post-procesamiento) y
-    // no el campo crudo `unlimitedStock` del body: el signal legado `stock: -1`
-    // también setea `updateData.unlimited_stock = true` sin que el body traiga
-    // la clave `unlimitedStock`, y ese caso hay que excluirlo igual.
+    // Se mira `updateData.unlimited_stock !== true` (el VALOR post-procesamiento)
+    // y no `=== undefined` (si la CLAVE está presente): el formulario general de
+    // edición manda `unlimitedStock: false` en cada guardado de un producto que
+    // sigue con stock controlado, así que la clave siempre está presente aunque
+    // nada se esté volviendo ilimitado. Con `=== undefined` eso bloqueaba el
+    // registro en el kardex de cualquier ajuste de stock hecho desde ese
+    // formulario — el único camino que sí queda sin rastro es el de
+    // StockAdjustDialog, que nunca manda la clave `unlimitedStock`.
+    // El signal legado `stock: -1` sigue excluido igual: setea
+    // `updateData.unlimited_stock = true`, y `true !== true` da false.
     const esAjusteDeStock =
       stock !== undefined &&
-      updateData.unlimited_stock === undefined &&
+      updateData.unlimited_stock !== true &&
       existing.unlimited_stock !== true;
 
     if (esAjusteDeStock) {
