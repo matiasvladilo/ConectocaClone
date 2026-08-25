@@ -67,5 +67,7 @@ test('ignora productos con nombre vacio', () => {
 // Solo la rama de substring (includes) lo detecta; el prefijo tiene distancia
 // de edición muy alta. Si se elimina la rama includes, este test falla.
 test('encuentra consulta en el medio del nombre (solo substring)', () => {
-  assert.deepEqual(buscarSimilares('coca cola', [{ id: 'x', name: 'Bebida Coca Cola Fria' }]).map(p => p.id), ['x']);
+  // description/price/stock son requeridos por el tipo Product pero no le importan
+  // a esta prueba (solo mira id/name), así que van con valores dummy.
+  assert.deepEqual(buscarSimilares('coca cola', [{ id: 'x', name: 'Bebida Coca Cola Fria', description: '', price: 0, stock: 0 }]).map(p => p.id), ['x']);
 });

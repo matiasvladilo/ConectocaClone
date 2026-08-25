@@ -59,7 +59,7 @@ export function ProductNameFields({ value, onChange, productosExistentes }: Prod
           <Label htmlFor="unidad">Unidad</Label>
           <Select
             value={value.unidad || 'none'}
-            onValueChange={(v) => set({ unidad: v === 'none' ? '' : v, unidadOtro: '' })}
+            onValueChange={(v: string) => set({ unidad: v === 'none' ? '' : v, unidadOtro: '' })}
           >
             <SelectTrigger id="unidad">
               <SelectValue placeholder="—" />
