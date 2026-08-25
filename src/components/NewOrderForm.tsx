@@ -836,7 +836,9 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* 2 columnas desde el celular más angosto (antes era 1 por fila, "una por
+              pantalla"), subiendo a 3-4 en pantallas más grandes. */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {products
               .filter((product: any) => {
                 // Fila de Búsqueda de Texto
@@ -882,7 +884,11 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                         }
                       }}
                     >
-                      <div className="relative w-full h-40 sm:h-48 bg-gray-100/50 flex items-center justify-center overflow-hidden group shrink-0">
+                      {/* `sm:h-48` no existe en el CSS precompilado de este proyecto y
+                          nunca se aplicó (verificado: 0 matches) — la imagen siempre
+                          quedó en h-40. Se reemplaza por h-28, el mismo alto ya probado
+                          en la grilla compacta de Gestión de Productos. */}
+                      <div className="relative w-full h-28 bg-gray-100/50 flex items-center justify-center overflow-hidden group shrink-0">
                         <ImageWithFallback
                           src={product.image}
                           alt={product.name}
@@ -913,23 +919,18 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                         )}
                       </div>
 
-                      <CardContent className="p-4 space-y-3">
+                      <CardContent className="p-2 space-y-2">
                         <div>
-                          <h3 className="text-gray-900 mb-1">{product.name}</h3>
-                          <p className="text-xs text-gray-500 line-clamp-2">{product.description}</p>
+                          <h3 className="text-gray-900 text-sm line-clamp-2 leading-tight mb-1">{product.name}</h3>
                         </div>
 
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            <DollarSign className="w-4 h-4 text-blue-600" />
-                            <span className="text-blue-700">${product.price.toFixed(2)}</span>
-                            <span className="text-xs text-gray-500">/unidad</span>
-                          </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-blue-700 text-sm">${product.price.toFixed(2)}</span>
                           <Badge
                             variant={isOutOfStock ? "destructive" : (!isUnlimitedProduct && remainingStock < 10) ? "outline" : "secondary"}
                             className="text-xs"
                           >
-                            {isUnlimitedProduct ? '∞ Ilimitado' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
+                            {isUnlimitedProduct ? '∞' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
                           </Badge>
                         </div>
 
