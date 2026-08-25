@@ -401,9 +401,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     ? null
     : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
 
+  // El disparador muestra SIEMPRE la palabra "Categoría" (se renderiza aparte) y
+  // este valor al lado. Antes este texto REEMPLAZABA a "Filtrar", así que el
+  // control nunca decía qué filtraba: o decía "Filtrar" (vago) o el nombre de una
+  // categoría (sin contexto).
   const nombreDelFiltro = selectedCategoryFilter === 'all'
-    ? 'Filtrar'
-    : (categories.find(c => c.id === selectedCategoryFilter)?.name || 'Filtrar');
+    ? 'Todas'
+    : (categories.find(c => c.id === selectedCategoryFilter)?.name || 'Todas');
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -639,7 +643,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
             className="border-2 shadow-lg"
             style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
           >
-            <CardContent className="p-4 flex flex-row gap-3">
+            <CardContent className="p-4 flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
@@ -658,14 +662,31 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                   <Camera className="w-5 h-5" />
                 </button>
               </div>
+              {/* `sm:w-auto` y `sm:shrink-0` no existen en el CSS precompilado
+                  (verificado: 0 matches), así que no se puede alternar el ancho
+                  por breakpoint con clases ni con `style` (los estilos inline de
+                  React no soportan media queries). En su lugar se usa el
+                  comportamiento por defecto del flex: el contenedor no fija
+                  "align-items", así que su valor inicial "stretch" ya estira
+                  este div a lo ancho completo cuando el layout es columna
+                  (celular, "flex-col") y "shrink-0" evita que se comprima
+                  cuando el layout es fila (escritorio, "sm:flex-row") — el
+                  mismo resultado que buscaba "w-full sm:w-auto sm:shrink-0". */}
               <div className="shrink-0">
                 <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
-                  <SelectTrigger className="h-11 bg-white border-[#CBD5E1] w-[130px] sm:w-[180px]" style={{ borderRadius: '10px' }}>
+                  {/* El ancho va inline y no por `w-[...]`: las clases de valor
+                      arbitrario no existen en el CSS precompilado de este proyecto.
+                      Las que había acá antes (w-[130px] sm:w-[180px]) no hacían nada. */}
+                  <SelectTrigger
+                    className="h-11 bg-white border-[#CBD5E1] w-full"
+                    style={{ borderRadius: '10px', minWidth: '190px' }}
+                  >
                     <div className="flex items-center gap-2 text-gray-600 overflow-hidden">
                       <Filter className="w-4 h-4 shrink-0" />
-                      <span className="truncate font-medium text-sm">
-                        {nombreDelFiltro}
-                      </span>
+                      {/* "Categoría" no se trunca nunca: es lo que le dice al
+                          usuario qué hace este control. Se trunca solo el valor. */}
+                      <span className="font-medium text-sm shrink-0">Categoría</span>
+                      <span className="text-sm truncate">· {nombreDelFiltro}</span>
                     </div>
                   </SelectTrigger>
                   <SelectContent>
