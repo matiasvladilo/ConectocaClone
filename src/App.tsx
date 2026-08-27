@@ -1766,6 +1766,7 @@ export default function App() {
           onBack={() => setCurrentScreen("home")}
           onViewOrder={handleViewOrder}
           userName={currentUser.name}
+          userRole={currentUser.role}
           accessToken={accessToken}
           onRefresh={() => loadOrders(accessToken)}
         />
@@ -1908,6 +1909,7 @@ export default function App() {
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onViewOrder={handleViewOrder}
             userName={currentUser.name}
+            userRole={currentUser.role}
             lastSync={lastSync}
             accessToken={accessToken}
             onRefresh={() => loadOrders(accessToken)}

@@ -25,6 +25,7 @@ import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { StandardDeliveryGuideContent } from './StandardDeliveryGuide';
 import { EditOrderDialog } from './EditOrderDialog';
+import { canEditOrder, isOrderEditableStatus } from '../utils/orderPermissions';
 
 interface DispatchOrdersProps {
   orders: Order[];
@@ -32,6 +33,7 @@ interface DispatchOrdersProps {
   onUpdateOrderStatus: (orderId: string, status: OrderStatus, progress: number) => void;
   onViewOrder: (order: Order) => void;
   userName: string;
+  userRole: string;
   lastSync?: Date | null;
   accessToken: string;
   onRefresh: () => void;
@@ -43,6 +45,7 @@ export function DispatchOrders({
   onUpdateOrderStatus,
   onViewOrder,
   userName,
+  userRole,
   lastSync,
   accessToken,
   onRefresh
@@ -51,6 +54,7 @@ export function DispatchOrders({
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
   const [selectedOrderForPrint, setSelectedOrderForPrint] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const canEdit = canEditOrder(userRole);
 
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
@@ -520,7 +524,7 @@ export function DispatchOrders({
                             </div>
 
                             {/* Edit Button */}
-                            {['pending', 'in_progress', 'completed'].includes(order.status) && (
+                            {canEdit && isOrderEditableStatus(order.status) && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -580,6 +584,7 @@ export function DispatchOrders({
             onClose={() => setEditingOrder(null)}
             order={editingOrder}
             accessToken={accessToken}
+            userRole={userRole}
             onOrderUpdated={() => {
               onRefresh();
               setEditingOrder(null);

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { EditOrderDialog } from './EditOrderDialog';
+import { canEditOrder } from '../utils/orderPermissions';
 
 interface OrderDetailProps {
   order: Order;
@@ -100,6 +101,7 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
   const [isUpdating, setIsUpdating] = useState(false);
   const [showDeliveryGuide, setShowDeliveryGuide] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const canEdit = canEditOrder(userRole);
 
   const handleDelete = async () => {
     if (!onDelete) return;
@@ -599,7 +601,7 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
           )}
           {/* Print Delivery Guide Button - Only for completed or delivered orders */}
           {/* Edit Order Button */}
-          {['pending', 'in_progress', 'completed'].includes(order.status) && (
+          {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
             <motion.div whileTap={{ scale: 0.98 }}>
               <Button
                 onClick={() => setEditingOrder(order)}
@@ -759,6 +761,7 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
           onClose={() => setEditingOrder(null)}
           order={editingOrder}
           accessToken={accessToken}
+          userRole={userRole}
           onOrderUpdated={() => {
             onRefresh();
             setEditingOrder(null);
