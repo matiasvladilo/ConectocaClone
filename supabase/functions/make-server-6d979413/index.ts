@@ -1566,10 +1566,6 @@ app.put("/make-server-6d979413/orders/:id", async (c) => {
     if (!allowedRoles.includes(profile?.role || '')) {
       return c.json({ error: 'No tienes permiso para editar este pedido' }, 403);
     }
-    if (!['pending', 'in_progress', 'completed'].includes(currentOrder.status)) {
-      return c.json({ error: 'Este pedido ya no se puede editar' }, 409);
-    }
-
     const updates = await c.req.json();
     const { products, total, notes, deadline, customerName, deliveryAddress, status } = updates;
 
