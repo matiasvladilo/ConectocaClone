@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canEditOrder } from './orderPermissions.ts';
+import { canEditOrder, isOrderEditableStatus } from './orderPermissions.ts';
 
 test('permite editar pedidos solo a distribución y administración', () => {
   assert.equal(canEditOrder('dispatch'), true);
@@ -11,4 +11,14 @@ test('permite editar pedidos solo a distribución y administración', () => {
   }
 
   assert.equal(canEditOrder(undefined), false);
+});
+
+test('solo permite editar pedidos pendientes, en preparación o listos', () => {
+  for (const status of ['pending', 'in_progress', 'completed']) {
+    assert.equal(isOrderEditableStatus(status), true);
+  }
+
+  for (const status of ['dispatched', 'delivered', 'cancelled']) {
+    assert.equal(isOrderEditableStatus(status), false);
+  }
 });
