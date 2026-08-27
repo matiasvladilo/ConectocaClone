@@ -32,12 +32,14 @@ import { EditOrderDialog } from './EditOrderDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { productsAPI, Product, categoriesAPI, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
+import { canEditOrder } from '../utils/orderPermissions';
 
 interface OrderHistoryProps {
   orders: Order[];
   onBack: () => void;
   onViewOrder: (order: Order) => void;
   userName: string;
+  userRole: string;
   accessToken: string;
   onRefresh: () => void;
 }
@@ -92,11 +94,12 @@ function truncateProducts(productName: string, max = 2): string {
   return parts.slice(0, max).join(', ') + ` y ${parts.length - max} más...`;
 }
 
-export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToken, onRefresh }: OrderHistoryProps) {
+export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, accessToken, onRefresh }: OrderHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const canEdit = canEditOrder(userRole);
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
@@ -921,7 +924,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                         </div>
 
                         {/* Edit Button */}
-                        {['pending', 'in_progress', 'completed'].includes(order.status) && (
+                        {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
                           <div className="mx-4">
                             <Button
                               size="sm"
@@ -1061,7 +1064,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
                       </div>
 
                       {/* Edit Button */}
-                      {['pending', 'in_progress', 'completed'].includes(order.status) && (
+                      {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
                         <div className="mt-3">
                           <Button
                             size="sm"
@@ -1111,6 +1114,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, accessToke
             onClose={() => setEditingOrder(null)}
             order={editingOrder}
             accessToken={accessToken}
+            userRole={userRole}
             onOrderUpdated={() => {
               onRefresh();
               setEditingOrder(null);

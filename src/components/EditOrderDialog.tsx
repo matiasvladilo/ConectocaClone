@@ -43,6 +43,7 @@ import { productsAPI, ordersAPI, type Product as APIProduct } from '../utils/api
 import { formatCLP } from '../utils/format';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
+import { canEditOrder } from '../utils/orderPermissions';
 
 
 interface EditOrderDialogProps {
@@ -50,6 +51,7 @@ interface EditOrderDialogProps {
     onClose: () => void;
     order: Order;
     accessToken: string;
+    userRole?: string;
     onOrderUpdated: () => void;
 }
 
@@ -66,6 +68,7 @@ export function EditOrderDialog({
     onClose,
     order,
     accessToken,
+    userRole,
     onOrderUpdated
 }: EditOrderDialogProps) {
     const [isLoading, setIsLoading] = useState(false);
@@ -162,6 +165,11 @@ export function EditOrderDialog({
     };
 
     const handleSave = async () => {
+        if (!canEditOrder(userRole)) {
+            toast.error('No tienes permiso para editar este pedido');
+            return;
+        }
+
         if (orderItems.length === 0) {
             toast.error('El pedido debe tener al menos un producto');
             return;

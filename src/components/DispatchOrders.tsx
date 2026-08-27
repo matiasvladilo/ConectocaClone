@@ -32,6 +32,7 @@ interface DispatchOrdersProps {
   onUpdateOrderStatus: (orderId: string, status: OrderStatus, progress: number) => void;
   onViewOrder: (order: Order) => void;
   userName: string;
+  userRole: string;
   lastSync?: Date | null;
   accessToken: string;
   onRefresh: () => void;
@@ -43,6 +44,7 @@ export function DispatchOrders({
   onUpdateOrderStatus,
   onViewOrder,
   userName,
+  userRole,
   lastSync,
   accessToken,
   onRefresh
@@ -580,6 +582,7 @@ export function DispatchOrders({
             onClose={() => setEditingOrder(null)}
             order={editingOrder}
             accessToken={accessToken}
+            userRole={userRole}
             onOrderUpdated={() => {
               onRefresh();
               setEditingOrder(null);
