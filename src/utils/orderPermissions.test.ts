@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canEditOrder, isOrderEditableStatus } from './orderPermissions.ts';
 
-test('permite editar pedidos solo a distribución y administración', () => {
+test('permite editar pedidos a distribución, producción y administración', () => {
   assert.equal(canEditOrder('dispatch'), true);
   assert.equal(canEditOrder('admin'), true);
+  assert.equal(canEditOrder('production'), true);
 
-  for (const role of ['local', 'production', 'user', 'worker', 'pastry']) {
+  for (const role of ['local', 'user', 'worker', 'pastry']) {
     assert.equal(canEditOrder(role), false);
   }
 

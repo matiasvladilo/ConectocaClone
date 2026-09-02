@@ -1562,7 +1562,7 @@ app.put("/make-server-6d979413/orders/:id", async (c) => {
     if (!currentOrder) return c.json({ error: 'Pedido no encontrado' }, 404);
     if (currentOrder.business_id !== profile?.businessId) return c.json({ error: 'No autorizado' }, 403);
 
-    const allowedRoles = ['admin', 'dispatch'];
+    const allowedRoles = ['admin', 'dispatch', 'production'];
     if (!allowedRoles.includes(profile?.role || '')) {
       return c.json({ error: 'No tienes permiso para editar este pedido' }, 403);
     }
