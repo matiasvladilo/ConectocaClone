@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, ingredientsAPI, type Ingredient, type ProductIngredient, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
+import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
 import { productsAPI } from '../utils/api';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -68,7 +68,6 @@ interface ProductFormData {
   productionAreaId: string;
   unlimitedStock: boolean;
   allowDecimal: boolean;
-  ingredients: (ProductIngredient & { inputUnit?: string })[];
 }
 
 const emptyForm: ProductFormData = {
@@ -83,15 +82,13 @@ const emptyForm: ProductFormData = {
   imageUrl: '',
   productionAreaId: '',
   unlimitedStock: false,
-  allowDecimal: false,
-  ingredients: []
+  allowDecimal: false
 };
 
 export function ProductManagement({ accessToken, onBack, onManageCategories, onManageRecipe }: ProductManagementProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [productionAreas, setProductionAreas] = useState<ProductionArea[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -112,7 +109,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     loadProducts();
     loadCategories();
     loadProductionAreas();
-    loadIngredients();
 
     // Load profile to identify current user
     profileAPI.get(accessToken).then(profile => {
@@ -160,44 +156,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
-  const loadIngredients = async () => {
-    try {
-      const data = await ingredientsAPI.getAll(accessToken);
-      setIngredients(data);
-    } catch (error: any) {
-      console.error('Error loading ingredients:', error);
-    }
-  };
-
   const handleOpenDialog = (product?: Product) => {
     setNameParts(partesVacias);
     if (product) {
       setEditingProduct(product);
-
-      // Transform ingredients for display
-      const displayIngredients: (ProductIngredient & { inputUnit?: string })[] = [];
-
-      (product.ingredients || []).forEach(pi => {
-        const ingData = ingredients.find(i => i.id === pi.ingredientId);
-
-        const baseUnit = ingData?.unit?.toLowerCase() || 'kg';
-        let displayQty = pi.quantity;
-        let displayUnit = baseUnit;
-
-        if (baseUnit === 'kg' && pi.quantity < 1) {
-          displayQty = pi.quantity * 1000;
-          displayUnit = 'g';
-        } else if (baseUnit === 'l' && pi.quantity < 1) {
-          displayQty = pi.quantity * 1000;
-          displayUnit = 'ml';
-        }
-
-        displayIngredients.push({
-          ...pi,
-          quantity: parseFloat(displayQty.toFixed(3)),
-          inputUnit: displayUnit
-        });
-      });
 
       setFormData({
         name: product.name,
@@ -211,8 +173,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         imageUrl: product.imageUrl || '',
         productionAreaId: product.productionAreaId || '',
         unlimitedStock: product.unlimitedStock === true || product.stock === -1,
-        allowDecimal: product.allowDecimal === true,
-        ingredients: displayIngredients
+        allowDecimal: product.allowDecimal === true
       });
     } else {
       setEditingProduct(null);
@@ -253,8 +214,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     try {
       setSubmitting(true);
 
-      console.log('📝 [DEBUG] Form Ingredients:', formData.ingredients);
-
       // El stock solo se manda si de verdad se tocó en este formulario (o es un
       // producto nuevo). Si no, este PUT viajaría con el número con el que se
       // abrió el diálogo, y pisaría un stock que haya cambiado por otro lado
@@ -287,18 +246,6 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         sku: formData.sku.trim(),
         imageUrl: formData.imageUrl.trim() || undefined,
         productionAreaId: formData.productionAreaId || undefined,
-        ingredients: formData.ingredients.map(pi => {
-          // Convert back to base unit if necessary before saving
-          let quantityToSave = pi.quantity;
-          const unit = pi.inputUnit;
-          if (unit === 'g' || unit === 'ml') {
-            quantityToSave = quantityToSave / 1000;
-          }
-          return {
-            ingredientId: pi.ingredientId,
-            quantity: quantityToSave
-          };
-        }),
         ...(stockSeToco
           ? { stock: formData.unlimitedStock ? 0 : (parseFloat(formData.stock) || 0) }
           : {})
@@ -443,6 +390,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   // aunque el catálogo tuviera cientos. Mismo problema que ya se corrigió a
   // nivel de filtro (ver comentario de idsDelFiltro), pero acá no había llegado.
   const hayFiltroActivo = !!searchQuery || selectedCategoryFilter !== 'all';
+
+  // El contador sale de `products` y no de `formData`: así el loadProducts(true)
+  // que corre al cerrar la capa de receta lo refresca solo, sin cablear nada más.
+  const recetaCount = editingProduct
+    ? (products.find(p => p.id === editingProduct.id)?.ingredients?.length ?? 0)
+    : 0;
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -1234,7 +1187,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         Receta
                       </Label>
                       <p className="text-sm text-gray-500 mt-1">
-                        {formData.ingredients.length} ingrediente{formData.ingredients.length !== 1 ? 's' : ''} configurado{formData.ingredients.length !== 1 ? 's' : ''}
+                        {recetaCount} ingrediente{recetaCount !== 1 ? 's' : ''} configurado{recetaCount !== 1 ? 's' : ''}
                       </p>
                     </div>
                     {onManageRecipe && (
