@@ -1353,7 +1353,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
       {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo
           que existe. No compite con el diálogo porque abrirReceta lo cierra. */}
       {recetaDe && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+        // overscrollBehavior va inline porque `overscroll-*` no está compilada en
+        // src/index.css (no existe como clase). Sin esto, al llegar al final del
+        // scroll de la capa el gesto encadena al document, que Radix ya dejó
+        // scrolleable al cerrar el diálogo, y mueve la grilla de atrás en silencio.
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-white"
+          style={{ overscrollBehavior: 'contain' }}
+        >
           <ProductIngredientConfig
             initialProduct={recetaDe}
             onBack={cerrarReceta}
