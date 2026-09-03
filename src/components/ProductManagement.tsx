@@ -37,6 +37,7 @@ import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
+import { ProductIngredientConfig } from './ProductIngredientConfig';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -104,6 +105,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [savingStock, setSavingStock] = useState(false);
   // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
   const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
+  // La receta se abre como capa y no navegando a otra pantalla: así este
+  // componente no se desmonta y el diálogo, la búsqueda y el scroll sobreviven.
+  const [recetaDe, setRecetaDe] = useState<Product | null>(null);
 
   useEffect(() => {
     loadProducts();
@@ -187,6 +191,25 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     setEditingProduct(null);
     setFormData(emptyForm);
     setNameParts(partesVacias);
+  };
+
+  const abrirReceta = () => {
+    if (!editingProduct) return;
+    setRecetaDe(editingProduct);
+    // Ojo: NO handleCloseDialog(), que además borra editingProduct, formData y
+    // nameParts. Acá solo se baja la bandera; Radix desmonta el contenido del
+    // diálogo pero el estado vive en este componente y vuelve intacto, incluidos
+    // los campos a medio escribir.
+    setIsDialogOpen(false);
+  };
+
+  const cerrarReceta = () => {
+    setRecetaDe(null);
+    setIsDialogOpen(true);
+    // Silencioso para no perder el scroll de la grilla. Refresca `products`, y
+    // con eso el contador de ingredientes del diálogo.
+    // No tocar formData: conserva a propósito lo que el usuario no ha guardado.
+    loadProducts(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1190,8 +1213,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         {recetaCount} ingrediente{recetaCount !== 1 ? 's' : ''} configurado{recetaCount !== 1 ? 's' : ''}
                       </p>
                     </div>
-                    {onManageRecipe && (
-                      <Button type="button" variant="outline" onClick={onManageRecipe}>
+                    {/* Solo al editar: un producto que todavía no existe no tiene
+                        receta que configurar, y el botón sacaba del formulario
+                        perdiendo lo que se llevara escrito. */}
+                    {editingProduct && (
+                      <Button type="button" variant="outline" onClick={abrirReceta}>
                         Configurar receta
                       </Button>
                     )}
@@ -1323,6 +1349,18 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         onConfirm={handleAjustarStock}
         saving={savingStock}
       />
+
+      {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo
+          que existe. No compite con el diálogo porque abrirReceta lo cierra. */}
+      {recetaDe && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+          <ProductIngredientConfig
+            initialProduct={recetaDe}
+            onBack={cerrarReceta}
+            accessToken={accessToken}
+          />
+        </div>
+      )}
     </div >
   );
 }
