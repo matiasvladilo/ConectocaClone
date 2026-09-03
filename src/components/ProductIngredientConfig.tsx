@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -16,9 +16,13 @@ import { motion, AnimatePresence } from "motion/react";
 interface ProductIngredientConfigProps {
   onBack: () => void;
   accessToken: string;
+  // Cuando se entra desde "Configurar receta" de un producto puntual. Sin esto,
+  // el componente preselecciona el primer producto alfabético y el usuario
+  // termina editando la receta equivocada.
+  initialProduct?: Product;
 }
 
-export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredientConfigProps) {
+export function ProductIngredientConfig({ onBack, accessToken, initialProduct }: ProductIngredientConfigProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<APIIngredient[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -38,6 +42,8 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
   const [inputUnit, setInputUnit] = useState<string>("");
   const [laborCost, setLaborCost] = useState<string>("");
   const [savingLabor, setSavingLabor] = useState(false);
+  // Solo se usa para llevar la columna izquierda hasta el producto preseleccionado.
+  const botonPreseleccionado = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     console.log("ProductIngredientConfig: Component mounted");
@@ -82,6 +88,13 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
     };
   }, [selectedProduct]);
 
+  // Solo al terminar la carga inicial. Si dependiera de `selectedProduct`, saltaría
+  // cada vez que el usuario elige otro producto de la lista, que ya está a la vista.
+  useEffect(() => {
+    if (loading || !initialProduct) return;
+    botonPreseleccionado.current?.scrollIntoView({ block: "nearest" });
+  }, [loading, initialProduct]);
+
   const loadInitialData = async () => {
     try {
       console.log("Loading initial data...");
@@ -95,7 +108,18 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
       setProducts(productsData);
       setIngredients(ingredientsData);
 
-      if (productsData.length > 0) {
+      if (initialProduct) {
+        // Se busca en la lista recién cargada y no se usa `initialProduct` tal cual:
+        // el objeto que llega por prop puede ser una copia vieja.
+        const enLista = productsData.find(p => p.id === initialProduct.id);
+        if (enLista) {
+          setSelectedProduct(enLista);
+        } else {
+          // Sin fallback al primero de la lista: caer en la receta de otro producto
+          // es exactamente el bug que se está arreglando.
+          toast.error("Ese producto ya no está disponible");
+        }
+      } else if (productsData.length > 0) {
         setSelectedProduct(productsData[0]);
       }
     } catch (error: any) {
@@ -327,6 +351,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                       products.map((product) => (
                         <button
                           key={product.id}
+                          ref={initialProduct && product.id === initialProduct.id ? botonPreseleccionado : undefined}
                           onClick={() => setSelectedProduct(product)}
                           className={`w-full text-left p-3 rounded-lg transition-all ${selectedProduct?.id === product.id
                             ? "bg-blue-600 text-white shadow-md"
