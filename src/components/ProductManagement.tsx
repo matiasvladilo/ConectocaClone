@@ -53,7 +53,6 @@ interface ProductManagementProps {
   accessToken: string;
   onBack: () => void;
   onManageCategories: () => void;
-  onManageRecipe?: () => void;
 }
 
 interface ProductFormData {
@@ -86,7 +85,7 @@ const emptyForm: ProductFormData = {
   allowDecimal: false
 };
 
-export function ProductManagement({ accessToken, onBack, onManageCategories, onManageRecipe }: ProductManagementProps) {
+export function ProductManagement({ accessToken, onBack, onManageCategories }: ProductManagementProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [productionAreas, setProductionAreas] = useState<ProductionArea[]>([]);
