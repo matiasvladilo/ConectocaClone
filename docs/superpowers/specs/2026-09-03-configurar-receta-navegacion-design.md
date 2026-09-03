@@ -17,10 +17,16 @@ Tres causas encadenadas:
    `onManageRecipe()` sin argumentos, y `App.tsx:1791` lo traduce en un simple
    `irAPantalla("productIngredients")`.
 
-2. **La pantalla de destino es un configurador genérico.** `ProductIngredientConfig`
-   solo recibe `onBack` y `accessToken`; arranca con `selectedProduct = null` y lo
-   primero que dibuja es la lista completa de productos para que elijas uno. Esa es
-   la "sección de productos extraña": es un selector, no un error.
+2. **La pantalla de destino preselecciona el producto equivocado.**
+   `ProductIngredientConfig` solo recibe `onBack` y `accessToken`, así que no tiene
+   forma de saber de qué producto vienes. Tras cargar la lista hace
+   `setSelectedProduct(productsData[0])` (`ProductIngredientConfig.tsx:98`), y el
+   listado viene ordenado alfabéticamente (`index.ts:745`). Resultado: al pulsar
+   "Configurar receta" sobre cualquier producto, aterrizas en la receta del primer
+   producto del abecedario — hoy "Aceite Natura", que tiene 0 ingredientes.
+
+   No es solo confuso. Es peligroso: agregar ingredientes ahí se los asigna al
+   producto equivocado, sin ninguna señal de que estás en otro sitio.
 
 3. **La vuelta atrás resetea todo.** El render de App es condicional, así que
    `ProductManagement` se desmonta al salir y se monta de cero al volver: se pierde
@@ -97,6 +103,11 @@ Prop opcional `initialProduct?: Product`. En `loadInitialData`, tras cargar la l
 de productos, si viene `initialProduct` se hace `setSelectedProduct` con el elemento
 **de la lista recién cargada** que coincida por id — no con el objeto recibido por
 prop, que puede ser una copia desactualizada.
+
+El fallback a `productsData[0]` se mantiene **solo en modo pantalla**. Cuando llega
+un `initialProduct` cuyo id no está en la lista, no se preselecciona nada y se avisa
+con un toast: caer en la receta de otro producto es justamente el bug que se está
+arreglando.
 
 La columna izquierda hace scroll hasta el elemento seleccionado con `scrollIntoView`
 sobre un ref del botón correspondiente, disparado una sola vez cuando la
@@ -184,8 +195,8 @@ sin `editingProduct`. Ese botón ya es un bug: saca al usuario del formulario y 
 lo escrito. Se esconde el botón cuando no hay producto guardado.
 
 **El producto ya no existe.** Si el id de `initialProduct` no aparece en la lista que
-carga el configurador (lo borró otra sesión), no se preselecciona nada y queda el
-comportamiento actual: el usuario elige de la lista.
+carga el configurador (lo borró otra sesión), no se preselecciona nada y se muestra un
+toast. No debe caer al `productsData[0]` del modo pantalla.
 
 **Guardar el producto con la receta recién cambiada.** Es el caso que motivó el
 cambio (c): con el PUT sin `ingredients`, no hay nada viejo que pisar.
