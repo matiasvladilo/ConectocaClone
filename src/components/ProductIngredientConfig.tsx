@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -42,8 +42,6 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
   const [inputUnit, setInputUnit] = useState<string>("");
   const [laborCost, setLaborCost] = useState<string>("");
   const [savingLabor, setSavingLabor] = useState(false);
-  // Solo se usa para llevar la columna izquierda hasta el producto preseleccionado.
-  const botonPreseleccionado = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     console.log("ProductIngredientConfig: Component mounted");
@@ -88,12 +86,6 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
     };
   }, [selectedProduct]);
 
-  // Solo al terminar la carga inicial. Si dependiera de `selectedProduct`, saltaría
-  // cada vez que el usuario elige otro producto de la lista, que ya está a la vista.
-  useEffect(() => {
-    if (loading || !initialProduct) return;
-    botonPreseleccionado.current?.scrollIntoView({ block: "nearest" });
-  }, [loading, initialProduct]);
 
   const loadInitialData = async () => {
     try {
@@ -333,8 +325,14 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
           </div>
         ) : (
           <div className="max-w-7xl mx-auto p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Products List */}
+            <div className={initialProduct ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
+              {/* Products List — solo en modo pantalla. Cuando se entra desde
+                  "Configurar receta" de un producto puntual ya sabemos cuál es, y
+                  este bloque no es una barra lateral: por debajo de `lg` la grilla
+                  colapsa a una columna y la lista completa queda ENCIMA de la
+                  receta, obligando a recorrer todo el catálogo para llegar a lo
+                  único que el usuario vino a hacer. */}
+              {!initialProduct && (
               <div className="lg:col-span-1">
                 <Card className="p-4 bg-white">
                   <h2 className="mb-4 flex items-center gap-2">
@@ -351,7 +349,6 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                       products.map((product) => (
                         <button
                           key={product.id}
-                          ref={initialProduct && product.id === initialProduct.id ? botonPreseleccionado : undefined}
                           onClick={() => setSelectedProduct(product)}
                           className={`w-full text-left p-3 rounded-lg transition-all ${selectedProduct?.id === product.id
                             ? "bg-blue-600 text-white shadow-md"
@@ -381,14 +378,19 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                   </div>
                 </Card>
               </div>
+              )}
 
-              {/* Product Ingredients Configuration */}
-              <div className="lg:col-span-2">
+              {/* Product Ingredients Configuration. Sin la lista al lado, la grilla
+                  de arriba ya es de una sola columna y no hace falta ningún span
+                  (`lg:col-span-3` ni siquiera está compilado en index.css). */}
+              <div className={initialProduct ? undefined : "lg:col-span-2"}>
                 {selectedProduct ? (
                   <div className="space-y-4">
                     {/* Product Info Header */}
                     <Card className="p-6 bg-white border-l-4 border-blue-500">
-                      <div className="flex items-start gap-4">
+                      {/* El botón "Agregar Ingrediente" mide ~188px fijos: sin envolver
+                          dejaba el nombre y la descripción del producto en 112px. */}
+                      <div className="flex flex-wrap items-start gap-4">
                         {selectedProduct.imageUrl && (
                           <img
                             src={selectedProduct.imageUrl}
@@ -399,7 +401,9 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                         <div className="flex-1">
                           <h2 className="text-gray-900 mb-1">{selectedProduct.name}</h2>
                           <p className="text-sm text-gray-600 mb-2">{selectedProduct.description}</p>
-                          <div className="flex items-center gap-4 text-sm">
+                          {/* Sin flex-wrap, "Precio" y "Costo Materias Primas" se reparten
+                              el ancho en columnas de una palabra en cuanto no caben. */}
+                          <div className="flex flex-wrap items-center gap-4 text-sm">
                             <span className="text-gray-600">
                               Precio: <span className="text-gray-900">${selectedProduct.price}</span>
                             </span>
@@ -409,7 +413,7 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                               </span>
                             )}
                           </div>
-                          <div className="mt-3 flex items-center gap-2">
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
                             <label className="text-sm text-gray-600">Costo mano de obra (opcional):</label>
                             <input
                               type="text"
@@ -612,10 +616,17 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                                 exit={{ opacity: 0, x: -20 }}
                               >
                                 <Card className="p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
-                                  <div className="flex items-center gap-4">
-                                    <div className="flex-1">
+                                  {/* En una sola fila los controles de edición se llevan ~180px
+                                      fijos y en móvil le dejaban 86px al nombre y a los datos,
+                                      que quedaban en columnas de una palabra. Apilado por
+                                      defecto y en fila recién desde `sm`, donde sí hay ancho. */}
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                    <div className="flex-1 min-w-0 w-full">
                                       <h4 className="text-gray-900 mb-1">{ingredient.name}</h4>
-                                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                                      {/* flex-wrap: sin él los cuatro datos no se apilan,
+                                          se comprimen en columnas de un par de palabras y
+                                          en móvil quedan ilegibles. */}
+                                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
                                         <span>
                                           Cantidad: {pi.quantity} {ingredient.unit}
                                         </span>
