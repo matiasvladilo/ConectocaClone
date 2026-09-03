@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
 import { productsAPI } from '../utils/api';
 import { Button } from './ui/button';
@@ -93,6 +93,16 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   // La receta se abre como capa y no navegando a otra pantalla: así este
   // componente no se desmonta y el diálogo, la búsqueda y el scroll sobreviven.
   const [recetaDe, setRecetaDe] = useState<Product | null>(null);
+  // Foco de la capa de receta. Al montarse, el botón "Configurar receta" que
+  // tenía el foco ya se desmontó (estaba dentro del diálogo, que se cerró), así
+  // que el foco cae en document.body: desde ahí, espacio/PageDown/flechas
+  // scrollean la grilla de atrás (overscrollBehavior solo corta el
+  // encadenamiento de rueda y touch, no el del teclado), y Tab alcanza esa
+  // misma grilla tapada, donde Enter en un "Editar" de otra tarjeta pisa
+  // editingProduct/formData y abre el diálogo del producto equivocado encima
+  // de la capa. Enfocar el div de la capa (con tabIndex={-1}) cierra las dos
+  // fugas: el teclado ya no tiene forma de llegar a lo de atrás.
+  const recetaLayerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProducts();
@@ -188,6 +198,17 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     setIsDialogOpen(false);
   };
 
+  // Le da foco a la capa apenas se monta (ver comentario de recetaLayerRef).
+  // `preventScroll` es obligatorio: sin él, el navegador scrollea para revelar
+  // el elemento recién enfocado, y como la capa ya cubre toda la pantalla
+  // (fixed inset-0) ese scroll cae sobre el documento de atrás — exactamente
+  // el movimiento que este mismo efecto existe para evitar.
+  useEffect(() => {
+    if (recetaDe) {
+      recetaLayerRef.current?.focus({ preventScroll: true });
+    }
+  }, [recetaDe]);
+
   const cerrarReceta = () => {
     setRecetaDe(null);
     setIsDialogOpen(true);
@@ -222,13 +243,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     try {
       setSubmitting(true);
 
-      // El stock solo se manda si de verdad se tocó en este formulario (o es un
-      // producto nuevo). Si no, este PUT viajaría con el número con el que se
-      // abrió el diálogo, y pisaría un stock que haya cambiado por otro lado
-      // mientras estuvo abierto (un "Ajustar stock", un pedido, otra sesión) sin
-      // que nadie lo haya pedido. StockAdjustDialog es el único lugar pensado
-      // para tocar stock, mandando solo { stock, modo }; este formulario general
-      // no debe pisarlo de rebote por editar, por ejemplo, la categoría.
+      // Por qué el stock viaja condicional: ver el comentario de `stockSeToco`
+      // en construirPayloadProducto (src/utils/productPayload.ts).
       const productData = construirPayloadProducto({
         formData,
         editingProduct,
@@ -1312,13 +1328,28 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       />
 
       {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo
-          que existe. No compite con el diálogo porque abrirReceta lo cierra. */}
+          que existe. No queda detrás del diálogo de forma permanente (abrirReceta
+          lo cierra), pero sí se solapan unos 200ms: animate-out/fade-out-0/
+          zoom-out-95/duration-200 SÍ están compiladas en src/index.css, así que
+          Radix mantiene montado el DialogContent durante su animación de salida
+          y ese frame pinta sobre la capa recién montada. Es un crossfade visual,
+          inofensivo — no una carrera de estado. */}
       {recetaDe && (
         // overscrollBehavior va inline porque `overscroll-*` no está compilada en
         // src/index.css (no existe como clase). Sin esto, al llegar al final del
         // scroll de la capa el gesto encadena al document, que Radix ya dejó
         // scrolleable al cerrar el diálogo, y mueve la grilla de atrás en silencio.
+        // tabIndex={-1} + el useEffect de más arriba: sin foco EN la capa, el
+        // teclado (espacio/PageDown/flechas) scrollea el document de atrás, y Tab
+        // alcanza la grilla tapada (ver comentario de recetaLayerRef).
         <div
+          ref={recetaLayerRef}
+          tabIndex={-1}
+          onKeyDown={(e) => {
+            // Cerrar con Escape es seguro: la receta se guarda contra la API al
+            // toque, no hay borrador en memoria que se pueda perder al salir.
+            if (e.key === 'Escape') cerrarReceta();
+          }}
           className="fixed inset-0 z-50 overflow-y-auto bg-white"
           style={{ overscrollBehavior: 'contain' }}
         >

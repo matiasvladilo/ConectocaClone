@@ -113,3 +113,30 @@ test('categoría vacía cae en General', () => {
   });
   assert.equal(payload.category, 'General');
 });
+
+// Pasar de ilimitado a limitado toca el stock aunque el número en formData.stock
+// sea el mismo que ya traía el producto: eraIlimitadoAntes !== formData.unlimitedStock
+// debe alcanzar para disparar stockSeToco por sí solo.
+test('pasar de stock ilimitado a limitado incluye stock', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, unlimitedStock: false, stock: '10' },
+    editingProduct: { ...productoBase, unlimitedStock: true, stock: 10 },
+    priceValue: 2500,
+  });
+  assert.equal('stock' in payload, true);
+  assert.equal(payload.stock, 10);
+});
+
+// Quirk preexistente, no comportamiento nuevo: categoryId: '' viaja como
+// `undefined` (no como '' ni null), así que este formulario nunca puede
+// mandar "sin categoría" para BORRAR la categoría de un producto existente
+// (el backend, al recibir undefined, no toca el campo). Este test solo deja
+// documentado el estado actual.
+test('categoryId vacío viaja como undefined (no borra la categoría)', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, categoryId: '' },
+    editingProduct: productoBase,
+    priceValue: 2500,
+  });
+  assert.equal(payload.categoryId, undefined);
+});
