@@ -128,3 +128,7 @@ supabase/.temp/
 
 # Local git worktrees
 .worktrees/
+
+# Worktrees aislados de Claude Code y scratch de subagent-driven-development
+.claude/worktrees/
+.superpowers/
