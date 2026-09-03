@@ -886,7 +886,15 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
       {/* Create/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Radix, al desmontar el diálogo, devuelve el foco al elemento que lo abrió: la
+            tarjeta de la grilla. Cuando salimos por "Configurar receta" eso ocurre ~200ms
+            después, ya con la capa de receta montada, y le roba el foco que le dimos: el
+            usuario queda tecleando sobre una grilla que no ve, donde Enter abre el diálogo
+            de OTRO producto y se lleva puesto lo que estaba editando sin guardar. */}
+        <DialogContent
+          className="max-w-2xl max-h-[90vh] overflow-y-auto"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editingProduct ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
