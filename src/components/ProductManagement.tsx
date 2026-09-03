@@ -37,6 +37,7 @@ import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
+import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
 import { ProductIngredientConfig } from './ProductIngredientConfig';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
@@ -53,21 +54,6 @@ interface ProductManagementProps {
   accessToken: string;
   onBack: () => void;
   onManageCategories: () => void;
-}
-
-interface ProductFormData {
-  name: string;
-  description: string;
-  price: string;
-  stock: string;
-  minStock: string;
-  category: string;
-  categoryId: string;
-  sku: string;
-  imageUrl: string;
-  productionAreaId: string;
-  unlimitedStock: boolean;
-  allowDecimal: boolean;
 }
 
 const emptyForm: ProductFormData = {
@@ -243,35 +229,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       // que nadie lo haya pedido. StockAdjustDialog es el único lugar pensado
       // para tocar stock, mandando solo { stock, modo }; este formulario general
       // no debe pisarlo de rebote por editar, por ejemplo, la categoría.
-      const eraIlimitadoAntes = editingProduct
-        ? (editingProduct.unlimitedStock === true || editingProduct.stock === -1)
-        : false;
-      // parseFloat y no parseInt: `stock` es numeric en Postgres y un producto
-      // con allowDecimal se queda en valores fraccionados (los pedidos le restan
-      // 0.5). Con parseInt, parseInt("9.5") = 9 nunca coincidía con 9.5, así que
-      // para TODO producto por peso este chequeo daba "se tocó" y además mandaba
-      // el 9 truncado: editar solo el precio le comía media unidad.
-      const stockSeToco = !editingProduct
-        || formData.unlimitedStock !== eraIlimitadoAntes
-        || parseFloat(formData.stock) !== editingProduct.stock;
-
-      const productData = {
-        name: formData.name.trim(),
-        description: formData.description.trim(),
-        price: priceValue,
-        minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
-        unlimitedStock: formData.unlimitedStock,
-        trackStock: !formData.unlimitedStock,
-        allowDecimal: formData.allowDecimal,
-        category: formData.category.trim() || 'General',
-        categoryId: formData.categoryId || undefined,
-        sku: formData.sku.trim(),
-        imageUrl: formData.imageUrl.trim() || undefined,
-        productionAreaId: formData.productionAreaId || undefined,
-        ...(stockSeToco
-          ? { stock: formData.unlimitedStock ? 0 : (parseFloat(formData.stock) || 0) }
-          : {})
-      };
+      const productData = construirPayloadProducto({
+        formData,
+        editingProduct,
+        priceValue,
+      });
 
       console.log('📦 [DEBUG] Sending Product Data:', JSON.stringify(productData, null, 2));
 
