@@ -16,9 +16,13 @@ import { motion, AnimatePresence } from "motion/react";
 interface ProductIngredientConfigProps {
   onBack: () => void;
   accessToken: string;
+  // Cuando se entra desde "Configurar receta" de un producto puntual. Sin esto,
+  // el componente preselecciona el primer producto alfabético y el usuario
+  // termina editando la receta equivocada.
+  initialProduct?: Product;
 }
 
-export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredientConfigProps) {
+export function ProductIngredientConfig({ onBack, accessToken, initialProduct }: ProductIngredientConfigProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<APIIngredient[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -82,6 +86,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
     };
   }, [selectedProduct]);
 
+
   const loadInitialData = async () => {
     try {
       console.log("Loading initial data...");
@@ -95,7 +100,18 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
       setProducts(productsData);
       setIngredients(ingredientsData);
 
-      if (productsData.length > 0) {
+      if (initialProduct) {
+        // Se busca en la lista recién cargada y no se usa `initialProduct` tal cual:
+        // el objeto que llega por prop puede ser una copia vieja.
+        const enLista = productsData.find(p => p.id === initialProduct.id);
+        if (enLista) {
+          setSelectedProduct(enLista);
+        } else {
+          // Sin fallback al primero de la lista: caer en la receta de otro producto
+          // es exactamente el bug que se está arreglando.
+          toast.error("Ese producto ya no está disponible");
+        }
+      } else if (productsData.length > 0) {
         setSelectedProduct(productsData[0]);
       }
     } catch (error: any) {
@@ -309,8 +325,14 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
           </div>
         ) : (
           <div className="max-w-7xl mx-auto p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Products List */}
+            <div className={initialProduct ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 lg:grid-cols-3 gap-6"}>
+              {/* Products List — solo en modo pantalla. Cuando se entra desde
+                  "Configurar receta" de un producto puntual ya sabemos cuál es, y
+                  este bloque no es una barra lateral: por debajo de `lg` la grilla
+                  colapsa a una columna y la lista completa queda ENCIMA de la
+                  receta, obligando a recorrer todo el catálogo para llegar a lo
+                  único que el usuario vino a hacer. */}
+              {!initialProduct && (
               <div className="lg:col-span-1">
                 <Card className="p-4 bg-white">
                   <h2 className="mb-4 flex items-center gap-2">
@@ -356,14 +378,19 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                   </div>
                 </Card>
               </div>
+              )}
 
-              {/* Product Ingredients Configuration */}
-              <div className="lg:col-span-2">
+              {/* Product Ingredients Configuration. Sin la lista al lado, la grilla
+                  de arriba ya es de una sola columna y no hace falta ningún span
+                  (`lg:col-span-3` ni siquiera está compilado en index.css). */}
+              <div className={initialProduct ? undefined : "lg:col-span-2"}>
                 {selectedProduct ? (
                   <div className="space-y-4">
                     {/* Product Info Header */}
                     <Card className="p-6 bg-white border-l-4 border-blue-500">
-                      <div className="flex items-start gap-4">
+                      {/* El botón "Agregar Ingrediente" mide ~188px fijos: sin envolver
+                          dejaba el nombre y la descripción del producto en 112px. */}
+                      <div className="flex flex-wrap items-start gap-4">
                         {selectedProduct.imageUrl && (
                           <img
                             src={selectedProduct.imageUrl}
@@ -374,7 +401,9 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                         <div className="flex-1">
                           <h2 className="text-gray-900 mb-1">{selectedProduct.name}</h2>
                           <p className="text-sm text-gray-600 mb-2">{selectedProduct.description}</p>
-                          <div className="flex items-center gap-4 text-sm">
+                          {/* Sin flex-wrap, "Precio" y "Costo Materias Primas" se reparten
+                              el ancho en columnas de una palabra en cuanto no caben. */}
+                          <div className="flex flex-wrap items-center gap-4 text-sm">
                             <span className="text-gray-600">
                               Precio: <span className="text-gray-900">${selectedProduct.price}</span>
                             </span>
@@ -384,7 +413,7 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                               </span>
                             )}
                           </div>
-                          <div className="mt-3 flex items-center gap-2">
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
                             <label className="text-sm text-gray-600">Costo mano de obra (opcional):</label>
                             <input
                               type="text"
@@ -587,10 +616,17 @@ export function ProductIngredientConfig({ onBack, accessToken }: ProductIngredie
                                 exit={{ opacity: 0, x: -20 }}
                               >
                                 <Card className="p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
-                                  <div className="flex items-center gap-4">
-                                    <div className="flex-1">
+                                  {/* En una sola fila los controles de edición se llevan ~180px
+                                      fijos y en móvil le dejaban 86px al nombre y a los datos,
+                                      que quedaban en columnas de una palabra. Apilado por
+                                      defecto y en fila recién desde `sm`, donde sí hay ancho. */}
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                    <div className="flex-1 min-w-0 w-full">
                                       <h4 className="text-gray-900 mb-1">{ingredient.name}</h4>
-                                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                                      {/* flex-wrap: sin él los cuatro datos no se apilan,
+                                          se comprimen en columnas de un par de palabras y
+                                          en móvil quedan ilegibles. */}
+                                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
                                         <span>
                                           Cantidad: {pi.quantity} {ingredient.unit}
                                         </span>

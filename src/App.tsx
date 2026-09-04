@@ -1788,9 +1788,6 @@ export default function App() {
             onManageCategories={() =>
               setCurrentScreen("categories")
             }
-            onManageRecipe={() =>
-              irAPantalla("productIngredients")
-            }
           />
         )}
 

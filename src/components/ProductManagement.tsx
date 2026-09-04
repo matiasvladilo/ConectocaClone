@@ -1,5 +1,5 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
-import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, ingredientsAPI, type Ingredient, type ProductIngredient, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { Product, Category, categoriesAPI, ProductionArea, productionAreasAPI, businessAPI, notificationsAPI, profileAPI } from '../utils/api';
 import { productsAPI } from '../utils/api';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -37,6 +37,8 @@ import { ImageUpload } from './ImageUpload';
 import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
+import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
+import { ProductIngredientConfig } from './ProductIngredientConfig';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -52,23 +54,6 @@ interface ProductManagementProps {
   accessToken: string;
   onBack: () => void;
   onManageCategories: () => void;
-  onManageRecipe?: () => void;
-}
-
-interface ProductFormData {
-  name: string;
-  description: string;
-  price: string;
-  stock: string;
-  minStock: string;
-  category: string;
-  categoryId: string;
-  sku: string;
-  imageUrl: string;
-  productionAreaId: string;
-  unlimitedStock: boolean;
-  allowDecimal: boolean;
-  ingredients: (ProductIngredient & { inputUnit?: string })[];
 }
 
 const emptyForm: ProductFormData = {
@@ -83,15 +68,13 @@ const emptyForm: ProductFormData = {
   imageUrl: '',
   productionAreaId: '',
   unlimitedStock: false,
-  allowDecimal: false,
-  ingredients: []
+  allowDecimal: false
 };
 
-export function ProductManagement({ accessToken, onBack, onManageCategories, onManageRecipe }: ProductManagementProps) {
+export function ProductManagement({ accessToken, onBack, onManageCategories }: ProductManagementProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [productionAreas, setProductionAreas] = useState<ProductionArea[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -107,12 +90,24 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   const [savingStock, setSavingStock] = useState(false);
   // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
   const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
+  // La receta se abre como capa y no navegando a otra pantalla: así este
+  // componente no se desmonta y el diálogo, la búsqueda y el scroll sobreviven.
+  const [recetaDe, setRecetaDe] = useState<Product | null>(null);
+  // Foco de la capa de receta. Al montarse, el botón "Configurar receta" que
+  // tenía el foco ya se desmontó (estaba dentro del diálogo, que se cerró), así
+  // que el foco cae en document.body: desde ahí, espacio/PageDown/flechas
+  // scrollean la grilla de atrás (overscrollBehavior solo corta el
+  // encadenamiento de rueda y touch, no el del teclado), y Tab alcanza esa
+  // misma grilla tapada, donde Enter en un "Editar" de otra tarjeta pisa
+  // editingProduct/formData y abre el diálogo del producto equivocado encima
+  // de la capa. Enfocar el div de la capa (con tabIndex={-1}) cierra las dos
+  // fugas: el teclado ya no tiene forma de llegar a lo de atrás.
+  const recetaLayerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProducts();
     loadCategories();
     loadProductionAreas();
-    loadIngredients();
 
     // Load profile to identify current user
     profileAPI.get(accessToken).then(profile => {
@@ -160,44 +155,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     }
   };
 
-  const loadIngredients = async () => {
-    try {
-      const data = await ingredientsAPI.getAll(accessToken);
-      setIngredients(data);
-    } catch (error: any) {
-      console.error('Error loading ingredients:', error);
-    }
-  };
-
   const handleOpenDialog = (product?: Product) => {
     setNameParts(partesVacias);
     if (product) {
       setEditingProduct(product);
-
-      // Transform ingredients for display
-      const displayIngredients: (ProductIngredient & { inputUnit?: string })[] = [];
-
-      (product.ingredients || []).forEach(pi => {
-        const ingData = ingredients.find(i => i.id === pi.ingredientId);
-
-        const baseUnit = ingData?.unit?.toLowerCase() || 'kg';
-        let displayQty = pi.quantity;
-        let displayUnit = baseUnit;
-
-        if (baseUnit === 'kg' && pi.quantity < 1) {
-          displayQty = pi.quantity * 1000;
-          displayUnit = 'g';
-        } else if (baseUnit === 'l' && pi.quantity < 1) {
-          displayQty = pi.quantity * 1000;
-          displayUnit = 'ml';
-        }
-
-        displayIngredients.push({
-          ...pi,
-          quantity: parseFloat(displayQty.toFixed(3)),
-          inputUnit: displayUnit
-        });
-      });
 
       setFormData({
         name: product.name,
@@ -211,8 +172,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         imageUrl: product.imageUrl || '',
         productionAreaId: product.productionAreaId || '',
         unlimitedStock: product.unlimitedStock === true || product.stock === -1,
-        allowDecimal: product.allowDecimal === true,
-        ingredients: displayIngredients
+        allowDecimal: product.allowDecimal === true
       });
     } else {
       setEditingProduct(null);
@@ -226,6 +186,36 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     setEditingProduct(null);
     setFormData(emptyForm);
     setNameParts(partesVacias);
+  };
+
+  const abrirReceta = () => {
+    if (!editingProduct) return;
+    setRecetaDe(editingProduct);
+    // Ojo: NO handleCloseDialog(), que además borra editingProduct, formData y
+    // nameParts. Acá solo se baja la bandera; Radix desmonta el contenido del
+    // diálogo pero el estado vive en este componente y vuelve intacto, incluidos
+    // los campos a medio escribir.
+    setIsDialogOpen(false);
+  };
+
+  // Le da foco a la capa apenas se monta (ver comentario de recetaLayerRef).
+  // `preventScroll` es obligatorio: sin él, el navegador scrollea para revelar
+  // el elemento recién enfocado, y como la capa ya cubre toda la pantalla
+  // (fixed inset-0) ese scroll cae sobre el documento de atrás — exactamente
+  // el movimiento que este mismo efecto existe para evitar.
+  useEffect(() => {
+    if (recetaDe) {
+      recetaLayerRef.current?.focus({ preventScroll: true });
+    }
+  }, [recetaDe]);
+
+  const cerrarReceta = () => {
+    setRecetaDe(null);
+    setIsDialogOpen(true);
+    // Silencioso para no perder el scroll de la grilla. Refresca `products`, y
+    // con eso el contador de ingredientes del diálogo.
+    // No tocar formData: conserva a propósito lo que el usuario no ha guardado.
+    loadProducts(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -253,56 +243,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
     try {
       setSubmitting(true);
 
-      console.log('📝 [DEBUG] Form Ingredients:', formData.ingredients);
-
-      // El stock solo se manda si de verdad se tocó en este formulario (o es un
-      // producto nuevo). Si no, este PUT viajaría con el número con el que se
-      // abrió el diálogo, y pisaría un stock que haya cambiado por otro lado
-      // mientras estuvo abierto (un "Ajustar stock", un pedido, otra sesión) sin
-      // que nadie lo haya pedido. StockAdjustDialog es el único lugar pensado
-      // para tocar stock, mandando solo { stock, modo }; este formulario general
-      // no debe pisarlo de rebote por editar, por ejemplo, la categoría.
-      const eraIlimitadoAntes = editingProduct
-        ? (editingProduct.unlimitedStock === true || editingProduct.stock === -1)
-        : false;
-      // parseFloat y no parseInt: `stock` es numeric en Postgres y un producto
-      // con allowDecimal se queda en valores fraccionados (los pedidos le restan
-      // 0.5). Con parseInt, parseInt("9.5") = 9 nunca coincidía con 9.5, así que
-      // para TODO producto por peso este chequeo daba "se tocó" y además mandaba
-      // el 9 truncado: editar solo el precio le comía media unidad.
-      const stockSeToco = !editingProduct
-        || formData.unlimitedStock !== eraIlimitadoAntes
-        || parseFloat(formData.stock) !== editingProduct.stock;
-
-      const productData = {
-        name: formData.name.trim(),
-        description: formData.description.trim(),
-        price: priceValue,
-        minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
-        unlimitedStock: formData.unlimitedStock,
-        trackStock: !formData.unlimitedStock,
-        allowDecimal: formData.allowDecimal,
-        category: formData.category.trim() || 'General',
-        categoryId: formData.categoryId || undefined,
-        sku: formData.sku.trim(),
-        imageUrl: formData.imageUrl.trim() || undefined,
-        productionAreaId: formData.productionAreaId || undefined,
-        ingredients: formData.ingredients.map(pi => {
-          // Convert back to base unit if necessary before saving
-          let quantityToSave = pi.quantity;
-          const unit = pi.inputUnit;
-          if (unit === 'g' || unit === 'ml') {
-            quantityToSave = quantityToSave / 1000;
-          }
-          return {
-            ingredientId: pi.ingredientId,
-            quantity: quantityToSave
-          };
-        }),
-        ...(stockSeToco
-          ? { stock: formData.unlimitedStock ? 0 : (parseFloat(formData.stock) || 0) }
-          : {})
-      };
+      // Por qué el stock viaja condicional: ver el comentario de `stockSeToco`
+      // en construirPayloadProducto (src/utils/productPayload.ts).
+      const productData = construirPayloadProducto({
+        formData,
+        editingProduct,
+        priceValue,
+      });
 
       console.log('📦 [DEBUG] Sending Product Data:', JSON.stringify(productData, null, 2));
 
@@ -443,6 +390,12 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
   // aunque el catálogo tuviera cientos. Mismo problema que ya se corrigió a
   // nivel de filtro (ver comentario de idsDelFiltro), pero acá no había llegado.
   const hayFiltroActivo = !!searchQuery || selectedCategoryFilter !== 'all';
+
+  // El contador sale de `products` y no de `formData`: así el loadProducts(true)
+  // que corre al cerrar la capa de receta lo refresca solo, sin cablear nada más.
+  const recetaCount = editingProduct
+    ? (products.find(p => p.id === editingProduct.id)?.ingredients?.length ?? 0)
+    : 0;
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -933,7 +886,15 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
 
       {/* Create/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Radix, al desmontar el diálogo, devuelve el foco al elemento que lo abrió: la
+            tarjeta de la grilla. Cuando salimos por "Configurar receta" eso ocurre ~200ms
+            después, ya con la capa de receta montada, y le roba el foco que le dimos: el
+            usuario queda tecleando sobre una grilla que no ve, donde Enter abre el diálogo
+            de OTRO producto y se lleva puesto lo que estaba editando sin guardar. */}
+        <DialogContent
+          className="max-w-2xl max-h-[90vh] overflow-y-auto"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editingProduct ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
@@ -1234,11 +1195,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
                         Receta
                       </Label>
                       <p className="text-sm text-gray-500 mt-1">
-                        {formData.ingredients.length} ingrediente{formData.ingredients.length !== 1 ? 's' : ''} configurado{formData.ingredients.length !== 1 ? 's' : ''}
+                        {recetaCount} ingrediente{recetaCount !== 1 ? 's' : ''} configurado{recetaCount !== 1 ? 's' : ''}
                       </p>
                     </div>
-                    {onManageRecipe && (
-                      <Button type="button" variant="outline" onClick={onManageRecipe}>
+                    {/* Solo al editar: un producto que todavía no existe no tiene
+                        receta que configurar, y el botón sacaba del formulario
+                        perdiendo lo que se llevara escrito. */}
+                    {editingProduct && (
+                      <Button type="button" variant="outline" onClick={abrirReceta}>
                         Configurar receta
                       </Button>
                     )}
@@ -1370,6 +1334,40 @@ export function ProductManagement({ accessToken, onBack, onManageCategories, onM
         onConfirm={handleAjustarStock}
         saving={savingStock}
       />
+
+      {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo
+          que existe. No queda detrás del diálogo de forma permanente (abrirReceta
+          lo cierra), pero sí se solapan unos 200ms: animate-out/fade-out-0/
+          zoom-out-95/duration-200 SÍ están compiladas en src/index.css, así que
+          Radix mantiene montado el DialogContent durante su animación de salida
+          y ese frame pinta sobre la capa recién montada. Es un crossfade visual,
+          inofensivo — no una carrera de estado. */}
+      {recetaDe && (
+        // overscrollBehavior va inline porque `overscroll-*` no está compilada en
+        // src/index.css (no existe como clase). Sin esto, al llegar al final del
+        // scroll de la capa el gesto encadena al document, que Radix ya dejó
+        // scrolleable al cerrar el diálogo, y mueve la grilla de atrás en silencio.
+        // tabIndex={-1} + el useEffect de más arriba: sin foco EN la capa, el
+        // teclado (espacio/PageDown/flechas) scrollea el document de atrás, y Tab
+        // alcanza la grilla tapada (ver comentario de recetaLayerRef).
+        <div
+          ref={recetaLayerRef}
+          tabIndex={-1}
+          onKeyDown={(e) => {
+            // Cerrar con Escape es seguro: la receta se guarda contra la API al
+            // toque, no hay borrador en memoria que se pueda perder al salir.
+            if (e.key === 'Escape') cerrarReceta();
+          }}
+          className="fixed inset-0 z-50 overflow-y-auto bg-white"
+          style={{ overscrollBehavior: 'contain' }}
+        >
+          <ProductIngredientConfig
+            initialProduct={recetaDe}
+            onBack={cerrarReceta}
+            accessToken={accessToken}
+          />
+        </div>
+      )}
     </div >
   );
 }
