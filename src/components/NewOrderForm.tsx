@@ -40,6 +40,7 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 import { productsAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { hijasDe, idsDeCategoriaConHijas, raicesDe } from '../utils/categoryTree';
+import { calcularCantidadAgregable } from '../utils/cartStock';
 import { projectId } from '../utils/supabase/info';
 
 // Carga diferida, mismo motivo que en ImageUpload.tsx: no hace falta en la
@@ -167,6 +168,28 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
 
       setProducts(transformedProducts);
 
+      // El carrito guarda una FOTO del stock del momento en que se agregó cada
+      // producto, y sobrevive en localStorage entre sesiones. Ese número
+      // congelado es el que miran los topes del carrito, así que un producto
+      // repuesto de 1 a 100 seguía mostrando "Stock máximo alcanzado" en 1 y el
+      // botón + gris, aunque la tarjeta ya dijera "Stock: 100". Este refresco es
+      // el que faltaba para que el intervalo de 5 seg de arriba cumpla lo que
+      // promete. Las cantidades pedidas no se tocan: son decisión del local.
+      setCart(prev => {
+        let cambio = false;
+        const reconciliado = prev.map(item => {
+          const fresco = transformedProducts.find(p => p.id === item.id);
+          if (!fresco || (fresco.stock === item.stock && fresco.trackStock === item.trackStock)) {
+            return item;
+          }
+          cambio = true;
+          return { ...item, stock: fresco.stock, trackStock: fresco.trackStock };
+        });
+        // Devolver la misma referencia si no cambió nada evita un re-render y
+        // una escritura a localStorage cada 5 segundos.
+        return cambio ? reconciliado : prev;
+      });
+
       // Show message if no products (solo en carga visible)
       if (!silent && transformedProducts.length === 0) {
         toast.info('No hay productos disponibles. El administrador debe crear productos primero.');
@@ -276,12 +299,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   };
 
   const handleAddToCart = (product: Product, quantity?: number) => {
-    // Check if product has stock (handle unlimited stock -1)
-    if (product.stock <= 0 && product.stock !== -1 && product.trackStock) {
-      toast.error('Producto sin stock disponible');
-      return;
-    }
-
     const qtyToAdd = quantity || productQuantities[product.id] || 1;
 
     if (qtyToAdd <= 0) {
@@ -291,23 +308,38 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
 
     const existingItem = cart.find(item => item.id === product.id);
     const currentCartQuantity = existingItem ? existingItem.quantity : 0;
-    const totalQuantity = currentCartQuantity + qtyToAdd;
 
-    // Check if total quantity exceeds stock (handle unlimited stock -1)
-    if (totalQuantity > product.stock && product.stock !== -1 && product.trackStock) {
-      toast.error(`Solo hay ${product.stock} unidades disponibles en stock`);
+    // Se agrega lo que haya en vez de rechazar el pedido completo. Antes, pedir
+    // 6 de un producto con 1 unidad no agregaba NADA: para el local eso era "la
+    // app no me deja pedir este producto". Ver src/utils/cartStock.ts.
+    const { agregable, recortada } = calcularCantidadAgregable(product, qtyToAdd, currentCartQuantity);
+
+    if (agregable <= 0) {
+      // Dos motivos distintos para no poder agregar nada, y el local necesita
+      // distinguirlos: no queda mercadería, o ya se llevó toda la que había.
+      toast.error(
+        currentCartQuantity > 0
+          ? `Ya tienes las ${product.stock} unidades disponibles en tu pedido`
+          : 'Producto sin stock disponible'
+      );
       return;
     }
 
     if (existingItem) {
       setCart(cart.map(item =>
         item.id === product.id
-          ? { ...item, quantity: item.quantity + qtyToAdd }
+          ? { ...item, quantity: item.quantity + agregable }
           : item
       ));
-      toast.success(`${qtyToAdd} unidades agregadas al pedido`);
     } else {
-      setCart([...cart, { ...product, quantity: qtyToAdd }]);
+      setCart([...cart, { ...product, quantity: agregable }]);
+    }
+
+    if (recortada) {
+      toast.warning(`Solo quedan ${product.stock} de ${product.name}: se agregaron ${agregable} al pedido`);
+    } else if (existingItem) {
+      toast.success(`${agregable} unidades agregadas al pedido`);
+    } else {
       toast.success(`${product.name} agregado al pedido`);
     }
 
