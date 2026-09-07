@@ -1004,21 +1004,46 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
               </div>
 
               <div>
-                <Label htmlFor="stock">Stock *</Label>
-                <div className="relative">
-                  <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="stock"
-                    type="number"
-                    min="0"
-                    value={formData.stock}
-                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                    placeholder="0"
-                    className="pl-9"
-                    required
-                    disabled={formData.unlimitedStock}
-                  />
-                </div>
+                <Label htmlFor="stock">Stock {!editingProduct && '*'}</Label>
+                {editingProduct ? (
+                  // Al editar, el stock NO es un campo de este formulario. Era la
+                  // causa del bug reportado: quien lo tipeaba y cerraba el diálogo
+                  // sin llegar a "Guardar Cambios" (que queda debajo del scroll en
+                  // teléfono) perdía el número sin ningún aviso. Ahora se muestra y
+                  // se cambia por el diálogo de ajuste, que confirma en el acto.
+                  <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
+                    <span className="text-lg font-mono text-gray-900">
+                      {formData.unlimitedStock ? '∞' : formData.stock}
+                    </span>
+                    {!formData.unlimitedStock && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setStockProduct(editingProduct)}
+                        disabled={submitting}
+                        className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+                      >
+                        <BoxIcon className="w-4 h-4 mr-1" />
+                        Ajustar
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      id="stock"
+                      type="number"
+                      min="0"
+                      value={formData.stock}
+                      onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                      placeholder="0"
+                      className="pl-9"
+                      required
+                      disabled={formData.unlimitedStock}
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1223,30 +1248,16 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   `type="button"` es obligatorio: el contenido del diálogo es un
                   <form> y sin eso dispararían un submit. */}
               {editingProduct && (
-                <>
-                  {!(editingProduct.unlimitedStock || editingProduct.stock === -1) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setStockProduct(editingProduct)}
-                      disabled={submitting}
-                      className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                    >
-                      <BoxIcon className="w-4 h-4 mr-1" />
-                      Ajustar Stock
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsDeleting(editingProduct)}
-                    disabled={submitting}
-                    className="border-red-500 text-red-500 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Eliminar
-                  </Button>
-                </>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsDeleting(editingProduct)}
+                  disabled={submitting}
+                  className="border-red-500 text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Eliminar
+                </Button>
               )}
               <Button
                 type="button"
