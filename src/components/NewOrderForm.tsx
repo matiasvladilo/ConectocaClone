@@ -1460,7 +1460,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
             {/* Stock: solo lectura. Este editor rápido no lo modifica; la única vía
                 para cambiar stock es el diálogo de ajuste en Gestión de Productos. */}
             <div className="space-y-2">
-              <Label htmlFor="edit-stock">Stock Disponible</Label>
+              <Label>Stock Disponible</Label>
               <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
                 <span className="text-lg font-mono text-gray-900">
                   {editForm.trackStock ? editForm.stock : '∞'}
