@@ -89,20 +89,22 @@ function FichaContenido({
             un único botón. En productos ilimitados no se muestra: no hay nada
             que ajustar y ofrecerlo invita a un error. */}
         {!esIlimitado && (
-          <div className="mx-4 mb-2 flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
-            <div>
-              <p className="text-xs text-blue-700">Stock actual</p>
-              <p className="text-2xl font-mono text-gray-900">{product.stock}</p>
+          <div className="px-4 mb-2">
+            <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
+              <div>
+                <p className="text-xs text-blue-700">Stock actual</p>
+                <p className="text-2xl font-mono text-gray-900">{product.stock}</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onAjustarStock(product)}
+                className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+              >
+                <BoxIcon className="w-4 h-4 mr-1" />
+                Ajustar
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onAjustarStock(product)}
-              className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-            >
-              <BoxIcon className="w-4 h-4 mr-1" />
-              Ajustar
-            </Button>
           </div>
         )}
 
