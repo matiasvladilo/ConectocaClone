@@ -288,9 +288,14 @@ El orden importa dentro del bloque 1: la ficha se construye antes de sacar el ca
 
 ## Testing
 
-Hay suite de tests (`vitest`) para utilidades puras; los componentes se verifican en navegador con evidencia.
+Hay suite de tests para utilidades puras; los componentes se verifican en navegador con evidencia.
 
-**Nota de entorno:** `npx vitest run` levanta también los tests de worktrees viejos en `.claude/worktrees/`, que fallan con "No test suite found" y ensucian el resultado. Hay que excluir ese directorio al correr la suite.
+**Runner:** `npm test`, que es `node --test src/utils/*.test.ts` con `node:test` y `node:assert/strict`. **No hay vitest ni ninguna librería de testing de componentes** en el proyecto. Dos consecuencias para este trabajo:
+
+- Sólo corren archivos en `src/utils/*.test.ts`. Lo que se quiera testear tiene que vivir como función pura en `src/utils/`.
+- No se pueden testear componentes React automáticamente sin agregar dependencias, que está fuera de alcance. Por eso la lógica del checkbox se extrae a una función pura: para que sea testeable con el harness que ya existe.
+
+Baseline actual: 57 tests, todos en verde.
 
 **Tests automatizados**
 
