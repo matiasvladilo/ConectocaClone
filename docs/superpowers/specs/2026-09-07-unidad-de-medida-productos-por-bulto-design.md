@@ -1,19 +1,17 @@
 # Unidad de medida en productos por bulto — Nota de investigación
 
 **Fecha:** 2026-09-07
-**Estado:** preliminar. **Bloqueado** hasta confirmar dos datos con el equipo (ver "Qué falta saber").
+**Estado:** cerrado como investigación. Queda una corrección de dato y una mejora opcional.
 
-Esto no es un diseño aprobado. Es el registro de un hallazgo que apareció investigando el bug de stock, y que se decidió tratar como trabajo aparte. Ver `2026-09-07-stock-una-sola-via-design.md`.
+Apareció investigando el bug de stock y se trató aparte porque no es un problema de software. Ver `2026-09-07-stock-una-sola-via-design.md`.
 
-## Problema
+## Resumen
 
-Un mismo producto se está contando en dos unidades distintas —a veces en bultos, a veces en unidades sueltas— y nada en el sistema distingue una de otra. Cuando eso pasa, **ninguna cantidad de ese producto significa nada**: ni el stock, ni el mínimo, ni lo que se despacha.
+Un producto —**uno solo**— tuvo el stock cargado en una unidad distinta a la que usa para venderse. No es un problema sistémico del modelo de datos, como se sospechó al principio: se verificó contra todo el catálogo y no se repite.
 
-Es más grave que un bug de software, porque el software no puede detectarlo. Todas las escrituras son válidas: un `4` y un `96` son ambos enteros positivos perfectamente legales. No hay error que loguear ni validación que agregar.
+## El hallazgo
 
-## Evidencia
-
-El caso que lo destapó, `SCORE GORILLA 473, POR MALETA`:
+`SCORE GORILLA 473, POR MALETA`, el 6/09:
 
 ```
 04/09 17:51  ajuste        → 96
@@ -23,64 +21,61 @@ El caso que lo destapó, `SCORE GORILLA 473, POR MALETA`:
 06/09 16:51  ajuste        → 4     (mismo usuario)
 ```
 
-El precio dice cuál es la unidad real:
+A primera vista parece que alguien destruyó el stock dos veces. Es al revés.
 
-| producto | precio |
-|---|---|
-| SCORE GORILLA 473, **POR MALETA** | **$19.200** |
-| SCORE GORILLA ZERO | $800 |
-| SCORE ENERGY DRINK 473ml | $800 |
-| SCORE RADICAL WHITE 473ml | $800 |
+**La unidad de ese producto es la maleta**, y está probado por los pedidos, no por deducción:
 
-$19.200 ÷ $800 = **24**. La unidad de ese producto es la maleta, y una maleta son 24 botellas.
+| producto | precio | cantidad pedida (histórico) |
+|---|---|---|
+| SCORE GORILLA 473, **POR MALETA** | **$19.200** | siempre **1 o 2** — 8 líneas, promedio 1,13 |
+| SCORE ENERGY DRINK 473ml | $800 | 2 a 10, promedio 5,9 |
+| SCORE GORILLA ZERO | $800 | 2 a 12, promedio 7,5 |
+| SCORE RADICAL WHITE 473ml | $800 | 2 a 10, promedio 6 |
 
-Con eso, la historia se lee distinta:
+$19.200 ÷ $800 = 24. Una maleta son 24 botellas, y en toda la historia del sistema nadie pidió más de 2 maletas de una vez. El `min_stock` lo confirma desde otro ángulo: el GORILLA tiene umbral 2, los otros SCORE tienen 24.
 
-- El **96** del viernes, leído en maletas, serían 2.304 botellas — alrededor de $1,8 millones inmovilizados en un solo SKU. No es plausible. Ese 96 está cargado **en botellas** en un producto cuya unidad es la maleta (96 ÷ 24 = 4).
-- El **4** del domingo son 4 maletas. El usuario **no estaba rompiendo el stock: lo estaba corrigiendo.**
+Entonces:
 
-El `min_stock` confirma la lectura desde otro ángulo: el GORILLA POR MALETA tiene umbral **2**, y los otros SCORE tienen **24**. Alguien configuró el umbral pensando en maletas.
+- El **96** del viernes está cargado en **botellas** (96 ÷ 24 = 4 maletas). Leído en maletas serían 2.304 botellas: **$1.843.200** inmovilizados en un solo SKU. No es plausible.
+- El **4** del domingo son 4 maletas. **El usuario no rompió el stock: lo estaba corrigiendo.**
+- El segundo **4** fue volver a corregirlo después de que una devolución lo empujara a 28.
 
-### Alcance del problema
+El despacho de 24 del 6/09 no tiene línea de pedido sobreviviente: ese pedido se anuló a las 16:48 (de ahí la devolución). O sea que alguien cargó un pedido de 24 maletas — $460.800, 24 veces lo normal — y después se dio de baja.
 
-21 productos llevan la unidad escrita en el nombre, como texto libre:
+## Se verificó que no es sistémico
 
-`SCORE GORILLA 473, POR MALETA` · `SIXPACK COCACOLA ORIGINAL LATA 350ml` (stock 8) · `SIXPACK COCACOLA ZERO LATA 350ml` (29) · `COCA COLA LIGHT LATA SIXPACK 350ml` (4) · `Encendedor RONSON 20 unidades` · `NESCAFE CAPPUCCINO CAJA (8 UNIDADES)` · `Alfajor Mendocino caja 12 unidades` · `Brownie 6 unidades` · y 13 más, la mayoría hoy en 0.
+21 productos llevan la unidad escrita en el nombre como texto libre. Comparando la cantidad típica de pedido contra la carga manual de stock más alta de cada uno:
 
-La unidad vive **sólo en el nombre**. No hay ningún campo en `products` que diga "esto es un pack de N". El modelo de datos no sabe que existe el concepto.
+**9 son ilimitados** (Alfajor Mendocino, Alfajor de Maicena, Brownie, Cocadas, Trufa, barquillo de nutella, Chilenito, Galleta conchitas, Merenguitos). No llevan inventario, así que no pueden tener este problema.
 
-### Lo que sí está bien
+**12 llevan stock controlado**, y sólo uno desentona:
 
-Se verificó el riesgo peor —que el mismo inventario físico esté duplicado en dos productos— y **no ocurre** con las latas de Coca Cola: existen los tres sixpacks y ninguna lata suelta equivalente. El sixpack es la única representación de ese producto. No hay doble conteo.
+| producto | máx. pedido | máx. carga manual | lectura |
+|---|---|---|---|
+| **SCORE GORILLA POR MALETA** | 2 | **96** | **48× — anomalía** |
+| SIXPACK COCACOLA ZERO | 4 | 69 | 17×, $262.890 — plausible para distribuidora |
+| SIXPACK COCACOLA ORIGINAL | 4 | 23 | normal |
+| NESCAFE CAPPUCCINO | 1 | 6 | normal |
+| NESCAFE VAINILLA LATE | 1 | 3 | normal |
+| otros 7 | — | nunca se cargó | sin datos, sin riesgo activo |
 
-Conviene repetir esa verificación para el resto de los 21 antes de tocar nada.
+También se descartó el riesgo peor —el mismo inventario físico duplicado en dos productos—: existen los tres sixpacks de Coca Cola y ninguna lata suelta equivalente.
 
-## Qué falta saber
+**Conclusión: es un error de carga en un producto, no una falla del modelo.**
 
-Dos preguntas al equipo. Sin estas respuestas, cualquier diseño es adivinanza:
+## Qué hacer
 
-1. **El SCORE GORILLA POR MALETA, ¿se cuenta en maletas o en botellas?** Y el despacho de 24 del 6/09, ¿fueron 24 maletas o 24 botellas? Si fueron botellas, el descuento está mal por un factor de 24.
-2. **¿Hay más productos donde la gente cuenta distinto según quién?** El GORILLA apareció por casualidad; puede no ser el único.
+**1. Corregir el dato.** El stock del GORILLA hoy es 0 y su historia está contaminada por el 96. Cuando se haga el recuento físico, cargarlo en maletas. No hace falta migración ni código.
 
-## Opciones de diseño
+**2. Opcional — un aviso de cordura al ajustar stock.** Si un ajuste manual deja un valor muy fuera de lo que ese producto mueve (por ejemplo, más de 20× la cantidad máxima que se pidió alguna vez, o un valor de inventario por encima de cierto monto), mostrar una advertencia antes de confirmar. No bloquea: avisa.
 
-Sin decidir. Se anotan para cuando lleguen las respuestas.
+Esto encaja naturalmente en `StockAdjustDialog`, que con el otro spec ya va a tener un estado de advertencia para los conflictos de concurrencia. Sería el mismo lugar, distinto motivo.
 
-**A. Campo `unidades_por_bulto` en `products`.** El producto declara que es un bulto de N. La UI muestra "4 maletas (96 unidades)" y los formularios dicen en qué unidad se está escribiendo. Es lo más honesto con la realidad del negocio, y el cambio más grande: toca modelo, UI de productos, pedidos y despacho.
-
-**B. Un solo producto por artículo, siempre en unidades sueltas.** La maleta deja de ser un producto y pasa a ser una cantidad (pedir 24). Simplifica el inventario a una sola unidad y elimina la clase de error entera. Requiere migrar los 21 productos y reeducar cómo se cargan los pedidos; y pierde el precio por bulto, que hoy es distinto al unitario × 24.
-
-**C. Sólo convención de nombres y capacitación.** Cero código. No resuelve nada estructuralmente: el próximo producto por bulto reintroduce el problema.
-
-La inclinación inicial es **A**, porque respeta cómo trabaja la distribuidora (se compra por maleta y se vende de las dos formas) sin obligar a rehacer el catálogo. Pero depende por completo de la respuesta a la pregunta 1.
-
-## Fuera de alcance
-
-- **El bug de stock.** Va en `2026-09-07-stock-una-sola-via-design.md`. Son problemas independientes: aquel es de software, éste es de modelo de datos.
-- **Corregir los stocks históricos mal cargados.** No se puede deducir desde la base cuál número estaba en qué unidad. Requiere recuento físico.
+**Descartado: agregar un campo `unidades_por_bulto` al modelo.** Era la inclinación inicial cuando parecía sistémico. Con un solo producto afectado y ninguna evidencia de que se repita, cambiar el modelo de datos, la UI de productos, pedidos y despacho no se justifica. Si en el futuro aparecen más casos, se reevalúa.
 
 ## Riesgos / notas
 
-- **El compare-and-swap del otro spec no arregla esto, pero ayuda.** En el evento del 6/09 a las 16:51, el usuario pisó una devolución de 24 sin enterarse. Con el aviso de conflicto habría visto "entró una devolución de 24" — que es exactamente el dato que necesitaba para darse cuenta de que las unidades no cuadraban. No lo resuelve; lo hace visible.
-- **Ningún arreglo de software detecta este error.** Vale insistir: no hay validación posible que distinga 4 maletas de 4 botellas si el sistema no sabe que existen las maletas. Por eso B o A, y no una regla de validación.
-- **Puede ser más caro que el bug de stock.** Un producto de $19.200 contado con un factor de error de 24 distorsiona el valor del inventario, los umbrales de reposición y lo que se le cobra al cliente.
+- **Ningún arreglo de software detecta este error con certeza.** No hay forma de distinguir 4 maletas de 4 botellas si el sistema no sabe que las maletas existen. El aviso de cordura es heurístico: detecta valores raros, no unidades equivocadas.
+- **El compare-and-swap del otro spec no arregla esto, pero ayuda.** En el evento de las 16:51 el usuario pisó una devolución de 24 sin enterarse. Con el aviso de conflicto habría visto "entró una devolución de 24" — el dato que le faltaba para notar que los números no cerraban.
+- **El SIXPACK COCACOLA ZERO conviene mirarlo en el recuento.** 69 sixpacks es plausible pero es el segundo más alto de la lista; vale confirmarlo con mercadería a la vista.
+- **Corrección respecto del análisis inicial del bug de stock.** El caso SCORE GORILLA se presentó como uno de los tres ejemplos de "escritura vieja que pisa movimientos reales". Con el dato del precio, ese caso es mitad y mitad: la corrección a 4 era correcta y deliberada, y lo único defectuoso fue pisar la devolución sin enterarse. Los otros dos casos (Aceite Natura y SCORE ENERGY DRINK) siguen siendo válidos tal como se describieron.
