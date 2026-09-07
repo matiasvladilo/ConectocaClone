@@ -38,6 +38,7 @@ import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
 import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
+import { alternarStockIlimitado } from '../utils/stockForm';
 import { ProductIngredientConfig } from './ProductIngredientConfig';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
@@ -1040,11 +1041,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   <Checkbox
                     id="unlimited-stock"
                     checked={formData.unlimitedStock}
-                    onCheckedChange={(checked: boolean | "indeterminate") => setFormData({
-                      ...formData,
-                      unlimitedStock: checked === true,
-                      stock: checked === true ? '0' : formData.stock
-                    })}
+                    onCheckedChange={(checked: boolean | "indeterminate") =>
+                      setFormData(prev => alternarStockIlimitado(prev, checked === true))
+                    }
                     className="border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                   />
                   <div className="flex-1">
