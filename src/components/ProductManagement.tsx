@@ -40,6 +40,7 @@ import { componerNombre, partesVacias, type ProductNameParts } from '../utils/pr
 import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
 import { alternarStockIlimitado } from '../utils/stockForm';
 import { ProductIngredientConfig } from './ProductIngredientConfig';
+import { ProductDetailDialog } from './ProductDetailDialog';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -89,6 +90,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   const [searchScannerOpen, setSearchScannerOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [savingStock, setSavingStock] = useState(false);
+  // Producto cuya ficha está abierta. Es la puerta de entrada desde la grilla:
+  // la tarjeta ya no abre el formulario de edición directamente.
+  const [detalleProduct, setDetalleProduct] = useState<Product | null>(null);
+  const [esAdmin, setEsAdmin] = useState(false);
   // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
   const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
   // La receta se abre como capa y no navegando a otra pantalla: así este
@@ -113,6 +118,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     // Load profile to identify current user
     profileAPI.get(accessToken).then(profile => {
       setCurrentUserId(profile.id);
+      setEsAdmin(profile.role === 'admin');
     }).catch(err => console.error("Error loading profile", err));
   }, []);
 
@@ -782,22 +788,22 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   // dejaría los últimos apareciendo más de 10 segundos después.
                   transition={{ delay: Math.min(index * 0.02, 0.4) }}
                 >
-                  {/* Todo el cuadrado abre Editar: los tres botones que había antes
-                      no entran en ~150px de ancho, así que Ajustar Stock y Eliminar
-                      viven ahora dentro de ese diálogo. */}
+                  {/* Todo el cuadrado abre la ficha de solo lectura: los tres botones
+                      que había antes no entran en ~150px de ancho, así que Editar,
+                      Ajustar Stock y Eliminar viven ahora dentro de esa ficha. */}
                   {/* La tarjeta reemplazó a tres botones (Editar/Ajustar Stock/Eliminar)
                       que eran focuseables por naturaleza. Como ahora es la ÚNICA forma
                       de llegar a esas acciones, necesita comportarse como un botón real
                       para teclado y lectores de pantalla: rol, foco y activación con
                       Enter/Espacio (el div no los da gratis). */}
                   <Card
-                    onClick={() => handleOpenDialog(product)}
+                    onClick={() => setDetalleProduct(product)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        handleOpenDialog(product);
+                        setDetalleProduct(product);
                       }
                     }}
                     className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
@@ -1332,6 +1338,17 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         product={stockProduct}
         onConfirm={handleAjustarStock}
         saving={savingStock}
+      />
+
+      <ProductDetailDialog
+        product={detalleProduct}
+        accessToken={accessToken}
+        onOpenChange={(abierto) => { if (!abierto) setDetalleProduct(null); }}
+        esAdmin={esAdmin}
+        onEditar={(p) => { setDetalleProduct(null); handleOpenDialog(p); }}
+        onAjustarStock={(p) => { setDetalleProduct(null); setStockProduct(p); }}
+        onReceta={(p) => { setDetalleProduct(null); setRecetaDe(p); }}
+        onEliminar={(p) => { setDetalleProduct(null); setIsDeleting(p); }}
       />
 
       {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo
