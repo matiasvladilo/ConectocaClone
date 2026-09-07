@@ -1,8 +1,12 @@
+import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
-import { Package, Edit, BoxIcon, Trash2, ChevronRight, ListChecks } from 'lucide-react';
-import type { Product } from '../utils/api';
+import { Package, Edit, BoxIcon, Trash2, ChevronRight, ListChecks, History } from 'lucide-react';
+import { stockEventsAPI, type Product, type StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
+import { formatDateCL } from '../utils/dateUtils';
+import { ETIQUETA_MOVIMIENTO, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
+import { toast } from 'sonner';
 
 interface ProductDetailDialogProps {
   product: Product | null;
@@ -46,6 +50,7 @@ const filaClase =
 
 function FichaContenido({
   product,
+  accessToken,
   onEditar,
   onAjustarStock,
   onReceta,
@@ -54,6 +59,25 @@ function FichaContenido({
 }: ContenidoProps) {
   const esIlimitado = product.unlimitedStock === true || product.stock === -1;
   const recetaCount = product.ingredients?.length ?? 0;
+
+  const [movimientos, setMovimientos] = useState<StockEvent[] | null>(null);
+  const [cargandoMov, setCargandoMov] = useState(false);
+
+  const verMovimientos = async () => {
+    // Segundo toque: colapsa. Evita que la ficha crezca sin forma de volver.
+    if (movimientos) { setMovimientos(null); return; }
+    try {
+      setCargandoMov(true);
+      setMovimientos(await stockEventsAPI.getByProduct(accessToken, product.id));
+    } catch {
+      // No se deja `movimientos` en [] ante un error: "todavía no hay
+      // movimientos" es el peor mensaje posible acá, porque disfraza una
+      // consulta rota de producto sin historial y nadie lo investiga.
+      toast.error('No se pudieron cargar los movimientos. Es un error de consulta, no quiere decir que el producto no tenga historial.');
+    } finally {
+      setCargandoMov(false);
+    }
+  };
 
   return (
     <>
@@ -123,7 +147,53 @@ function FichaContenido({
             <ChevronRight className="w-4 h-4 text-gray-500" />
           </button>
 
-          {/* Acá va la fila "Movimientos de stock" (Tarea 2b). */}
+          {esAdmin && (
+            <>
+              <button type="button" className={filaClase} onClick={verMovimientos}>
+                <History className="w-4 h-4 text-gray-500" />
+                <span className="flex-1 text-sm">Movimientos de stock</span>
+                <ChevronRight className="w-4 h-4 text-gray-500" />
+              </button>
+
+              {cargandoMov && (
+                <p className="px-4 py-3 text-sm text-gray-500">Cargando…</p>
+              )}
+
+              {movimientos && movimientos.length === 0 && (
+                <p className="px-4 py-3 text-sm text-gray-500">
+                  Todavía no hay movimientos registrados para este producto.
+                </p>
+              )}
+
+              {movimientos && movimientos.map(m => (
+                <div key={m.id} className="flex items-center justify-between border-b px-4 py-2">
+                  <div>
+                    <div className="text-sm text-gray-900">{ETIQUETA_MOVIMIENTO[m.type]}</div>
+                    <div className="text-xs text-gray-500">{formatDateCL(m.createdAt)}</div>
+                  </div>
+                  {m.type === 'ajuste' ? (
+                    <div className="text-right">
+                      <div className="font-mono text-gray-900">
+                        {m.stockAfter !== undefined ? `quedó en ${m.stockAfter}` : `corrección de ${m.quantity}`}
+                      </div>
+                      {m.stockAfter !== undefined && (
+                        <div className="text-xs text-gray-500">corrección de {m.quantity}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-right">
+                      <div className={`font-mono ${COLOR_MOVIMIENTO[m.type]}`}>
+                        {SIGNO_MOVIMIENTO[m.type]}{m.quantity}
+                      </div>
+                      {m.stockAfter !== undefined && (
+                        <div className="text-xs text-gray-500">queda {m.stockAfter}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
 
           <button
             type="button"
