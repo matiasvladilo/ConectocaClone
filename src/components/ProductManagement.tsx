@@ -250,8 +250,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     try {
       setSubmitting(true);
 
-      // Por qué el stock viaja condicional: ver el comentario de `stockSeToco`
-      // en construirPayloadProducto (src/utils/productPayload.ts).
+      // El stock no viaja en el payload de edición: se cambia sólo desde
+      // StockAdjustDialog. Ver construirPayloadProducto.
       const productData = construirPayloadProducto({
         formData,
         editingProduct,
@@ -283,10 +283,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       } else {
         // Create new product
         // `stock` queda opcional en el tipo de productData porque el spread de
-        // más arriba es condicional (así el guardado de edición no pisa el stock
-        // con un valor viejo). Pero en esta rama `editingProduct` es null, así que
-        // `stockSeToco` da `true` siempre (ver su definición) y `stock` SIEMPRE
-        // está presente acá: el assert solo hace explícito para TS lo que ya es
+        // más arriba es condicional (para que el guardado de edición no pise el
+        // stock con un valor viejo). Pero en esta rama `editingProduct` es null,
+        // que es exactamente la condición que hace que construirPayloadProducto
+        // incluya `stock`: el assert solo hace explícito para TS lo que ya es
         // cierto en runtime, sin tocar el tipo de Product ni el de la API.
         const created = await productsAPI.create(accessToken, productData as typeof productData & { stock: number });
         setProducts([created, ...products]);
