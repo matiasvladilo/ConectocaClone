@@ -9,9 +9,10 @@
 
 import { NUTRIENTES } from './tipos.ts';
 import { ETIQUETA_NUTRIENTE, formatearParaEtiqueta } from './reglasChile.ts';
-import { TAMANO_MIN_MM, anchoTexto, envolver, octogono } from './etiquetaLayout.ts';
+import { TAMANO_MIN_MM, ajustarAlAncho, anchoTexto, envolver, octogono } from './etiquetaLayout.ts';
 import type { Lienzo, Primitiva } from './etiquetaLayout.ts';
 import type { ResultadoEtiqueta } from './armado.ts';
+import type { Sello } from './sellos.ts';
 
 export interface DatosElaborador {
   razonSocial?: string | null;
@@ -86,7 +87,9 @@ export function construirEtiquetaPosterior(
 
   const registrar = (tamano: number, que: string) => {
     if (tamano < TAMANO_MIN_MM) {
-      avisos.push(`${que}: ${tamano.toFixed(2)} mm, por debajo del mínimo legible (${TAMANO_MIN_MM} mm).`);
+      // 3 decimales: con 2, un 1,398 se mostraba como "1.40 mm, por debajo del
+      // mínimo (1.4 mm)" y el aviso se leía como una contradicción.
+      avisos.push(`${que}: ${tamano.toFixed(3)} mm, por debajo del mínimo legible (${TAMANO_MIN_MM} mm).`);
     }
   };
   registrar(T_CUERPO, 'Texto de ingredientes y alérgenos');
@@ -108,21 +111,33 @@ export function construirEtiquetaPosterior(
   }
 
   // Nombre del producto al lado del logo.
+  //
+  // Se mide con las métricas reales de Helvetica negrita y se corta en varias
+  // líneas; si aun así no entra (una sola palabra muy larga en una etiqueta
+  // angosta), `ajustarAlAncho` baja el cuerpo hasta que entre. Antes se medía con
+  // una aproximación que subestimaba y el nombre se montaba sobre la tabla.
   const nombreX = margen + (opts.logoDataUrl ? logoLado + 1.5 * escala : 0);
   const nombreW = colIzqW - (opts.logoDataUrl ? logoLado + 1.5 * escala : 0);
-  let yNombre = y + T_TITULO;
-  for (const linea of envolver(resultado.denominacion.toUpperCase(), T_TITULO, nombreW)) {
-    primitivas.push({ tipo: 'texto', x: nombreX, y: yNombre, texto: linea, tamano: T_TITULO, negrita: true });
-    yNombre += T_TITULO * 1.15;
+  const nombre = ajustarAlAncho(
+    resultado.denominacion.toUpperCase(), T_TITULO, nombreW, 3, T_SECCION, true,
+  );
+  registrar(nombre.tamano, 'Nombre del producto');
+
+  let yNombre = y + nombre.tamano;
+  for (const linea of nombre.lineas) {
+    primitivas.push({ tipo: 'texto', x: nombreX, y: yNombre, texto: linea, tamano: nombre.tamano, negrita: true });
+    yNombre += nombre.tamano * 1.15;
   }
 
+  // El bloque de textos arranca debajo de LO MÁS BAJO entre el logo y el nombre:
+  // si el nombre ocupó tres líneas, los ingredientes bajan, no se superponen.
   y = Math.max(y + logoLado, yNombre) + 1.5 * escala;
 
   const bloque = (titulo: string, cuerpo: string) => {
     if (!cuerpo) return;
     primitivas.push({ tipo: 'texto', x: margen, y, texto: titulo, tamano: T_SECCION, negrita: true });
     y += T_SECCION * 1.3;
-    for (const linea of envolver(cuerpo, T_CUERPO, colIzqW)) {
+    for (const linea of envolver(cuerpo, T_CUERPO, colIzqW, false)) {
       primitivas.push({ tipo: 'texto', x: margen, y, texto: linea, tamano: T_CUERPO });
       y += T_CUERPO * 1.25;
     }
@@ -222,37 +237,24 @@ export function construirEtiquetaPosterior(
   // ── Sellos ──────────────────────────────────────────────────────────────
   const sellos = resultado.sellos?.sellos || [];
   if (sellos.length > 0) {
-    const disponible = colDerW;
-    const ladoSello = Math.min(13 * escala, (disponible - (sellos.length - 1) * escala) / sellos.length);
+    const ladoSello = Math.min(15 * escala, (colDerW - (sellos.length - 1) * escala) / sellos.length);
     let xs = colDerX;
     yd += 1 * escala;
 
     for (const sello of sellos) {
-      primitivas.push({ tipo: 'poligono', puntos: octogono(xs, yd, ladoSello), relleno: true });
-      const lineas = sello.texto.split('\n');
-      const tSello = Math.min(ladoSello * 0.145, T_TABLA);
-      registrar(tSello, `Texto del sello ${sello.codigo}`);
-      let ys = yd + ladoSello / 2 - ((lineas.length - 1) * tSello * 1.2) / 2 + tSello * 0.35;
-      for (const linea of lineas) {
-        primitivas.push({
-          tipo: 'texto',
-          x: xs + ladoSello / 2,
-          y: ys,
-          texto: linea,
-          tamano: tSello,
-          negrita: true,
-          align: 'center',
-          color: '#fff',
-        });
-        ys += tSello * 1.2;
-      }
+      primitivas.push(...dibujarSello(sello, xs, yd, ladoSello, registrar));
       xs += ladoSello + escala;
     }
     yd += ladoSello + 1 * escala;
   }
 
-  // ── Pie: contenido neto, conservación y elaborador ──────────────────────
-  let yPie = Math.max(y, yd) + 0.5 * escala;
+  // ── Pie: contenido neto y elaborador ────────────────────────────────────
+  //
+  // Va en la columna IZQUIERDA, continuando debajo de los alérgenos, no debajo
+  // de las dos columnas. Antes esperaba a la más larga —la derecha, por los
+  // sellos— y se empujaba fuera de la etiqueta mientras la izquierda quedaba con
+  // un hueco vacío. Además es donde está en el rótulo de referencia.
+  let yPie = y + 0.5 * escala;
 
   if (resultado.pesoFinalG !== null) {
     primitivas.push({
@@ -267,7 +269,7 @@ export function construirEtiquetaPosterior(
   }
 
   if (datosElaborador) {
-    for (const linea of envolver(`Elaborado por ${datosElaborador}`, T_CUERPO, anchoUtil)) {
+    for (const linea of envolver(`Elaborado por ${datosElaborador}`, T_CUERPO, colIzqW, false)) {
       primitivas.push({ tipo: 'texto', x: margen, y: yPie, texto: linea, tamano: T_CUERPO });
       yPie += T_CUERPO * 1.25;
     }
@@ -292,14 +294,84 @@ export function construirEtiquetaPosterior(
     });
   }
 
-  // El contenido que se pasa del alto es contenido que no se imprime.
-  if (yPie > altoMm - margen) {
+  // El contenido que se pasa del alto es contenido que no se imprime. Se mide
+  // contra la columna MÁS LARGA de las dos, que es la que define el alto real.
+  const fondoUsado = Math.max(yPie, yd);
+  if (fondoUsado > altoMm - margen) {
     avisos.push(
-      `El contenido no entra: necesita ${Math.ceil(yPie + margen)} mm de alto y la etiqueta tiene ${altoMm} mm.`,
+      `El contenido no entra: necesita ${Math.ceil(fondoUsado + margen)} mm de alto y la etiqueta tiene ${altoMm} mm.`,
     );
   }
 
   return { anchoMm, altoMm, primitivas, avisosLegibilidad: avisos };
+}
+
+/**
+ * Sello "ALTO EN" con la forma oficial del MINSAL: octógono negro relleno,
+ * anillo blanco y contorno octogonal fino por fuera. Adentro, el nutriente en
+ * mayúsculas y "Ministerio de Salud" abajo en cuerpo menor.
+ *
+ * Las proporciones están tomadas del arte de referencia. El tamaño mínimo del
+ * sello según la superficie del envase está en el reglamento y todavía NO se
+ * transcribió: acá solo se garantiza que el texto no baje del piso de
+ * legibilidad, que no es lo mismo que cumplir la norma.
+ */
+function dibujarSello(
+  sello: Sello,
+  x: number,
+  y: number,
+  lado: number,
+  registrar: (tamano: number, que: string) => void,
+): Primitiva[] {
+  const out: Primitiva[] = [];
+
+  // Contorno exterior, anillo blanco y octógono relleno.
+  out.push({ tipo: 'poligono', puntos: octogono(x, y, lado), grosor: lado * 0.012 });
+  const inset = lado * 0.065;
+  out.push({
+    tipo: 'poligono',
+    puntos: octogono(x + inset, y + inset, lado - inset * 2),
+    relleno: true,
+  });
+
+  const cx = x + lado / 2;
+  const lineas = sello.texto.split('\n');
+
+  // El cuerpo se ajusta a la línea más larga para que "GRASAS SATURADAS" no se
+  // salga del octógono en un sello chico.
+  const anchoUtilSello = lado * 0.72;
+  let tTexto = lado * 0.135;
+  for (const linea of lineas) {
+    while (anchoTexto(linea, tTexto, true) > anchoUtilSello && tTexto > TAMANO_MIN_MM) {
+      tTexto -= lado * 0.005;
+    }
+  }
+  registrar(tTexto, `Texto del sello ${sello.codigo}`);
+
+  const tMinsal = tTexto * 0.62;
+  const alturaTexto = lineas.length * tTexto * 1.18;
+  const alturaMinsal = tMinsal * 2 * 1.15;
+
+  // El bloque completo (nutriente + Ministerio) se centra en el octógono.
+  let ys = y + (lado - alturaTexto - alturaMinsal) / 2 + tTexto;
+  for (const linea of lineas) {
+    out.push({
+      tipo: 'texto', x: cx, y: ys, texto: linea,
+      tamano: tTexto, negrita: true, align: 'center', color: '#fff',
+    });
+    ys += tTexto * 1.18;
+  }
+
+  ys += tMinsal * 0.5;
+  for (const linea of ['Ministerio', 'de Salud']) {
+    out.push({
+      tipo: 'texto', x: cx, y: ys, texto: linea,
+      tamano: tMinsal, negrita: true, align: 'center', color: '#fff',
+    });
+    ys += tMinsal * 1.15;
+  }
+
+  return out;
 }
 
 function formatNum(n: number): string {

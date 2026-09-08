@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { construirEtiquetaFrontal, construirEtiquetaPosterior } from './etiquetas.ts';
-import { TAMANO_MIN_MM, anchoTexto, envolver, octogono } from './etiquetaLayout.ts';
+import { TAMANO_MIN_MM, ajustarAlAncho, anchoTexto, envolver, octogono } from './etiquetaLayout.ts';
 import { armarEtiqueta } from './armado.ts';
 import { PESO_FINAL_G, recetaMarmolado } from './fixtures.ts';
 import { nombreArchivo } from './render/renderPdf.ts';
@@ -37,6 +37,50 @@ test('el ancho de texto crece con el tamaño de fuente', () => {
 
 test('las letras angostas miden menos que las anchas', () => {
   assert.ok(anchoTexto('iii', 3) < anchoTexto('mmm', 3));
+});
+
+test('usa las métricas reales de Helvetica, no un promedio', () => {
+  // Anchos AFM: M=833, i=222 sobre 1000 unidades. A 10 mm de cuerpo son 8,33 y
+  // 2,22 mm. Con el promedio de 0,55 que había antes ambos daban 5,5.
+  assert.ok(Math.abs(anchoTexto('M', 10) - 8.33) < 0.001);
+  assert.ok(Math.abs(anchoTexto('i', 10) - 2.22) < 0.001);
+});
+
+test('la negrita mide más que la regular', () => {
+  // Es lo que hacía que "PRODUCTO PRUEBA" se montara sobre la tabla: se medía
+  // como si fuera regular.
+  assert.ok(anchoTexto('PRODUCTO PRUEBA', 4, true) > anchoTexto('PRODUCTO PRUEBA', 4, false));
+});
+
+test('las tildes no cambian el ancho: en Helvetica miden igual que la letra base', () => {
+  assert.equal(anchoTexto('AZUCARES', 4, true), anchoTexto('AZÚCARES', 4, true));
+  assert.equal(anchoTexto('nino', 3), anchoTexto('niño', 3));
+});
+
+test('ajustarAlAncho no toca el cuerpo si el texto ya entra', () => {
+  const holgado = ajustarAlAncho('PRODUCTO PRUEBA', 4, 60, 2, 1.5, true);
+  assert.equal(holgado.tamano, 4);
+  assert.deepEqual(holgado.lineas, ['PRODUCTO PRUEBA']);
+});
+
+test('ajustarAlAncho corta en varias líneas antes que achicar', () => {
+  // Con dos palabras y 2 líneas permitidas alcanza con envolver: el cuerpo
+  // queda intacto.
+  const r = ajustarAlAncho('PRODUCTO PRUEBA', 4, 12, 2, 1.5, true);
+  assert.equal(r.tamano, 4);
+  assert.deepEqual(r.lineas, ['PRODUCTO', 'PRUEBA']);
+});
+
+test('ajustarAlAncho achica cuando no puede cortar más', () => {
+  // Cuatro palabras en 2 líneas: envolver solo no alcanza, tiene que bajar cuerpo.
+  const r = ajustarAlAncho('TORTA DE MIL HOJAS ARTESANAL', 4, 20, 2, 1.5, true);
+  assert.ok(r.tamano < 4, `esperaba achicar, quedó en ${r.tamano}`);
+  assert.ok(r.lineas.length <= 2, `quedaron ${r.lineas.length} líneas`);
+});
+
+test('ajustarAlAncho nunca baja del mínimo aunque no entre', () => {
+  const r = ajustarAlAncho('SUPERCALIFRAGILISTICOEXPIALIDOSO', 4, 3, 1, 1.5, true);
+  assert.ok(r.tamano >= 1.5);
 });
 
 test('envolver corta en palabras y no parte palabras al medio', () => {
@@ -112,12 +156,48 @@ test('imprime los 11 nutrientes con sus dos columnas', () => {
   assert.ok(textos.includes('1 porción'));
 });
 
-test('dibuja un octógono por cada sello que corresponde', () => {
+test('cada sello son dos octógonos: contorno exterior y relleno', () => {
   const r = resultado();
   const l = construirEtiquetaPosterior(r, elaborador, { anchoMm: 100, altoMm: 80 });
   const poligonos = l.primitivas.filter((p) => p.tipo === 'poligono');
-  assert.equal(poligonos.length, r.sellos!.sellos.length);
-  assert.equal(poligonos.length, 3);
+
+  assert.equal(r.sellos!.sellos.length, 3);
+  assert.equal(poligonos.length, 6); // 2 por sello
+
+  const contornos = poligonos.filter((p) => p.tipo === 'poligono' && !p.relleno);
+  const rellenos = poligonos.filter((p) => p.tipo === 'poligono' && p.relleno);
+  assert.equal(contornos.length, 3);
+  assert.equal(rellenos.length, 3);
+});
+
+test('el relleno del sello queda por dentro del contorno', () => {
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 100, altoMm: 80 });
+  const poligonos = l.primitivas.filter((p) => p.tipo === 'poligono');
+  const contorno = poligonos[0];
+  const relleno = poligonos[1];
+  if (contorno.tipo !== 'poligono' || relleno.tipo !== 'poligono') throw new Error('tipo inesperado');
+
+  const xs = (p: typeof contorno) => p.puntos.map(([x]) => x);
+  assert.ok(Math.min(...xs(relleno)) > Math.min(...xs(contorno)));
+  assert.ok(Math.max(...xs(relleno)) < Math.max(...xs(contorno)));
+});
+
+test('el sello lleva "Ministerio de Salud", como el arte oficial', () => {
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 100, altoMm: 80 });
+  const textos = l.primitivas.filter((p) => p.tipo === 'texto').map((p) => (p.tipo === 'texto' ? p.texto : ''));
+  assert.equal(textos.filter((t) => t === 'Ministerio').length, 3);
+  assert.equal(textos.filter((t) => t === 'de Salud').length, 3);
+});
+
+test('el texto del sello va en blanco sobre el octógono negro', () => {
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 100, altoMm: 80 });
+  const alto = l.primitivas.find((p) => p.tipo === 'texto' && p.texto === 'ALTO EN');
+  assert.ok(alto && alto.tipo === 'texto');
+  if (alto.tipo === 'texto') {
+    assert.equal(alto.color, '#fff');
+    assert.equal(alto.negrita, true);
+    assert.equal(alto.align, 'center');
+  }
 });
 
 test('sin sellos no dibuja octógonos', () => {
@@ -144,8 +224,52 @@ test('un borrador sale marcado en la etiqueta', () => {
 });
 
 test('avisa cuando el contenido no entra en el alto pedido', () => {
-  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 90, altoMm: 25 });
-  assert.ok(l.avisosLegibilidad.some((a) => /no entra/i.test(a)));
+  // El tamaño de fuente escala con el alto, así que achicar la etiqueta sola no
+  // desborda: la etiqueta es autosemejante. Lo que sí desborda es un texto largo,
+  // que es el caso real —un producto con muchos ingredientes—.
+  const listaLarga = Array.from({ length: 40 }, (_, i) => `ingrediente numero ${i}`).join(', ');
+  const r = armarEtiqueta({
+    productName: 'Bizcocho Marmolado',
+    lineas: recetaMarmolado(),
+    perfil: {
+      pesoFinalPromedioG: PESO_FINAL_G, pesoPorcionG: 160, porcionesPorEnvase: 1,
+      porcionDescripcion: '1 unidad', ingredientesTextoOverride: listaLarga,
+    },
+    elaborador: 'La Oca SpA',
+  });
+
+  const l = construirEtiquetaPosterior(r, elaborador, { anchoMm: 90, altoMm: 60 });
+  assert.ok(l.avisosLegibilidad.some((a) => /no entra/i.test(a)), 'esperaba aviso de desborde');
+});
+
+test('la etiqueta de referencia entra en 90x60 sin avisos', () => {
+  // Es la regresión del pie: cuando esperaba a las DOS columnas se iba 2 mm
+  // abajo mientras la izquierda tenía un hueco vacío.
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 90, altoMm: 60 });
+  assert.deepEqual(l.avisosLegibilidad, []);
+});
+
+test('el nombre largo se parte en líneas y no invade la columna de la tabla', () => {
+  // CON logo: es el caso que fallaba. El logo le come 11,5 mm a la columna
+  // izquierda y "PRODUCTO PRUEBA" ya no entra en una línea. Sin logo entra
+  // holgado, así que un test sin logo no probaría nada.
+  const r = resultado();
+  r.denominacion = 'PRODUCTO PRUEBA';
+  const l = construirEtiquetaPosterior(r, elaborador, { anchoMm: 90, altoMm: 60, logoDataUrl: LOGO });
+
+  const lineasNombre = l.primitivas.filter(
+    (p) => p.tipo === 'texto' && /^(PRODUCTO|PRUEBA)$/.test(p.texto),
+  );
+  assert.equal(lineasNombre.length, 2, 'el nombre deberia partirse en dos lineas');
+
+  // Ninguna línea del nombre puede pisar el inicio de la columna derecha.
+  const cabecera = l.primitivas.find((p) => p.tipo === 'texto' && p.texto === 'INFORMACIÓN NUTRICIONAL');
+  if (cabecera?.tipo !== 'texto') throw new Error('falta la cabecera');
+  for (const linea of lineasNombre) {
+    if (linea.tipo !== 'texto') continue;
+    const derecha = linea.x + anchoTexto(linea.texto, linea.tamano, true);
+    assert.ok(derecha < cabecera.x, `"${linea.texto}" llega a ${derecha} y la tabla arranca antes`);
+  }
 });
 
 test('avisa cuando el texto queda por debajo del mínimo legible', () => {

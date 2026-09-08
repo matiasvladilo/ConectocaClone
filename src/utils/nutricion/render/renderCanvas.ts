@@ -74,7 +74,7 @@ function dibujar(ctx: CanvasRenderingContext2D, p: Primitiva) {
         ctx.fill();
       } else {
         ctx.strokeStyle = '#000';
-        ctx.lineWidth = 0.2;
+        ctx.lineWidth = p.grosor ?? 0.2;
         ctx.stroke();
       }
       break;

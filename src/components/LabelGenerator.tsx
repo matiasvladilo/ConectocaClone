@@ -103,9 +103,12 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
     (async () => {
       await precargarImagenes(lienzo);
       if (!vigente || !contenedor.current) return;
-      // 150 dpi alcanza para mirar en pantalla; el PDF y el PNG descargable
-      // salen a 300.
-      const canvas = renderizarCanvas(lienzo, 150);
+
+      // La previsualización se dibuja a 300 dpi y se muestra escalada por CSS.
+      // A 150 se veía borrosa: el canvas se mostraba más grande que su resolución
+      // real, y en pantallas retina el navegador lo escalaba el doble otra vez.
+      // Dibujar de más y achicar por CSS es lo que la deja nítida.
+      const canvas = renderizarCanvas(lienzo, 300);
       canvas.style.width = "100%";
       canvas.style.height = "auto";
       canvas.style.border = "1px solid #d1d5db";
@@ -139,7 +142,9 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
     try {
       setGenerando(true);
       await precargarImagenes(lienzo);
-      const canvas = renderizarCanvas(lienzo, 300);
+      // 600 dpi para el PNG descargable: es un raster que puede terminar en una
+      // imprenta, y a 300 el texto chico de los sellos se empasta.
+      const canvas = renderizarCanvas(lienzo, 600);
       const a = document.createElement("a");
       a.href = canvasAPng(canvas);
       a.download = nombreArchivo(resultado.denominacion, sufijo, "png");

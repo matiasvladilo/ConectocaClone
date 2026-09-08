@@ -67,6 +67,7 @@ function dibujar(doc: jsPDF, p: Primitiva) {
       deltas.push([inicio[0] - px, inicio[1] - py]); // cierre
       if (p.relleno) doc.setFillColor(0);
       doc.setDrawColor(0);
+      doc.setLineWidth(p.grosor ?? 0.2);
       doc.lines(deltas, inicio[0], inicio[1], [1, 1], p.relleno ? 'F' : 'S', true);
       break;
     }
