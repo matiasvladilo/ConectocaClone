@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Plus, Save, Trash2, Package, AlertTriangle, TrendingDown, TrendingUp, Edit2, X, Search, Filter } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, Package, AlertTriangle, TrendingDown, TrendingUp, Edit2, X, Search, Filter, FlaskConical } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
-import { ingredientsAPI, type Ingredient as APIIngredient } from "../utils/api";
+import {
+  ingredientsAPI,
+  nutritionAPI,
+  type AlergenoAPI,
+  type AlergenosDeMateriaPrima,
+  type FichaNutricionalAPI,
+  type Ingredient as APIIngredient,
+} from "../utils/api";
+import { NutritionFichaDialog, EstadoPunto } from "./NutritionFichaDialog";
+import { diagnosticarFicha, ETIQUETA_ESTADO } from "../utils/nutricion/estado";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -41,10 +50,18 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
   const [searchTerm, setSearchTerm] = useState("");
   const [supplierFilter, setSupplierFilter] = useState<string>("ALL");
 
+  // Datos nutricionales. Van en su propio estado y se cargan aparte: si el
+  // endpoint de nutrición falla, la pantalla de stock tiene que seguir andando.
+  const [fichas, setFichas] = useState<Record<string, FichaNutricionalAPI>>({});
+  const [alergenos, setAlergenos] = useState<Record<string, AlergenosDeMateriaPrima>>({});
+  const [catalogoAlergenos, setCatalogoAlergenos] = useState<AlergenoAPI[]>([]);
+  const [fichaAbierta, setFichaAbierta] = useState<APIIngredient | null>(null);
+
   useEffect(() => {
     console.log("IngredientManagement: Component mounted");
     console.log("Access Token:", accessToken ? "Present" : "Missing");
     loadIngredients();
+    loadNutricion();
   }, []);
 
   const loadIngredients = async () => {
@@ -59,6 +76,25 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
       toast.error(error.message || "Error al cargar materias primas");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Sin toast de error a propósito: que no haya datos nutricionales todavía es el
+  // estado normal al empezar, y un cartel rojo cada vez que se abre la pantalla de
+  // stock sería ruido. El semáforo de cada tarjeta ya comunica que falta cargar.
+  const loadNutricion = async () => {
+    try {
+      const [datos, catalogo] = await Promise.all([
+        nutritionAPI.getIngredientNutrition(accessToken),
+        nutritionAPI.getAllergens(accessToken),
+      ]);
+      const porId: Record<string, FichaNutricionalAPI> = {};
+      for (const f of datos.fichas) porId[f.ingredientId] = f;
+      setFichas(porId);
+      setAlergenos(datos.alergenos || {});
+      setCatalogoAlergenos(catalogo);
+    } catch (error: any) {
+      console.error("Error loading nutrition data:", error);
     }
   };
 
@@ -203,6 +239,16 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
     return matchesSearch && matchesSupplier;
   });
 
+  // Sobre el total, no sobre lo filtrado: es el avance de la carga de datos, y
+  // buscar "harina" no debería cambiarlo.
+  const resumenNutricional = ingredients.reduce(
+    (acc, ing) => {
+      acc[diagnosticarFicha(ing.unit, fichas[ing.id] || null).estado] += 1;
+      return acc;
+    },
+    { completa: 0, parcial: 0, sin_datos: 0 },
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 pb-20">
       {/* Header */}
@@ -315,6 +361,26 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
               </select>
             </div>
           </div>
+
+          {/* Cuánto falta para poder generar etiquetas. Con 89 materias primas,
+              saber que van 12 cargadas importa más que el estado de una sola. */}
+          {ingredients.length > 0 && (
+            <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-gray-200 text-xs text-gray-600">
+              <span className="text-gray-700">Información nutricional:</span>
+              <span className="flex items-center gap-1">
+                <EstadoPunto estado="completa" />
+                {resumenNutricional.completa} completas
+              </span>
+              <span className="flex items-center gap-1">
+                <EstadoPunto estado="parcial" />
+                {resumenNutricional.parcial} parciales
+              </span>
+              <span className="flex items-center gap-1">
+                <EstadoPunto estado="sin_datos" />
+                {resumenNutricional.sin_datos} sin datos
+              </span>
+            </div>
+          )}
         </Card>
 
         {/* New/Edit Form */}
@@ -518,6 +584,7 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredIngredients.map((ingredient) => {
               const stockStatus = getStockStatus(ingredient);
+              const nutricion = diagnosticarFicha(ingredient.unit, fichas[ingredient.id] || null);
               return (
                 <motion.div
                   key={ingredient.id}
@@ -529,13 +596,26 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
                         <h3 className="text-gray-900 mb-1">{ingredient.name}</h3>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className={`text-xs px-2 py-1 rounded-full text-white ${stockStatus.color}`}>
                             {stockStatus.label}
+                          </span>
+                          <span className="flex items-center gap-1 text-xs text-gray-600">
+                            <EstadoPunto estado={nutricion.estado} />
+                            {ETIQUETA_ESTADO[nutricion.estado]}
                           </span>
                         </div>
                       </div>
                       <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setFichaAbierta(ingredient)}
+                          className="text-blue-600 hover:bg-blue-50"
+                          title="Información nutricional"
+                        >
+                          <FlaskConical className="w-4 h-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -621,6 +701,20 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
           </div>
         )}
       </div>
+
+      {fichaAbierta && (
+        <NutritionFichaDialog
+          open={!!fichaAbierta}
+          onClose={() => setFichaAbierta(null)}
+          ingredient={fichaAbierta}
+          ficha={fichas[fichaAbierta.id] || null}
+          contieneIniciales={alergenos[fichaAbierta.id]?.contiene || []}
+          trazasIniciales={alergenos[fichaAbierta.id]?.trazas || []}
+          catalogo={catalogoAlergenos}
+          onSaved={loadNutricion}
+          accessToken={accessToken}
+        />
+      )}
     </div>
   );
 }

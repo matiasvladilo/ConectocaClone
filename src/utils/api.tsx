@@ -1,6 +1,7 @@
 import { projectId, publicAnonKey } from './supabase/info';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as getSharedClient } from './supabase/client';
+import type { FichaNutricional } from './nutricion/tipos';
 
 export const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-6d979413`;
 
@@ -690,6 +691,189 @@ export const productIngredientsAPI = {
   removeIngredient: async (token: string, productId: string, ingredientId: string): Promise<{ deleted: boolean }> => {
     const response = await fetchAPI(`/products/${productId}/ingredients/${ingredientId}`, {
       method: 'DELETE',
+    }, token);
+    return response?.data || response;
+  },
+};
+
+// ─── Nutrición y etiquetas ────────────────────────────────────────────────────
+//
+// El motor de cálculo vive en src/utils/nutricion y es puro. Esta capa solo trae
+// y guarda datos; ninguna fórmula pasa por acá.
+
+/**
+ * Extiende el tipo que consume el motor. Que herede de `FichaNutricional` no es
+ * cosmético: si el endpoint deja de devolver un campo que el cálculo necesita,
+ * el compilador lo marca acá en vez de aparecer como un NaN en una etiqueta.
+ */
+export interface FichaNutricionalAPI extends FichaNutricional {
+  ingredientId: string;
+  marca: string;
+  fuente: string;
+  actualizadoEn?: string | null;
+  updatedAt?: string;
+}
+
+export interface AlergenoAPI {
+  id: string;
+  codigo: string;
+  nombre: string;
+  nombreEtiqueta: string;
+  orden: number;
+  businessId?: string | null;
+}
+
+export interface AlergenosDeMateriaPrima {
+  contiene: AlergenoAPI[];
+  trazas: AlergenoAPI[];
+}
+
+export interface LabelProfile {
+  productId: string;
+  pesoFinalPromedioG: number | null;
+  pesoPorcionG: number | null;
+  porcionesPorEnvase: number | null;
+  porcionDescripcion: string;
+  denominacionLegal: string;
+  descripcionEtiqueta: string;
+  conservacion: string;
+  vidaUtilDias: number | null;
+  ingredientesTextoOverride: string;
+  alergenosTextoOverride: string;
+  trazasTextoOverride: string;
+  updatedAt?: string;
+}
+
+export interface LabelSettings {
+  businessId: string;
+  razonSocial: string;
+  rut: string;
+  direccion: string;
+  telefono: string;
+  email: string;
+  plantaElaboradora: string;
+  logoFrontalUrl: string;
+  anchoMmDefault: number;
+  altoMmDefault: number;
+}
+
+export interface LabelVersion {
+  id: string;
+  productId: string;
+  productName: string;
+  version: number;
+  estado: 'borrador' | 'lista';
+  snapshot: Record<string, unknown>;
+  regulationVersion: string;
+  calculatedAt: string;
+  createdBy?: string | null;
+  anchoMm: number | null;
+  altoMm: number | null;
+  createdAt: string;
+}
+
+/** Una línea de receta con todo lo necesario para calcularla. */
+export interface LineaDataset {
+  ingredienteId: string;
+  nombre: string;
+  /** ingredients.unit. `cantidad` está en ESTA unidad, no en gramos. */
+  unidad: string;
+  cantidad: number;
+  ficha: FichaNutricionalAPI | null;
+  contiene: AlergenoAPI[];
+  trazas: AlergenoAPI[];
+}
+
+export interface NutritionDataset {
+  product: { id: string; name: string };
+  lineas: LineaDataset[];
+  labelProfile: LabelProfile | null;
+  labelSettings: LabelSettings | null;
+}
+
+export const nutritionAPI = {
+  getAllergens: async (token: string): Promise<AlergenoAPI[]> => {
+    const response = await fetchAPI('/nutrition/allergens', {}, token);
+    return response?.data || [];
+  },
+
+  /** Fichas + alérgenos de todas las materias primas del negocio, en una llamada. */
+  getIngredientNutrition: async (
+    token: string,
+  ): Promise<{ fichas: FichaNutricionalAPI[]; alergenos: Record<string, AlergenosDeMateriaPrima> }> => {
+    const response = await fetchAPI('/nutrition/ingredients', {}, token);
+    return response?.data || { fichas: [], alergenos: {} };
+  },
+
+  /**
+   * Guarda la ficha de una materia prima. Upsert.
+   *
+   * `contiene`/`trazas` son arrays de allergen_id y REEMPLAZAN lo que hubiera.
+   * Omitirlos deja los alérgenos como están: un guardado que solo toca nutrientes
+   * no borra lo ya cargado.
+   */
+  saveIngredientNutrition: async (
+    token: string,
+    ingredientId: string,
+    ficha: Partial<FichaNutricionalAPI> & { contiene?: string[]; trazas?: string[] },
+  ): Promise<FichaNutricionalAPI> => {
+    const response = await fetchAPI(`/nutrition/ingredients/${ingredientId}`, {
+      method: 'PUT',
+      body: JSON.stringify(ficha),
+    }, token);
+    return response?.data || response;
+  },
+
+  getProductDataset: async (token: string, productId: string): Promise<NutritionDataset> => {
+    const response = await fetchAPI(`/nutrition/products/${productId}/dataset`, {}, token);
+    return response?.data || response;
+  },
+
+  saveLabelProfile: async (
+    token: string,
+    productId: string,
+    perfil: Partial<LabelProfile>,
+  ): Promise<LabelProfile> => {
+    const response = await fetchAPI(`/nutrition/products/${productId}/label-profile`, {
+      method: 'PUT',
+      body: JSON.stringify(perfil),
+    }, token);
+    return response?.data || response;
+  },
+
+  getLabelSettings: async (token: string): Promise<LabelSettings | null> => {
+    const response = await fetchAPI('/nutrition/label-settings', {}, token);
+    return response?.data ?? null;
+  },
+
+  saveLabelSettings: async (token: string, settings: Partial<LabelSettings>): Promise<LabelSettings> => {
+    const response = await fetchAPI('/nutrition/label-settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }, token);
+    return response?.data || response;
+  },
+
+  getLabelVersions: async (token: string, productId: string): Promise<LabelVersion[]> => {
+    const response = await fetchAPI(`/nutrition/products/${productId}/label-versions`, {}, token);
+    return response?.data || [];
+  },
+
+  createLabelVersion: async (
+    token: string,
+    productId: string,
+    payload: {
+      estado: 'borrador' | 'lista';
+      snapshot: Record<string, unknown>;
+      regulationVersion: string;
+      calculatedAt?: string;
+      anchoMm?: number;
+      altoMm?: number;
+    },
+  ): Promise<LabelVersion> => {
+    const response = await fetchAPI(`/nutrition/products/${productId}/label-versions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }, token);
     return response?.data || response;
   },
