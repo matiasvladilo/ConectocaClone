@@ -12,6 +12,7 @@ import type { Product, Category, StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
+import { ETIQUETA_MOVIMIENTO, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
 
 interface DistributionPanelProps {
   onBack: () => void;
@@ -51,41 +52,6 @@ export function elegirCategoriaInicial(categories: Category[]): string {
   const distri = categories.find(c => c.name.trim().toLowerCase().includes('distribuidora'));
   return distri ? distri.id : 'all';
 }
-
-const ETIQUETA_MOVIMIENTO: Record<StockEvent['type'], string> = {
-  despacho: 'Despacho a local',
-  reposicion: 'Llegó mercadería',
-  merma: 'Merma',
-  ajuste: 'Corrección de conteo',
-  devolucion: 'Devolución por pedido borrado',
-};
-
-/**
- * Cómo se dibuja cada tipo de movimiento en el drawer.
- *
- * 'ajuste' es el caso raro: `quantity` en la base es siempre positiva y el signo
- * lo da el tipo, pero una corrección de conteo puede haber sido para arriba o
- * para abajo — y ese dato NO existe en la tabla. Antes se mostraba el número sin
- * signo, que se lee como si fuera un alta. La salida honesta es no fingir un
- * signo y decir explícitamente que el número es la magnitud de la corrección,
- * apoyándose en el stock resultante (que sí es un dato real) para saber en qué
- * quedó el producto.
- */
-const SIGNO_MOVIMIENTO: Record<StockEvent['type'], '+' | '−' | ''> = {
-  despacho: '−',
-  merma: '−',
-  reposicion: '+',
-  devolucion: '+',
-  ajuste: '',
-};
-
-const COLOR_MOVIMIENTO: Record<StockEvent['type'], string> = {
-  despacho: 'text-red-600',
-  merma: 'text-red-600',
-  reposicion: 'text-green-600',
-  devolucion: 'text-green-600',
-  ajuste: 'text-gray-600',
-};
 
 export function DistributionPanel({ onBack, accessToken }: DistributionPanelProps) {
   const [products, setProducts] = useState<Product[]>([]);

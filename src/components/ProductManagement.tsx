@@ -38,7 +38,9 @@ import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
 import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
+import { alternarStockIlimitado } from '../utils/stockForm';
 import { ProductIngredientConfig } from './ProductIngredientConfig';
+import { ProductDetailDialog } from './ProductDetailDialog';
 
 // Carga diferida: ZXing es una dependencia pesada y solo hace falta cuando
 // alguien abre el escáner. Con un import estático entraría en el bundle
@@ -88,11 +90,25 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   const [searchScannerOpen, setSearchScannerOpen] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [savingStock, setSavingStock] = useState(false);
+  // Producto cuya ficha está abierta. Es la puerta de entrada desde la grilla:
+  // la tarjeta ya no abre el formulario de edición directamente.
+  const [detalleProduct, setDetalleProduct] = useState<Product | null>(null);
+  const [esAdmin, setEsAdmin] = useState(false);
   // Solo se usan al crear. Al editar, el nombre sigue siendo texto libre.
   const [nameParts, setNameParts] = useState<ProductNameParts>(partesVacias);
   // La receta se abre como capa y no navegando a otra pantalla: así este
   // componente no se desmonta y el diálogo, la búsqueda y el scroll sobreviven.
   const [recetaDe, setRecetaDe] = useState<Product | null>(null);
+  // De dónde se abrió la receta, para saber a dónde volver al cerrarla
+  // (Hallazgo 1 del review final). 'edicion' = se abrió con "Configurar
+  // receta" desde el diálogo de editar (abrirReceta); hay que reabrir ESE
+  // diálogo. 'ficha' = se abrió con "Receta" desde la ficha de solo lectura
+  // (onReceta de ProductDetailDialog); hay que volver a esa ficha. Sin este
+  // estado, cerrarReceta no tiene forma de distinguir los dos caminos y
+  // siempre reabría el diálogo de edición, aunque editingProduct fuera null
+  // (formulario "Crear" en blanco) o perteneciera a otro producto editado
+  // antes y cerrado con Escape.
+  const [recetaOrigen, setRecetaOrigen] = useState<'edicion' | 'ficha' | null>(null);
   // Foco de la capa de receta. Al montarse, el botón "Configurar receta" que
   // tenía el foco ya se desmontó (estaba dentro del diálogo, que se cerró), así
   // que el foco cae en document.body: desde ahí, espacio/PageDown/flechas
@@ -112,6 +128,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     // Load profile to identify current user
     profileAPI.get(accessToken).then(profile => {
       setCurrentUserId(profile.id);
+      setEsAdmin(profile.role === 'admin');
     }).catch(err => console.error("Error loading profile", err));
   }, []);
 
@@ -191,6 +208,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   const abrirReceta = () => {
     if (!editingProduct) return;
     setRecetaDe(editingProduct);
+    setRecetaOrigen('edicion');
     // Ojo: NO handleCloseDialog(), que además borra editingProduct, formData y
     // nameParts. Acá solo se baja la bandera; Radix desmonta el contenido del
     // diálogo pero el estado vive en este componente y vuelve intacto, incluidos
@@ -210,10 +228,24 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   }, [recetaDe]);
 
   const cerrarReceta = () => {
+    // Se captura ANTES de limpiar recetaDe: es la única oportunidad de saber
+    // a qué producto volver si el origen fue la ficha.
+    const productoDeFicha = recetaOrigen === 'ficha' ? recetaDe : null;
     setRecetaDe(null);
-    setIsDialogOpen(true);
+    setRecetaOrigen(null);
+    if (productoDeFicha) {
+      // Se abrió desde la ficha (onReceta): volver ahí, no al diálogo de
+      // edición. editingProduct puede ser null (formulario "Crear" en blanco)
+      // o pertenecer a otro producto editado antes y cerrado con Escape/X —
+      // abrir el diálogo de edición acá sería exactamente el Hallazgo 1.
+      setDetalleProduct(productoDeFicha);
+    } else {
+      // Se abrió con "Configurar receta" desde el diálogo de editar: reabrir
+      // ese mismo diálogo, como siempre.
+      setIsDialogOpen(true);
+    }
     // Silencioso para no perder el scroll de la grilla. Refresca `products`, y
-    // con eso el contador de ingredientes del diálogo.
+    // con eso el contador de ingredientes del diálogo/ficha.
     // No tocar formData: conserva a propósito lo que el usuario no ha guardado.
     loadProducts(true);
   };
@@ -235,7 +267,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     }
     // parseFloat acá también: con parseInt, "-0.4" se leía como -0 y pasaba la
     // validación, y ahora que el valor se guarda con decimales entraría negativo.
-    if (!formData.unlimitedStock && (!formData.stock || parseFloat(formData.stock) < 0)) {
+    // Solo corre al CREAR: al editar, formData.stock ni siquiera viaja en el
+    // payload (construirPayloadProducto lo omite), así que validarlo acá
+    // quedaba muerto y además podía bloquear sin salida: un producto legado
+    // con stock -1 abre con unlimitedStock=true y formData.stock="-1"; si el
+    // usuario destildaba "Stock Ilimitado", el guardado quedaba atascado en
+    // este toast sin ningún campo donde corregir el valor (Hallazgo 3).
+    if (!editingProduct && !formData.unlimitedStock && (!formData.stock || parseFloat(formData.stock) < 0)) {
       toast.error('El stock debe ser mayor o igual a 0');
       return;
     }
@@ -243,8 +281,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     try {
       setSubmitting(true);
 
-      // Por qué el stock viaja condicional: ver el comentario de `stockSeToco`
-      // en construirPayloadProducto (src/utils/productPayload.ts).
+      // El stock no viaja en el payload de edición: se cambia sólo desde
+      // StockAdjustDialog. Ver construirPayloadProducto.
       const productData = construirPayloadProducto({
         formData,
         editingProduct,
@@ -276,10 +314,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       } else {
         // Create new product
         // `stock` queda opcional en el tipo de productData porque el spread de
-        // más arriba es condicional (así el guardado de edición no pisa el stock
-        // con un valor viejo). Pero en esta rama `editingProduct` es null, así que
-        // `stockSeToco` da `true` siempre (ver su definición) y `stock` SIEMPRE
-        // está presente acá: el assert solo hace explícito para TS lo que ya es
+        // más arriba es condicional (para que el guardado de edición no pise el
+        // stock con un valor viejo). Pero en esta rama `editingProduct` es null,
+        // que es exactamente la condición que hace que construirPayloadProducto
+        // incluya `stock`: el assert solo hace explícito para TS lo que ya es
         // cierto en runtime, sin tocar el tipo de Product ni el de la API.
         const created = await productsAPI.create(accessToken, productData as typeof productData & { stock: number });
         setProducts([created, ...products]);
@@ -781,22 +819,22 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   // dejaría los últimos apareciendo más de 10 segundos después.
                   transition={{ delay: Math.min(index * 0.02, 0.4) }}
                 >
-                  {/* Todo el cuadrado abre Editar: los tres botones que había antes
-                      no entran en ~150px de ancho, así que Ajustar Stock y Eliminar
-                      viven ahora dentro de ese diálogo. */}
+                  {/* Todo el cuadrado abre la ficha de solo lectura: los tres botones
+                      que había antes no entran en ~150px de ancho, así que Editar,
+                      Ajustar Stock y Eliminar viven ahora dentro de esa ficha. */}
                   {/* La tarjeta reemplazó a tres botones (Editar/Ajustar Stock/Eliminar)
                       que eran focuseables por naturaleza. Como ahora es la ÚNICA forma
                       de llegar a esas acciones, necesita comportarse como un botón real
                       para teclado y lectores de pantalla: rol, foco y activación con
                       Enter/Espacio (el div no los da gratis). */}
                   <Card
-                    onClick={() => handleOpenDialog(product)}
+                    onClick={() => setDetalleProduct(product)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        handleOpenDialog(product);
+                        setDetalleProduct(product);
                       }
                     }}
                     className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
@@ -857,9 +895,10 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
                       {/* Solo visible desde 1024px (ver .tarjeta-producto-stock-btn más
                           arriba): en celular el cuadrado sigue chico a propósito, y
-                          Ajustar Stock ya está a un toque de distancia dentro de Editar.
+                          Ajustar Stock ya está a un toque de distancia dentro de la
+                          ficha de solo lectura (ver ProductDetailDialog).
                           `stopPropagation` es obligatorio: el botón vive adentro de la
-                          tarjeta clickeable que abre Editar, y sin esto un click acá
+                          tarjeta clickeable que abre esa ficha, y sin esto un click acá
                           abriría los dos diálogos a la vez. */}
                       {!esIlimitado && (
                         <button
@@ -997,21 +1036,50 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
               </div>
 
               <div>
-                <Label htmlFor="stock">Stock *</Label>
-                <div className="relative">
-                  <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="stock"
-                    type="number"
-                    min="0"
-                    value={formData.stock}
-                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                    placeholder="0"
-                    className="pl-9"
-                    required
-                    disabled={formData.unlimitedStock}
-                  />
-                </div>
+                {/* htmlFor solo cuando el input existe (rama de creación, id="stock"
+                    más abajo): al editar no hay ningún elemento con ese id, y un
+                    htmlFor huérfano no anuncia nada al lector de pantalla ni hace
+                    nada al clickear (Hallazgo 2). */}
+                <Label htmlFor={editingProduct ? undefined : 'stock'}>Stock {!editingProduct && '*'}</Label>
+                {editingProduct ? (
+                  // Al editar, el stock NO es un campo de este formulario. Era la
+                  // causa del bug reportado: quien lo tipeaba y cerraba el diálogo
+                  // sin llegar a "Guardar Cambios" (que queda debajo del scroll en
+                  // teléfono) perdía el número sin ningún aviso. Ahora se muestra y
+                  // se cambia por el diálogo de ajuste, que confirma en el acto.
+                  <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
+                    <span className="text-lg font-mono text-gray-900">
+                      {formData.unlimitedStock ? '∞' : formData.stock}
+                    </span>
+                    {!formData.unlimitedStock && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setStockProduct(editingProduct)}
+                        disabled={submitting}
+                        className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
+                      >
+                        <BoxIcon className="w-4 h-4 mr-1" />
+                        Ajustar
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      id="stock"
+                      type="number"
+                      min="0"
+                      value={formData.stock}
+                      onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                      placeholder="0"
+                      className="pl-9"
+                      required
+                      disabled={formData.unlimitedStock}
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1040,11 +1108,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                   <Checkbox
                     id="unlimited-stock"
                     checked={formData.unlimitedStock}
-                    onCheckedChange={(checked: boolean | "indeterminate") => setFormData({
-                      ...formData,
-                      unlimitedStock: checked === true,
-                      stock: checked === true ? '0' : formData.stock
-                    })}
+                    onCheckedChange={(checked: boolean | "indeterminate") =>
+                      setFormData(prev => alternarStockIlimitado(prev, checked === true))
+                    }
                     className="border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                   />
                   <div className="flex-1">
@@ -1213,35 +1279,22 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
             </div>
 
             <DialogFooter>
-              {/* Estas dos acciones vivían en la tarjeta del listado. Con la grilla
-                  compacta ya no entran ahí, así que se movieron acá.
+              {/* Esta acción vivía en la tarjeta del listado. Con la grilla compacta
+                  ya no entra ahí, así que se movió acá (Ajustar Stock, que vivía al
+                  lado de Eliminar, se fue en cambio a la ficha de solo lectura).
                   `type="button"` es obligatorio: el contenido del diálogo es un
-                  <form> y sin eso dispararían un submit. */}
+                  <form> y sin eso dispararía un submit. */}
               {editingProduct && (
-                <>
-                  {!(editingProduct.unlimitedStock || editingProduct.stock === -1) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setStockProduct(editingProduct)}
-                      disabled={submitting}
-                      className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                    >
-                      <BoxIcon className="w-4 h-4 mr-1" />
-                      Ajustar Stock
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsDeleting(editingProduct)}
-                    disabled={submitting}
-                    className="border-red-500 text-red-500 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Eliminar
-                  </Button>
-                </>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsDeleting(editingProduct)}
+                  disabled={submitting}
+                  className="border-red-500 text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Eliminar
+                </Button>
               )}
               <Button
                 type="button"
@@ -1333,6 +1386,17 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         product={stockProduct}
         onConfirm={handleAjustarStock}
         saving={savingStock}
+      />
+
+      <ProductDetailDialog
+        product={detalleProduct}
+        accessToken={accessToken}
+        onOpenChange={(abierto) => { if (!abierto) setDetalleProduct(null); }}
+        esAdmin={esAdmin}
+        onEditar={(p) => { setDetalleProduct(null); handleOpenDialog(p); }}
+        onAjustarStock={(p) => { setDetalleProduct(null); setStockProduct(p); }}
+        onReceta={(p) => { setDetalleProduct(null); setRecetaDe(p); setRecetaOrigen('ficha'); }}
+        onEliminar={(p) => { setDetalleProduct(null); setIsDeleting(p); }}
       />
 
       {/* z-50 y no más: el CSS de Tailwind está precompilado y z-50 es el máximo

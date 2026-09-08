@@ -56,18 +56,21 @@ test('omite stock cuando no se tocó', () => {
   assert.equal('stock' in payload, false);
 });
 
-test('incluye stock cuando cambió', () => {
+// Aunque el formulario mande un stock distinto al que tenía el producto, al
+// editar nunca viaja: no hay forma de "tocarlo" desde acá, sólo desde
+// StockAdjustDialog.
+test('al editar, un stock distinto en el formulario tampoco se incluye', () => {
   const payload = construirPayloadProducto({
     formData: { ...formBase, stock: '25' },
     editingProduct: productoBase,
     priceValue: 2500,
   });
-  assert.equal(payload.stock, 25);
+  assert.equal('stock' in payload, false);
 });
 
-// Con parseInt, parseInt("9.5") = 9 nunca coincidía con 9.5: todo producto por
-// peso daba "se tocó" y además mandaba el 9 truncado, comiéndose media unidad.
-test('no considera tocado un stock decimal sin cambios', () => {
+// Caso límite de la misma regla: ni siquiera un stock con decimales (productos
+// por peso) hace que se incluya al editar.
+test('al editar, un stock decimal tampoco se incluye', () => {
   const payload = construirPayloadProducto({
     formData: { ...formBase, stock: '9.5', allowDecimal: true },
     editingProduct: { ...productoBase, stock: 9.5 },
@@ -85,13 +88,13 @@ test('al crear siempre manda stock', () => {
   assert.equal(payload.stock, 10);
 });
 
-test('stock ilimitado manda 0 y trackStock false', () => {
+test('al editar, marcar ilimitado manda trackStock false y sigue sin incluir stock', () => {
   const payload = construirPayloadProducto({
     formData: { ...formBase, unlimitedStock: true },
     editingProduct: productoBase,
     priceValue: 2500,
   });
-  assert.equal(payload.stock, 0);
+  assert.equal('stock' in payload, false);
   assert.equal(payload.trackStock, false);
   assert.equal(payload.unlimitedStock, true);
 });
@@ -114,17 +117,31 @@ test('categoría vacía cae en General', () => {
   assert.equal(payload.category, 'General');
 });
 
-// Pasar de ilimitado a limitado toca el stock aunque el número en formData.stock
-// sea el mismo que ya traía el producto: eraIlimitadoAntes !== formData.unlimitedStock
-// debe alcanzar para disparar stockSeToco por sí solo.
-test('pasar de stock ilimitado a limitado incluye stock', () => {
+test('al EDITAR, el payload nunca incluye stock', () => {
   const payload = construirPayloadProducto({
-    formData: { ...formBase, unlimitedStock: false, stock: '10' },
-    editingProduct: { ...productoBase, unlimitedStock: true, stock: 10 },
+    formData: { ...formBase, stock: '999', unlimitedStock: true },
+    editingProduct: productoBase,
     priceValue: 2500,
   });
-  assert.equal('stock' in payload, true);
-  assert.equal(payload.stock, 10);
+  assert.equal('stock' in payload, false);
+});
+
+test('al CREAR, el payload incluye stock', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, stock: '40' },
+    editingProduct: null,
+    priceValue: 2500,
+  });
+  assert.equal((payload as { stock: number }).stock, 40);
+});
+
+test('al CREAR un producto ilimitado, el stock viaja en 0', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, stock: '40', unlimitedStock: true },
+    editingProduct: null,
+    priceValue: 2500,
+  });
+  assert.equal((payload as { stock: number }).stock, 0);
 });
 
 // Quirk preexistente, no comportamiento nuevo: categoryId: '' viaja como

@@ -496,30 +496,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     }
 
     const isUnlimited = !editForm.trackStock;
-    let stock = 0;
-    if (!isUnlimited) {
-      // parseFloat y no parseInt: `stock` es numeric en Postgres y los productos
-      // con allowDecimal viven en valores fraccionados (9.5). parseInt("9.5") da
-      // 9 y guardarlo se comería media unidad sin avisar.
-      stock = parseFloat(editForm.stock);
-      if (isNaN(stock) || stock < 0) {
-        toast.error('El stock debe ser un número válido mayor o igual a 0');
-        return;
-      }
-    }
 
-    // El stock solo viaja si el usuario lo tocó de verdad en este formulario. El
-    // valor se cargó cuando se abrió el diálogo y esta pantalla refresca los
-    // productos en segundo plano mientras el diálogo sigue abierto, así que el
-    // número puede estar viejo por minutos; encima, cada pedido que se toma
-    // descuenta stock en el servidor al mismo tiempo. Mandarlo siempre pisaba ese
-    // stock real con el viejo, sin error y sin dejar rastro. StockAdjustDialog es
-    // el único camino pensado para cambiar stock (manda solo { stock, modo });
-    // editar la descripción o el precio no debe tocarlo de rebote.
-    const eraIlimitadoAntes = editingProduct.trackStock === false || editingProduct.stock === -1;
-    const stockSeToco = isUnlimited !== eraIlimitadoAntes
-      || (!isUnlimited && stock !== editingProduct.stock);
-
+    // Este editor rápido nunca manda stock: sólo edita productos existentes y
+    // el campo de stock es de solo lectura (ver el diálogo de ajuste en
+    // Gestión de Productos, que es la única vía para cambiarlo).
     try {
       const updatedProduct = await productsAPI.update(accessToken, editingProduct.id, {
         name: editForm.name,
@@ -531,7 +511,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
         trackStock: editForm.trackStock,
         unlimitedStock: isUnlimited,
         allowDecimal: editForm.allowDecimal,
-        ...(stockSeToco ? { stock: isUnlimited ? 0 : stock } : {})
       });
 
       setProducts(products.map(p =>
@@ -1478,25 +1457,18 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
               </div>
             </div>
 
-            {/* Stock */}
+            {/* Stock: solo lectura. Este editor rápido no lo modifica; la única vía
+                para cambiar stock es el diálogo de ajuste en Gestión de Productos. */}
             <div className="space-y-2">
-              <Label htmlFor="edit-stock">Stock Disponible</Label>
-              <div className="relative">
-                <Package className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <Input
-                  id="edit-stock"
-                  type="number"
-                  min="0"
-                  value={editForm.stock}
-                  onChange={(e) => setEditForm({ ...editForm, stock: e.target.value })}
-                  placeholder="0"
-                  className="pl-9"
-                  disabled={!editForm.trackStock}
-                />
+              <Label>Stock Disponible</Label>
+              <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
+                <span className="text-lg font-mono text-gray-900">
+                  {editForm.trackStock ? editForm.stock : '∞'}
+                </span>
+                <span className="text-xs text-gray-500">
+                  Se cambia desde Gestión de Productos
+                </span>
               </div>
-              <p className="text-xs text-gray-500">
-                Cantidad de unidades disponibles en inventario
-              </p>
             </div>
 
             {/* Track Stock Switch */}
