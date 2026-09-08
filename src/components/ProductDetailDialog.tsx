@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { Package, Edit, BoxIcon, Trash2, ChevronRight, ListChecks, History } from 'lucide-react';
 import { stockEventsAPI, type Product, type StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
-import { formatDateCL } from '../utils/dateUtils';
 import { ETIQUETA_MOVIMIENTO, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
 import { toast } from 'sonner';
 
@@ -83,6 +82,10 @@ function FichaContenido({
     <>
         <DialogHeader className="px-4 py-3 border-b">
           <DialogTitle className="text-base">{product.name}</DialogTitle>
+          {/* Sin esto Radix 1.1.6 tira un warning en consola al abrir el diálogo
+              (falta aria-describedby). La categoría es lo más corto y siempre
+              disponible; la descripción del producto puede no existir. */}
+          <DialogDescription>{product.category || 'General'}</DialogDescription>
         </DialogHeader>
 
         <div className="flex gap-3 px-4 py-3">
@@ -169,7 +172,24 @@ function FichaContenido({
                 <div key={m.id} className="flex items-center justify-between border-b px-4 py-2">
                   <div>
                     <div className="text-sm text-gray-900">{ETIQUETA_MOVIMIENTO[m.type]}</div>
-                    <div className="text-xs text-gray-500">{formatDateCL(m.createdAt)}</div>
+                    {/* formatDateCL no sirve acá: su parseDate corta el string a los
+                        primeros 10 caracteres y arma un Date sin hora (pensado para
+                        campos YYYY-MM-DD tipo `deadline`, no para un timestamp real).
+                        Pasarle options con hour/minute mostraría 00:00 siempre, sin
+                        importar la hora real del evento. m.createdAt es un timestamptz
+                        completo (ver stock_events.created_at), así que se parsea
+                        directo con `new Date` y se formatea con hora — mismo patrón
+                        que ya usa DispatchOrders.tsx para order.createdAt. El criterio
+                        de aceptación pide la hora de cada evento (Hallazgo 5). */}
+                    <div className="text-xs text-gray-500">
+                      {new Date(m.createdAt).toLocaleString('es-CL', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
                   </div>
                   {m.type === 'ajuste' ? (
                     <div className="text-right">
