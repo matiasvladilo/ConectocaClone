@@ -242,6 +242,43 @@ test('avisa cuando el contenido no entra en el alto pedido', () => {
   assert.ok(l.avisosLegibilidad.some((a) => /no entra/i.test(a)), 'esperaba aviso de desborde');
 });
 
+test('el texto no se pega al logo ni se le monta encima', () => {
+  // El logo se posiciona por su borde SUPERIOR y el texto por su LÍNEA BASE.
+  // Sumar un hueco y dibujar texto ahí hacía que el texto subiera por encima del
+  // hueco: "INGREDIENTES:" quedaba pegado al logo.
+  const l = construirEtiquetaPosterior(resultado(), elaborador, {
+    anchoMm: 90, altoMm: 60, logoDataUrl: LOGO,
+  });
+
+  const logo = l.primitivas.find((p) => p.tipo === 'imagen');
+  const titulo = l.primitivas.find((p) => p.tipo === 'texto' && p.texto === 'INGREDIENTES:');
+  if (logo?.tipo !== 'imagen' || titulo?.tipo !== 'texto') throw new Error('falta logo o título');
+
+  const fondoLogo = logo.y + logo.h;
+  const topeTexto = titulo.y - titulo.tamano; // la base menos el alto = borde superior
+
+  assert.ok(topeTexto > fondoLogo, `el texto arranca en ${topeTexto} y el logo termina en ${fondoLogo}`);
+  assert.ok(topeTexto - fondoLogo >= 1.5, `solo ${(topeTexto - fondoLogo).toFixed(2)} mm de aire`);
+});
+
+test('hay aire entre el bloque de ingredientes y el de alérgenos', () => {
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 90, altoMm: 60, logoDataUrl: LOGO });
+  const textos = l.primitivas.filter((p) => p.tipo === 'texto');
+
+  const alergenos = textos.find((p) => p.tipo === 'texto' && p.texto === 'ALÉRGENOS:');
+  if (alergenos?.tipo !== 'texto') throw new Error('falta ALÉRGENOS');
+
+  // La última línea de cuerpo antes del título de alérgenos.
+  const previas = textos.filter(
+    (p) => p.tipo === 'texto' && p.y < alergenos.y && p.x === alergenos.x,
+  );
+  const ultima = previas[previas.length - 1];
+  if (ultima?.tipo !== 'texto') throw new Error('no hay texto previo');
+
+  const aire = (alergenos.y - alergenos.tamano) - ultima.y;
+  assert.ok(aire >= 1, `solo ${aire.toFixed(2)} mm entre bloques`);
+});
+
 test('la etiqueta de referencia entra en 90x60 sin avisos', () => {
   // Es la regresión del pie: cuando esperaba a las DOS columnas se iba 2 mm
   // abajo mientras la izquierda tenía un hueco vacío.

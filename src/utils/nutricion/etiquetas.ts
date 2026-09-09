@@ -102,6 +102,18 @@ export function construirEtiquetaPosterior(
   const colDerX = margen + colIzqW + 2 * escala;
   const colDerW = anchoMm - margen - colDerX;
 
+  // Separaciones. Van con nombre porque el error más fácil de cometer acá es
+  // mezclar sistemas de referencia: las imágenes y los rectángulos se posicionan
+  // por su BORDE SUPERIOR, pero el texto se dibuja por su LÍNEA BASE. Sumar un
+  // hueco y dibujar texto ahí hace que el texto suba por encima del hueco, que
+  // es exactamente lo que pegaba "INGREDIENTES:" contra el logo.
+  const SEP_CABECERA = 2.8 * escala; // aire debajo del logo / nombre
+  const SEP_BLOQUE = 2.0 * escala; // aire entre bloques de texto
+
+  // Baja hasta `fondo`, deja `hueco` de aire y devuelve la LÍNEA BASE donde
+  // empieza un texto de cuerpo `tamano`.
+  const baseTras = (fondo: number, hueco: number, tamano: number) => fondo + hueco + tamano;
+
   // ── Columna izquierda ───────────────────────────────────────────────────
   let y = margen;
 
@@ -129,19 +141,29 @@ export function construirEtiquetaPosterior(
     yNombre += nombre.tamano * 1.15;
   }
 
-  // El bloque de textos arranca debajo de LO MÁS BAJO entre el logo y el nombre:
-  // si el nombre ocupó tres líneas, los ingredientes bajan, no se superponen.
-  y = Math.max(y + logoLado, yNombre) + 1.5 * escala;
+  // Fondo visual de la cabecera: lo más bajo entre el logo y el nombre. El
+  // nombre terminó en `yNombre`, que ya avanzó un interlineado de más después de
+  // la última línea; se descuenta para no contar aire que no existe.
+  const fondoLogo = opts.logoDataUrl ? margen + logoLado : margen;
+  const fondoNombre = yNombre - nombre.tamano * 0.15;
+  const fondoCabecera = Math.max(fondoLogo, fondoNombre);
+
+  // El bloque de textos arranca debajo de LO MÁS BAJO de la cabecera: si el
+  // nombre ocupó tres líneas, los ingredientes bajan, no se superponen.
+  y = baseTras(fondoCabecera, SEP_CABECERA, T_SECCION);
 
   const bloque = (titulo: string, cuerpo: string) => {
     if (!cuerpo) return;
     primitivas.push({ tipo: 'texto', x: margen, y, texto: titulo, tamano: T_SECCION, negrita: true });
-    y += T_SECCION * 1.3;
+    y += T_SECCION * 1.35;
     for (const linea of envolver(cuerpo, T_CUERPO, colIzqW, false)) {
       primitivas.push({ tipo: 'texto', x: margen, y, texto: linea, tamano: T_CUERPO });
-      y += T_CUERPO * 1.25;
+      y += T_CUERPO * 1.3;
     }
-    y += 1.2 * escala;
+    // `y` quedó una línea de cuerpo más abajo de la última escrita: ése es el
+    // fondo del bloque. Desde ahí se abre el aire y se calcula la base del
+    // siguiente título.
+    y = baseTras(y - T_CUERPO * 1.3, SEP_BLOQUE, T_SECCION);
   };
 
   bloque('INGREDIENTES:', resultado.textoIngredientes);
@@ -254,7 +276,10 @@ export function construirEtiquetaPosterior(
   // de las dos columnas. Antes esperaba a la más larga —la derecha, por los
   // sellos— y se empujaba fuera de la etiqueta mientras la izquierda quedaba con
   // un hueco vacío. Además es donde está en el rótulo de referencia.
-  let yPie = y + 0.5 * escala;
+  // `bloque()` deja `y` ya apuntando a la línea base del siguiente título, y
+  // CONT. NETO se dibuja con ese mismo cuerpo: se usa tal cual, sin sumar aire
+  // otra vez.
+  let yPie = y;
 
   if (resultado.pesoFinalG !== null) {
     primitivas.push({
