@@ -28,6 +28,13 @@ export interface OpcionesEtiqueta {
   logoDataUrl?: string | null;
 }
 
+/**
+ * Altura de mayúsculas de Helvetica, en fracción del cuerpo. Sirve para centrar
+ * texto ópticamente dentro de una caja: lo que se ve es la mayúscula, no el
+ * cuerpo completo (que incluye espacio para acentos y descendentes).
+ */
+const ALTURA_MAYUSCULAS = 0.717;
+
 // Sangrados de la tabla, igual que en el rótulo de referencia.
 const SANGRADOS = new Set([
   'grasa_saturada_g',
@@ -184,19 +191,26 @@ export function construirEtiquetaPosterior(
   // ── Columna derecha: tabla nutricional ──────────────────────────────────
   let yd = margen;
 
-  const altoCabecera = T_SECCION * 1.8;
+  const altoCabecera = T_SECCION * 1.9;
+  const fondoCabeceraTabla = yd + altoCabecera;
   primitivas.push({ tipo: 'rect', x: colDerX, y: yd, w: colDerW, h: altoCabecera, relleno: true });
   primitivas.push({
     tipo: 'texto',
     x: colDerX + colDerW / 2,
-    y: yd + altoCabecera * 0.68,
+    // Centrado óptico dentro de la barra: la línea base va al medio más la mitad
+    // de la altura de mayúsculas, no a una fracción arbitraria del alto.
+    y: yd + (altoCabecera + T_SECCION * ALTURA_MAYUSCULAS) / 2,
     texto: 'INFORMACIÓN NUTRICIONAL',
     tamano: T_SECCION,
     negrita: true,
     align: 'center',
     color: '#fff',
   });
-  yd += altoCabecera + 1.2 * escala;
+
+  // Mismo cuidado que en la columna izquierda: la barra se posiciona por su
+  // borde y el texto por su línea base. Sin baseTras, "Porción:" se metía 0,3 mm
+  // DENTRO del negro.
+  yd = baseTras(fondoCabeceraTabla, SEP_BLOQUE * 0.6, T_CUERPO);
 
   const porcionTxt = `Porción: ${resultado.porcionDescripcion}${
     resultado.pesoPorcionG !== null ? ` (${formatNum(resultado.pesoPorcionG)} g)` : ''
@@ -210,7 +224,7 @@ export function construirEtiquetaPosterior(
     texto: `Porciones por envase: ${resultado.porcionesPorEnvase ?? '—'}`,
     tamano: T_CUERPO,
   });
-  yd += T_CUERPO * 1.6;
+  yd = baseTras(yd, SEP_BLOQUE * 0.5, T_TABLA);
 
   const colValor = colDerW * 0.22;
   const xCol100 = colDerX + colDerW - colValor * 2;

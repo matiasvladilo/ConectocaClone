@@ -279,6 +279,54 @@ test('hay aire entre el bloque de ingredientes y el de alérgenos', () => {
   assert.ok(aire >= 1, `solo ${aire.toFixed(2)} mm entre bloques`);
 });
 
+test('ningún texto negro se monta sobre la barra negra de la cabecera', () => {
+  // Invariante general, no un caso puntual: los rectángulos rellenos se ubican
+  // por su borde y los textos por su línea base, así que es fácil que un texto
+  // "posterior" termine pisando la barra. Pasó dos veces —con el logo y con
+  // "Porción:"— y los tests de entonces no lo agarraron porque miraban solo el
+  // lugar ya arreglado.
+  for (const [w, h] of [[90, 60], [80, 60], [100, 75], [120, 90]] as const) {
+    const l = construirEtiquetaPosterior(resultado(), elaborador, {
+      anchoMm: w, altoMm: h, logoDataUrl: LOGO,
+    });
+
+    const barras = l.primitivas.filter((p) => p.tipo === 'rect' && p.relleno);
+    const textosNegros = l.primitivas.filter(
+      (p) => p.tipo === 'texto' && p.color !== '#fff' && p.color !== '#e0e0e0',
+    );
+
+    for (const barra of barras) {
+      if (barra.tipo !== 'rect') continue;
+      for (const t of textosNegros) {
+        if (t.tipo !== 'texto') continue;
+        const topeTexto = t.y - t.tamano;
+        const fondoTexto = t.y;
+        const seSolapaVertical = fondoTexto > barra.y && topeTexto < barra.y + barra.h;
+        const seSolapaHorizontal = t.x >= barra.x - 0.01 && t.x <= barra.x + barra.w + 0.01;
+        assert.ok(
+          !(seSolapaVertical && seSolapaHorizontal),
+          `${w}x${h}: "${t.texto}" pisa la barra negra`,
+        );
+      }
+    }
+  }
+});
+
+test('el título de la tabla queda centrado dentro de su barra', () => {
+  const l = construirEtiquetaPosterior(resultado(), elaborador, { anchoMm: 90, altoMm: 60 });
+  const barra = l.primitivas.find((p) => p.tipo === 'rect' && p.relleno);
+  const titulo = l.primitivas.find((p) => p.tipo === 'texto' && p.texto === 'INFORMACIÓN NUTRICIONAL');
+  if (barra?.tipo !== 'rect' || titulo?.tipo !== 'texto') throw new Error('falta barra o título');
+
+  const aireArriba = titulo.y - titulo.tamano * 0.717 - barra.y;
+  const aireAbajo = barra.y + barra.h - titulo.y;
+  assert.ok(aireArriba > 0 && aireAbajo > 0, 'el título se sale de la barra');
+  assert.ok(
+    Math.abs(aireArriba - aireAbajo) < 0.15,
+    `descentrado: ${aireArriba.toFixed(2)} arriba vs ${aireAbajo.toFixed(2)} abajo`,
+  );
+});
+
 test('la etiqueta de referencia entra en 90x60 sin avisos', () => {
   // Es la regresión del pie: cuando esperaba a las DOS columnas se iba 2 mm
   // abajo mientras la izquierda tenía un hueco vacío.
