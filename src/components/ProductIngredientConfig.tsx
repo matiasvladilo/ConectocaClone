@@ -1,15 +1,25 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle, FlaskConical, Calculator, FileText, History } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import {
   productsAPI,
   ingredientsAPI,
   productIngredientsAPI,
+  nutritionAPI,
   type Product,
   type Ingredient as APIIngredient,
   type ProductIngredient as APIProductIngredient,
+  type NutritionDataset,
+  type LabelVersion,
 } from "../utils/api";
+import { NutritionPreview } from "./NutritionPreview";
+import { LabelGenerator } from "./LabelGenerator";
+import { armarEtiqueta } from "../utils/nutricion/armado";
+import type { ResultadoEtiqueta } from "../utils/nutricion/armado";
+import { construirSnapshot, mismaEtiqueta, restaurarDeSnapshot } from "../utils/nutricion/snapshot";
+import type { SnapshotEtiqueta } from "../utils/nutricion/snapshot";
+import { VERSION_REGLAS } from "../utils/nutricion/reglasChile";
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from "motion/react";
 
@@ -43,6 +53,21 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
   const [laborCost, setLaborCost] = useState<string>("");
   const [savingLabor, setSavingLabor] = useState(false);
 
+  // ── Información nutricional ──────────────────────────────────────────────
+  // Los pesos se manejan como texto por el mismo motivo que la cantidad de
+  // receta: un estado numérico no puede representar "campo vacío".
+  const [dataset, setDataset] = useState<NutritionDataset | null>(null);
+  const [pesoFinal, setPesoFinal] = useState("");
+  const [pesoPorcion, setPesoPorcion] = useState("");
+  const [porciones, setPorciones] = useState("");
+  const [porcionDesc, setPorcionDesc] = useState("");
+  const [guardandoPesos, setGuardandoPesos] = useState(false);
+  const [resultado, setResultado] = useState<ResultadoEtiqueta | null>(null);
+  const [generadorAbierto, setGeneradorAbierto] = useState(false);
+  const [versiones, setVersiones] = useState<LabelVersion[]>([]);
+  // Cuando se está mirando una etiqueta ya emitida en vez de una recién calculada.
+  const [versionAbierta, setVersionAbierta] = useState<LabelVersion | null>(null);
+
   useEffect(() => {
     console.log("ProductIngredientConfig: Component mounted");
     console.log("Access Token:", accessToken ? "Present" : "Missing");
@@ -57,6 +82,12 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
       console.log("Loading ingredients for product:", selectedProduct.name);
       setLoadingIngredients(true);
       setProductIngredients([]); // Clear previous ingredients immediately
+
+      // El resultado anterior se descarta al cambiar de producto: dejarlo en
+      // pantalla mostraría la tabla nutricional de OTRO producto bajo este nombre.
+      setResultado(null);
+      setDataset(null);
+      setVersiones([]);
 
       const load = async () => {
         try {
@@ -77,8 +108,13 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
       };
 
       load();
+      loadDataset(selectedProduct.id, () => isActive);
+      loadVersiones(selectedProduct.id, () => isActive);
     } else {
       setProductIngredients([]);
+      setResultado(null);
+      setDataset(null);
+      setVersiones([]);
     }
 
     return () => {
@@ -120,6 +156,134 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
     } finally {
       setLoading(false);
     }
+  };
+
+  // Sin toast de error: que todavía no haya datos nutricionales es lo normal al
+  // empezar, y esta pantalla existe para configurar la receta. El bloque de
+  // nutrición ya comunica qué falta.
+  const loadDataset = async (productId: string, sigueVigente: () => boolean) => {
+    try {
+      const d = await nutritionAPI.getProductDataset(accessToken, productId);
+      if (!sigueVigente()) return;
+      setDataset(d);
+      const p = d.labelProfile;
+      setPesoFinal(p?.pesoFinalPromedioG != null ? String(p.pesoFinalPromedioG) : "");
+      setPesoPorcion(p?.pesoPorcionG != null ? String(p.pesoPorcionG) : "");
+      setPorciones(p?.porcionesPorEnvase != null ? String(p.porcionesPorEnvase) : "");
+      setPorcionDesc(p?.porcionDescripcion || "");
+    } catch (error: any) {
+      console.error("Error loading nutrition dataset:", error);
+    }
+  };
+
+  // El historial se carga siempre, no solo despues de calcular: la idea es
+  // justamente poder ver una etiqueta ya emitida SIN volver a calcularla.
+  const loadVersiones = async (productId: string, sigueVigente: () => boolean) => {
+    try {
+      const v = await nutritionAPI.getLabelVersions(accessToken, productId);
+      if (sigueVigente()) setVersiones(v);
+    } catch (error: any) {
+      console.error("Error loading label versions:", error);
+    }
+  };
+
+  const aNumero = (s: string): number | null => {
+    const limpio = s.trim().replace(",", ".");
+    if (limpio === "") return null;
+    const n = parseFloat(limpio);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const perfilEnVivo = () => ({
+    pesoFinalPromedioG: aNumero(pesoFinal),
+    pesoPorcionG: aNumero(pesoPorcion),
+    porcionesPorEnvase: aNumero(porciones),
+    porcionDescripcion: porcionDesc,
+    denominacionLegal: dataset?.labelProfile?.denominacionLegal || "",
+    ingredientesTextoOverride: dataset?.labelProfile?.ingredientesTextoOverride || "",
+    alergenosTextoOverride: dataset?.labelProfile?.alergenosTextoOverride || "",
+    trazasTextoOverride: dataset?.labelProfile?.trazasTextoOverride || "",
+  });
+
+  const handleGuardarPesos = async () => {
+    if (!selectedProduct || guardandoPesos) return;
+    try {
+      setGuardandoPesos(true);
+      await nutritionAPI.saveLabelProfile(accessToken, selectedProduct.id, perfilEnVivo());
+      toast.success("Datos de etiqueta guardados");
+      await loadDataset(selectedProduct.id, () => true);
+    } catch (error: any) {
+      console.error("Error saving label profile:", error);
+      toast.error(error.message || "Error al guardar los datos de etiqueta");
+    } finally {
+      setGuardandoPesos(false);
+    }
+  };
+
+  const elaboradorDe = (d: NutritionDataset | null) => ({
+    razonSocial: d?.labelSettings?.razonSocial,
+    rut: d?.labelSettings?.rut,
+    direccion: d?.labelSettings?.direccion,
+    plantaElaboradora: d?.labelSettings?.plantaElaboradora,
+  });
+
+  /**
+   * Registra la etiqueta al descargarla. Devuelve el numero de version asignado,
+   * o null si no habia nada nuevo que guardar.
+   *
+   * Si el contenido es identico a la ultima version, NO crea una nueva: sin eso
+   * el historial se llena de copias y deja de servir para lo unico que importa,
+   * que es saber que cambio y cuando.
+   */
+  const registrarVersion = async (anchoMm: number, altoMm: number): Promise<number | null> => {
+    if (!selectedProduct || !resultado || !dataset) return null;
+
+    const nuevo = construirSnapshot({
+      resultado,
+      elaborador: elaboradorDe(dataset),
+      lineas: dataset.lineas.map((l) => ({
+        ingredienteId: l.ingredienteId,
+        nombre: l.nombre,
+        cantidad: l.cantidad,
+        unidad: l.unidad,
+        ficha: l.ficha,
+      })),
+      anchoMm,
+      altoMm,
+      regulationVersion: VERSION_REGLAS,
+    });
+
+    const ultima = versiones[0];
+    if (ultima && mismaEtiqueta(nuevo, ultima.snapshot as unknown as SnapshotEtiqueta)) {
+      return null;
+    }
+
+    const creada = await nutritionAPI.createLabelVersion(accessToken, selectedProduct.id, {
+      estado: resultado.veredicto.estado,
+      snapshot: nuevo as unknown as Record<string, unknown>,
+      regulationVersion: VERSION_REGLAS,
+      calculatedAt: new Date().toISOString(),
+      anchoMm,
+      altoMm,
+    });
+
+    setVersiones((prev) => [creada, ...prev]);
+    return creada.version;
+  };
+
+  // Una version historica se dibuja desde su snapshot, no desde la receta actual.
+  const restaurada = versionAbierta ? restaurarDeSnapshot(versionAbierta.snapshot) : null;
+
+  const handleCalcular = () => {
+    if (!dataset) return;
+    setResultado(
+      armarEtiqueta({
+        productName: dataset.product.name,
+        lineas: dataset.lineas,
+        perfil: perfilEnVivo(),
+        elaborador: dataset.labelSettings?.razonSocial || null,
+      }),
+    );
   };
 
   const loadProductIngredients = async (productId: string) => {
@@ -728,6 +892,194 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                         </div>
                       )}
                     </Card>
+
+                    {/* Información nutricional */}
+                    <Card className="p-6 bg-white">
+                      <h3 className="flex items-center gap-2 mb-4">
+                        <FlaskConical className="w-5 h-5 text-blue-600" />
+                        Información nutricional
+                      </h3>
+
+                      {!dataset ? (
+                        <p className="text-sm text-gray-500">Cargando datos nutricionales...</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {/* Etiquetas ya emitidas. Se muestran siempre, aunque no
+                              se haya calculado: el punto es poder reimprimir una
+                              etiqueta vieja sin volver a pasar por el calculo. */}
+                          {versiones.length > 0 && (
+                            <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                              <p className="flex items-center gap-2 text-sm text-gray-900 mb-2">
+                                <History className="w-4 h-4 text-blue-600" />
+                                Etiquetas generadas ({versiones.length})
+                              </p>
+                              <div className="space-y-1">
+                                {versiones.map((v) => (
+                                  <div key={v.id} className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm text-gray-900">v{v.version}</span>
+                                    <span className="text-xs text-gray-600">
+                                      {new Date(v.createdAt).toLocaleDateString("es-CL", {
+                                        day: "2-digit", month: "2-digit", year: "numeric",
+                                      })}
+                                    </span>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${v.estado === "lista"
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-yellow-100 text-yellow-700"}`}>
+                                      {v.estado === "lista" ? "Lista" : "Borrador"}
+                                    </span>
+                                    {v.anchoMm && v.altoMm && (
+                                      <span className="text-xs text-gray-500">
+                                        {v.anchoMm} x {v.altoMm} mm
+                                      </span>
+                                    )}
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => setVersionAbierta(v)}
+                                      className="text-xs"
+                                    >
+                                      Ver / descargar
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-2">
+                                Cada una guarda los datos con los que se calculo. Si cambia la receta,
+                                las etiquetas viejas siguen mostrando lo que decian.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Estado de las fichas de las materias primas */}
+                          {(() => {
+                            const sinFicha = dataset.lineas.filter((l) => !l.ficha);
+                            if (dataset.lineas.length === 0) {
+                              return (
+                                <p className="text-sm text-gray-600">
+                                  Configurá primero los ingredientes de la receta.
+                                </p>
+                              );
+                            }
+                            if (sinFicha.length === 0) {
+                              return (
+                                <p className="text-sm text-green-700">
+                                  ✓ Todas las materias primas tienen ficha nutricional cargada.
+                                </p>
+                              );
+                            }
+                            return (
+                              <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-300">
+                                <p className="text-sm text-gray-900">
+                                  ⚠ Información nutricional incompleta: faltan datos de {sinFicha.length}{" "}
+                                  {sinFicha.length === 1 ? "materia prima" : "materias primas"}.
+                                </p>
+                                <ul className="mt-1">
+                                  {sinFicha.map((l) => (
+                                    <li key={l.ingredienteId} className="text-sm text-gray-700">
+                                      • {l.nombre}
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p className="text-xs text-gray-600 mt-1">
+                                  Se cargan desde Stock de Materia Prima, con el botón del matraz.
+                                </p>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Pesos del producto terminado */}
+                          <div>
+                            <p className="text-sm text-gray-900 mb-1">Peso del producto terminado</p>
+                            <p className="text-xs text-gray-500 mb-2">
+                              La suma de la receta no es el peso final: en el horno se pierde agua. El
+                              cálculo por 100 g usa este número, no el de la mezcla cruda.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">
+                                  Peso final promedio (g) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={pesoFinal}
+                                  onChange={(e) => setPesoFinal(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  placeholder="Ej: 160"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">
+                                  Peso de la porción (g) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={pesoPorcion}
+                                  onChange={(e) => setPesoPorcion(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  placeholder="Ej: 160"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">Porciones por envase</label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={porciones}
+                                  onChange={(e) => setPorciones(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  placeholder="Ej: 1"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 mb-1">Descripción de la porción</label>
+                                <input
+                                  type="text"
+                                  value={porcionDesc}
+                                  onChange={(e) => setPorcionDesc(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  placeholder="Ej: 1 unidad"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            <Button
+                              onClick={handleGuardarPesos}
+                              disabled={guardandoPesos}
+                              variant="outline"
+                            >
+                              <Save className="w-4 h-4 mr-2" />
+                              {guardandoPesos ? "Guardando..." : "Guardar pesos"}
+                            </Button>
+                            <Button
+                              onClick={handleCalcular}
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                              <Calculator className="w-4 h-4 mr-2" />
+                              Calcular información nutricional
+                            </Button>
+                          </div>
+
+                          {resultado && (
+                            <>
+                              <NutritionPreview resultado={resultado} />
+                              {/* El botón aparece recién después de calcular: generar
+                                  una etiqueta sin haber visto los números es la forma
+                                  más fácil de mandar a imprenta algo equivocado. */}
+                              <Button
+                                onClick={() => setGeneradorAbierto(true)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                              >
+                                <FileText className="w-4 h-4 mr-2" />
+                                Generar etiqueta
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </Card>
                   </div>
                 ) : (
                   <Card className="p-12 text-center bg-white">
@@ -745,6 +1097,33 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
           </div>
         )
       }
+
+      {generadorAbierto && resultado && (
+        <LabelGenerator
+          open={generadorAbierto}
+          onClose={() => setGeneradorAbierto(false)}
+          resultado={resultado}
+          elaborador={elaboradorDe(dataset)}
+          anchoInicial={dataset?.labelSettings?.anchoMmDefault ?? 90}
+          altoInicial={dataset?.labelSettings?.altoMmDefault ?? 60}
+          alDescargar={registrarVersion}
+        />
+      )}
+
+      {versionAbierta && restaurada && (
+        <LabelGenerator
+          open
+          onClose={() => setVersionAbierta(null)}
+          resultado={restaurada.resultado}
+          elaborador={restaurada.elaborador}
+          anchoInicial={restaurada.anchoMm}
+          altoInicial={restaurada.altoMm}
+          versionHistorica={{
+            version: versionAbierta.version,
+            fecha: new Date(versionAbierta.createdAt).toLocaleDateString("es-CL"),
+          }}
+        />
+      )}
     </div >
   );
 }

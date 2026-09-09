@@ -3175,6 +3175,607 @@ app.delete('/make-server-6d979413/production-orders/:orderId', async (c) => {
   }
 });
 
+// ─── NUTRICIÓN Y ETIQUETAS ────────────────────────────────────────────────────
+//
+// Todo va bajo el prefijo /nutrition para no chocar con las rutas ya
+// registradas de /products/:id/... — hono resuelve por orden de registro y
+// estas se agregan al final.
+//
+// Ninguna de estas rutas toca products ni ingredients: escriben en las tablas
+// satélite. Stock, costos y "puede producir" quedan exactamente como estaban.
+
+const CLAVES_NUTRIENTES = [
+  'energia_kcal',
+  'proteinas_g',
+  'grasa_total_g',
+  'grasa_saturada_g',
+  'grasa_monoinsaturada_g',
+  'grasa_poliinsaturada_g',
+  'grasas_trans_g',
+  'colesterol_mg',
+  'carbohidratos_disp_g',
+  'azucares_totales_g',
+  'sodio_mg',
+];
+
+// null se conserva como null: es "no tengo el dato", distinto de 0. Number(null)
+// daría 0 y convertiría un dato faltante en un cero declarado.
+function num(v: any) {
+  return v === null || v === undefined || v === '' ? null : Number(v);
+}
+
+function toFichaNutricional(r: any) {
+  const valores: Record<string, number | null> = {};
+  for (const clave of CLAVES_NUTRIENTES) valores[clave] = num(r[clave]);
+
+  return {
+    ingredientId: r.ingredient_id,
+    baseCantidad: Number(r.base_cantidad),
+    baseUnidad: r.base_unidad,
+    valores,
+    densidadGMl: num(r.densidad_g_ml),
+    pesoPorUnidadG: num(r.peso_por_unidad_g),
+    ingredientesDeclarados: r.ingredientes_declarados || '',
+    marca: r.marca || '',
+    fuente: r.fuente || '',
+    aportaAzucaresAnadidos: !!r.aporta_azucares_anadidos,
+    aportaSodioAnadido: !!r.aporta_sodio_anadido,
+    aportaGrasasSaturadasAnadidas: !!r.aporta_grasas_saturadas_anadidas,
+    actualizadoEn: r.actualizado_en,
+    updatedAt: r.updated_at,
+  };
+}
+
+function toAlergeno(r: any) {
+  return {
+    id: r.id,
+    codigo: r.codigo,
+    nombre: r.nombre,
+    nombreEtiqueta: r.nombre_etiqueta,
+    orden: r.orden,
+    businessId: r.business_id,
+  };
+}
+
+function toLabelProfile(r: any) {
+  return {
+    productId: r.product_id,
+    pesoFinalPromedioG: num(r.peso_final_promedio_g),
+    pesoPorcionG: num(r.peso_porcion_g),
+    porcionesPorEnvase: num(r.porciones_por_envase),
+    porcionDescripcion: r.porcion_descripcion || '',
+    denominacionLegal: r.denominacion_legal || '',
+    descripcionEtiqueta: r.descripcion_etiqueta || '',
+    conservacion: r.conservacion || '',
+    vidaUtilDias: num(r.vida_util_dias),
+    ingredientesTextoOverride: r.ingredientes_texto_override || '',
+    alergenosTextoOverride: r.alergenos_texto_override || '',
+    trazasTextoOverride: r.trazas_texto_override || '',
+    updatedAt: r.updated_at,
+  };
+}
+
+function toLabelSettings(r: any) {
+  return {
+    businessId: r.business_id,
+    razonSocial: r.razon_social || '',
+    rut: r.rut || '',
+    direccion: r.direccion || '',
+    telefono: r.telefono || '',
+    email: r.email || '',
+    plantaElaboradora: r.planta_elaboradora || '',
+    logoFrontalUrl: r.logo_frontal_url || '',
+    anchoMmDefault: Number(r.ancho_mm_default),
+    altoMmDefault: Number(r.alto_mm_default),
+  };
+}
+
+function toLabelVersion(r: any) {
+  return {
+    id: r.id,
+    productId: r.product_id,
+    productName: r.product_name,
+    version: r.version,
+    estado: r.estado,
+    snapshot: r.snapshot,
+    regulationVersion: r.regulation_version,
+    calculatedAt: r.calculated_at,
+    createdBy: r.created_by,
+    anchoMm: num(r.ancho_mm),
+    altoMm: num(r.alto_mm),
+    createdAt: r.created_at,
+  };
+}
+
+/** Agrupa ingredient_allergens por materia prima, separando contiene de trazas. */
+function agruparAlergenos(filas: any[]) {
+  const porIngrediente: Record<string, { contiene: any[]; trazas: any[] }> = {};
+  for (const fila of filas || []) {
+    const id = fila.ingredient_id;
+    if (!porIngrediente[id]) porIngrediente[id] = { contiene: [], trazas: [] };
+    const alergeno = toAlergeno(fila.allergens);
+    if (fila.tipo === 'trazas') porIngrediente[id].trazas.push(alergeno);
+    else porIngrediente[id].contiene.push(alergeno);
+  }
+  return porIngrediente;
+}
+
+// Catálogo de alérgenos: los globales (business_id null) más los propios del negocio.
+app.get('/make-server-6d979413/nutrition/allergens', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+
+    const { data } = await supabaseAdmin
+      .from('allergens')
+      .select('*')
+      .or(`business_id.is.null,business_id.eq.${profile.businessId}`)
+      .order('orden', { ascending: true });
+
+    return c.json({ data: (data || []).map(toAlergeno) });
+  } catch (err: any) {
+    console.error('Error retrieving allergens:', err);
+    return c.json({ error: 'Failed to retrieve allergens' }, 500);
+  }
+});
+
+// Todas las fichas nutricionales del negocio, con sus alérgenos. Una sola llamada
+// alcanza para pintar el estado de la lista de materias primas.
+app.get('/make-server-6d979413/nutrition/ingredients', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+
+    const { data: fichas } = await supabaseAdmin
+      .from('ingredient_nutrition')
+      .select('*')
+      .eq('business_id', profile.businessId);
+
+    // El join filtra por las materias primas del negocio: ingredient_allergens no
+    // tiene business_id propio.
+    const { data: alergenos } = await supabaseAdmin
+      .from('ingredient_allergens')
+      .select('ingredient_id, tipo, allergens(*), ingredients!inner(business_id)')
+      .eq('ingredients.business_id', profile.businessId);
+
+    return c.json({
+      data: {
+        fichas: (fichas || []).map(toFichaNutricional),
+        alergenos: agruparAlergenos(alergenos || []),
+      },
+    });
+  } catch (err: any) {
+    console.error('Error retrieving ingredient nutrition:', err);
+    return c.json({ error: 'Failed to retrieve ingredient nutrition' }, 500);
+  }
+});
+
+// Guarda la ficha nutricional y los alérgenos de una materia prima.
+//
+// Es un upsert: la primera vez crea la fila. Los alérgenos se reemplazan enteros
+// (borrar + insertar) porque es lo que hace la UI — marcar/desmarcar checkboxes y
+// guardar — y evita tener que diferenciar altas de bajas.
+app.put('/make-server-6d979413/nutrition/ingredients/:id', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const ingredientId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar materias primas' }, 403);
+    }
+
+    const { data: ingrediente } = await supabaseAdmin
+      .from('ingredients')
+      .select('id, business_id')
+      .eq('id', ingredientId)
+      .maybeSingle();
+
+    if (!ingrediente) return c.json({ error: 'Materia prima no encontrada' }, 404);
+    if (ingrediente.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    const body = await c.req.json();
+
+    const fila: any = {
+      ingredient_id: ingredientId,
+      business_id: profile.businessId,
+    };
+
+    if (body.baseCantidad !== undefined) fila.base_cantidad = Number(body.baseCantidad);
+    if (body.baseUnidad !== undefined) fila.base_unidad = body.baseUnidad;
+
+    // Los nutrientes se copian uno por uno desde body.valores. `null` explícito
+    // llega como null y borra el dato: es la forma de decir "no lo tengo" después
+    // de haberlo cargado por error.
+    const valores = body.valores || {};
+    for (const clave of CLAVES_NUTRIENTES) {
+      if (valores[clave] !== undefined) fila[clave] = num(valores[clave]);
+    }
+
+    if (body.densidadGMl !== undefined) fila.densidad_g_ml = num(body.densidadGMl);
+    if (body.pesoPorUnidadG !== undefined) fila.peso_por_unidad_g = num(body.pesoPorUnidadG);
+    if (body.ingredientesDeclarados !== undefined) {
+      fila.ingredientes_declarados = body.ingredientesDeclarados?.trim() || null;
+    }
+    if (body.marca !== undefined) fila.marca = body.marca?.trim() || null;
+    if (body.fuente !== undefined) fila.fuente = body.fuente?.trim() || null;
+    if (body.aportaAzucaresAnadidos !== undefined) {
+      fila.aporta_azucares_anadidos = body.aportaAzucaresAnadidos === true;
+    }
+    if (body.aportaSodioAnadido !== undefined) {
+      fila.aporta_sodio_anadido = body.aportaSodioAnadido === true;
+    }
+    if (body.aportaGrasasSaturadasAnadidas !== undefined) {
+      fila.aporta_grasas_saturadas_anadidas = body.aportaGrasasSaturadasAnadidas === true;
+    }
+    if (body.actualizadoEn !== undefined) fila.actualizado_en = body.actualizadoEn;
+
+    const { data: guardada, error: upsertErr } = await supabaseAdmin
+      .from('ingredient_nutrition')
+      .upsert(fila, { onConflict: 'ingredient_id' })
+      .select()
+      .single();
+
+    if (upsertErr) {
+      console.error('Error upserting ingredient nutrition:', upsertErr);
+      return c.json({ error: 'Error al guardar la informacion nutricional' }, 500);
+    }
+
+    // Alérgenos: solo si el body los trae. Un PUT que solo actualiza nutrientes
+    // no debe borrar los alérgenos ya cargados.
+    if (Array.isArray(body.contiene) || Array.isArray(body.trazas)) {
+      await supabaseAdmin.from('ingredient_allergens').delete().eq('ingredient_id', ingredientId);
+
+      const filas = [
+        ...(body.contiene || []).map((id: string) => ({
+          ingredient_id: ingredientId,
+          allergen_id: id,
+          tipo: 'contiene',
+        })),
+        ...(body.trazas || []).map((id: string) => ({
+          ingredient_id: ingredientId,
+          allergen_id: id,
+          tipo: 'trazas',
+        })),
+      ];
+
+      if (filas.length > 0) {
+        const { error: alergErr } = await supabaseAdmin.from('ingredient_allergens').insert(filas);
+        if (alergErr) {
+          console.error('Error saving ingredient allergens:', alergErr);
+          return c.json({ error: 'Error al guardar los alergenos' }, 500);
+        }
+      }
+    }
+
+    return c.json({ data: toFichaNutricional(guardada) });
+  } catch (err: any) {
+    console.error('Error updating ingredient nutrition:', err);
+    return c.json({ error: 'Failed to update ingredient nutrition' }, 500);
+  }
+});
+
+// Todo lo que hace falta para calcular la etiqueta de un producto, en una llamada.
+// El motor de cálculo vive en el frontend (src/utils/nutricion) y es puro; este
+// endpoint solo junta los datos.
+app.get('/make-server-6d979413/nutrition/products/:id/dataset', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+
+    const { data: producto } = await supabaseAdmin
+      .from('products')
+      .select('id, name, business_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!producto) return c.json({ error: 'Producto no encontrado' }, 404);
+    if (producto.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    // La receta con la unidad de cada materia prima. `quantity` viene expresado en
+    // esa unidad, no en gramos: convertirlo es trabajo del motor.
+    const { data: receta } = await supabaseAdmin
+      .from('product_ingredients')
+      .select('ingredient_id, quantity, ingredients(id, name, unit)')
+      .eq('product_id', productId);
+
+    const ingredientIds = (receta || []).map((r: any) => r.ingredient_id);
+
+    const { data: fichas } = ingredientIds.length
+      ? await supabaseAdmin.from('ingredient_nutrition').select('*').in('ingredient_id', ingredientIds)
+      : { data: [] };
+
+    const { data: alergenos } = ingredientIds.length
+      ? await supabaseAdmin
+          .from('ingredient_allergens')
+          .select('ingredient_id, tipo, allergens(*)')
+          .in('ingredient_id', ingredientIds)
+      : { data: [] };
+
+    const { data: perfil } = await supabaseAdmin
+      .from('product_label_profile')
+      .select('*')
+      .eq('product_id', productId)
+      .maybeSingle();
+
+    const { data: settings } = await supabaseAdmin
+      .from('business_label_settings')
+      .select('*')
+      .eq('business_id', profile.businessId)
+      .maybeSingle();
+
+    const fichasPorId: Record<string, any> = {};
+    for (const f of fichas || []) fichasPorId[f.ingredient_id] = toFichaNutricional(f);
+
+    const alergenosPorId = agruparAlergenos(alergenos || []);
+
+    return c.json({
+      data: {
+        product: { id: producto.id, name: producto.name },
+        lineas: (receta || []).map((r: any) => ({
+          ingredienteId: r.ingredient_id,
+          nombre: r.ingredients?.name || '',
+          unidad: r.ingredients?.unit || '',
+          cantidad: Number(r.quantity),
+          ficha: fichasPorId[r.ingredient_id] || null,
+          contiene: alergenosPorId[r.ingredient_id]?.contiene || [],
+          trazas: alergenosPorId[r.ingredient_id]?.trazas || [],
+        })),
+        labelProfile: perfil ? toLabelProfile(perfil) : null,
+        labelSettings: settings ? toLabelSettings(settings) : null,
+      },
+    });
+  } catch (err: any) {
+    console.error('Error building nutrition dataset:', err);
+    return c.json({ error: 'Failed to build nutrition dataset' }, 500);
+  }
+});
+
+// Pesos y textos de etiqueta del producto. Upsert.
+app.put('/make-server-6d979413/nutrition/products/:id/label-profile', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
+    }
+
+    const { data: producto } = await supabaseAdmin
+      .from('products')
+      .select('id, business_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!producto) return c.json({ error: 'Producto no encontrado' }, 404);
+    if (producto.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    const body = await c.req.json();
+    const fila: any = { product_id: productId, business_id: profile.businessId };
+
+    if (body.pesoFinalPromedioG !== undefined) fila.peso_final_promedio_g = num(body.pesoFinalPromedioG);
+    if (body.pesoPorcionG !== undefined) fila.peso_porcion_g = num(body.pesoPorcionG);
+    if (body.porcionesPorEnvase !== undefined) fila.porciones_por_envase = num(body.porcionesPorEnvase);
+    if (body.porcionDescripcion !== undefined) fila.porcion_descripcion = body.porcionDescripcion?.trim() || null;
+    if (body.denominacionLegal !== undefined) fila.denominacion_legal = body.denominacionLegal?.trim() || null;
+    if (body.descripcionEtiqueta !== undefined) fila.descripcion_etiqueta = body.descripcionEtiqueta?.trim() || null;
+    if (body.conservacion !== undefined) fila.conservacion = body.conservacion?.trim() || null;
+    if (body.vidaUtilDias !== undefined) fila.vida_util_dias = num(body.vidaUtilDias);
+    if (body.ingredientesTextoOverride !== undefined) {
+      fila.ingredientes_texto_override = body.ingredientesTextoOverride?.trim() || null;
+    }
+    if (body.alergenosTextoOverride !== undefined) {
+      fila.alergenos_texto_override = body.alergenosTextoOverride?.trim() || null;
+    }
+    if (body.trazasTextoOverride !== undefined) {
+      fila.trazas_texto_override = body.trazasTextoOverride?.trim() || null;
+    }
+
+    const { data: guardado, error: upsertErr } = await supabaseAdmin
+      .from('product_label_profile')
+      .upsert(fila, { onConflict: 'product_id' })
+      .select()
+      .single();
+
+    if (upsertErr) {
+      console.error('Error upserting label profile:', upsertErr);
+      return c.json({ error: 'Error al guardar los datos de etiqueta' }, 500);
+    }
+
+    return c.json({ data: toLabelProfile(guardado) });
+  } catch (err: any) {
+    console.error('Error updating label profile:', err);
+    return c.json({ error: 'Failed to update label profile' }, 500);
+  }
+});
+
+app.get('/make-server-6d979413/nutrition/label-settings', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+
+    const { data } = await supabaseAdmin
+      .from('business_label_settings')
+      .select('*')
+      .eq('business_id', profile.businessId)
+      .maybeSingle();
+
+    return c.json({ data: data ? toLabelSettings(data) : null });
+  } catch (err: any) {
+    console.error('Error retrieving label settings:', err);
+    return c.json({ error: 'Failed to retrieve label settings' }, 500);
+  }
+});
+
+app.put('/make-server-6d979413/nutrition/label-settings', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    // Los datos del elaborador y el logo son configuración del negocio: solo admin.
+    if (profile.role !== 'admin') {
+      return c.json({ error: 'Solo un administrador puede cambiar la configuracion de etiquetas' }, 403);
+    }
+
+    const body = await c.req.json();
+    const fila: any = { business_id: profile.businessId };
+
+    if (body.razonSocial !== undefined) fila.razon_social = body.razonSocial?.trim() || null;
+    if (body.rut !== undefined) fila.rut = body.rut?.trim() || null;
+    if (body.direccion !== undefined) fila.direccion = body.direccion?.trim() || null;
+    if (body.telefono !== undefined) fila.telefono = body.telefono?.trim() || null;
+    if (body.email !== undefined) fila.email = body.email?.trim() || null;
+    if (body.plantaElaboradora !== undefined) fila.planta_elaboradora = body.plantaElaboradora?.trim() || null;
+    if (body.logoFrontalUrl !== undefined) fila.logo_frontal_url = body.logoFrontalUrl?.trim() || null;
+    if (body.anchoMmDefault !== undefined) fila.ancho_mm_default = Number(body.anchoMmDefault);
+    if (body.altoMmDefault !== undefined) fila.alto_mm_default = Number(body.altoMmDefault);
+
+    const { data: guardado, error: upsertErr } = await supabaseAdmin
+      .from('business_label_settings')
+      .upsert(fila, { onConflict: 'business_id' })
+      .select()
+      .single();
+
+    if (upsertErr) {
+      console.error('Error upserting label settings:', upsertErr);
+      return c.json({ error: 'Error al guardar la configuracion de etiquetas' }, 500);
+    }
+
+    return c.json({ data: toLabelSettings(guardado) });
+  } catch (err: any) {
+    console.error('Error updating label settings:', err);
+    return c.json({ error: 'Failed to update label settings' }, 500);
+  }
+});
+
+app.get('/make-server-6d979413/nutrition/products/:id/label-versions', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+
+    // Se filtra por business_id y no por el producto: label_versions no tiene FK a
+    // products a propósito (el histórico sobrevive al borrado del producto), así
+    // que el negocio es lo único con lo que se puede autorizar.
+    const { data } = await supabaseAdmin
+      .from('label_versions')
+      .select('*')
+      .eq('business_id', profile.businessId)
+      .eq('product_id', productId)
+      .order('version', { ascending: false });
+
+    return c.json({ data: (data || []).map(toLabelVersion) });
+  } catch (err: any) {
+    console.error('Error retrieving label versions:', err);
+    return c.json({ error: 'Failed to retrieve label versions' }, 500);
+  }
+});
+
+// Congela una etiqueta. El snapshot llega armado desde el frontend, donde vive el
+// motor de cálculo; acá solo se le asigna número de versión y se guarda.
+app.post('/make-server-6d979413/nutrition/products/:id/label-versions', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const productId = c.req.param('id');
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!puedeGestionarMateriasPrimas(profile)) {
+      return c.json({ error: 'No tenes permiso para generar etiquetas' }, 403);
+    }
+
+    const { data: producto } = await supabaseAdmin
+      .from('products')
+      .select('id, name, business_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!producto) return c.json({ error: 'Producto no encontrado' }, 404);
+    if (producto.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    const body = await c.req.json();
+
+    if (!body.snapshot || typeof body.snapshot !== 'object') {
+      return c.json({ error: 'Falta el snapshot de la etiqueta' }, 400);
+    }
+    if (body.estado !== 'borrador' && body.estado !== 'lista') {
+      return c.json({ error: 'Estado invalido' }, 400);
+    }
+    if (!body.regulationVersion) {
+      return c.json({ error: 'Falta la version de las reglas regulatorias' }, 400);
+    }
+
+    // MAX+1 con reintento. Dos generaciones simultáneas leen el mismo máximo y una
+    // de las dos choca con UNIQUE(product_id, version); en vez de fallar, vuelve a
+    // leer y toma el siguiente número.
+    let ultimoError: any = null;
+    for (let intento = 0; intento < 3; intento++) {
+      const { data: ultima } = await supabaseAdmin
+        .from('label_versions')
+        .select('version')
+        .eq('product_id', productId)
+        .order('version', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const version = (ultima?.version || 0) + 1;
+
+      const { data: creada, error: insertErr } = await supabaseAdmin
+        .from('label_versions')
+        .insert({
+          business_id: profile.businessId,
+          product_id: productId,
+          product_name: producto.name,
+          version,
+          estado: body.estado,
+          snapshot: body.snapshot,
+          regulation_version: body.regulationVersion,
+          calculated_at: body.calculatedAt || new Date().toISOString(),
+          created_by: userId,
+          ancho_mm: num(body.anchoMm),
+          alto_mm: num(body.altoMm),
+        })
+        .select()
+        .single();
+
+      if (!insertErr) return c.json({ data: toLabelVersion(creada) }, 201);
+
+      ultimoError = insertErr;
+      if (insertErr.code !== '23505') break;
+    }
+
+    console.error('Error creating label version:', ultimoError);
+    return c.json({ error: 'Error al guardar la version de etiqueta' }, 500);
+  } catch (err: any) {
+    console.error('Error creating label version:', err);
+    return c.json({ error: 'Failed to create label version' }, 500);
+  }
+});
+
 console.log('Server initialized - Ready to handle requests');
 console.log('Base path: /make-server-6d979413');
 
