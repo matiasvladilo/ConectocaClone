@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, FileText, Image as ImageIcon, AlertTriangle } from "lucide-react";
+import { Download, FileText, Image as ImageIcon, AlertTriangle, History } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { construirEtiquetaFrontal, construirEtiquetaPosterior } from "../utils/nutricion/etiquetas";
@@ -8,8 +8,28 @@ import type { Lienzo } from "../utils/nutricion/etiquetaLayout";
 import { canvasAPng, precargarImagenes, renderizarCanvas } from "../utils/nutricion/render/renderCanvas";
 import { descargarPdf, nombreArchivo, renderizarPdf } from "../utils/nutricion/render/renderPdf";
 import type { ResultadoEtiqueta } from "../utils/nutricion/armado";
-import type { LabelSettings } from "../utils/api";
 import { toast } from "sonner";
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  resultado: ResultadoEtiqueta;
+  elaborador: DatosElaborador;
+  anchoInicial: number;
+  altoInicial: number;
+  /**
+   * Se llama antes de descargar para registrar la versión. Devuelve el número
+   * asignado, o null si no correspondía guardar (ya existía una igual).
+   *
+   * La persistencia vive en el componente padre a propósito: acá solo se dibuja
+   * y se descarga.
+   */
+  alDescargar?: (anchoMm: number, altoMm: number) => Promise<number | null>;
+  /** Cuando se está mirando una etiqueta ya emitida, en vez de una recién calculada. */
+  versionHistorica?: { version: number; fecha: string } | null;
+}
+
+type Cara = "posterior" | "frontal";
 
 /**
  * El logo se sirve desde public/, no se importa desde src/assets.
@@ -21,15 +41,6 @@ import { toast } from "sonner";
  * public/ se sirven tal cual en los dos casos.
  */
 const LOGO_POR_DEFECTO = "/logo-la-oca-bn.png";
-
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  resultado: ResultadoEtiqueta;
-  settings: LabelSettings | null;
-}
-
-type Cara = "posterior" | "frontal";
 
 /**
  * El logo se necesita como data URL: jsPDF no sale a buscar una URL, y el canvas
@@ -52,50 +63,43 @@ async function comoDataUrl(url: string): Promise<string | null> {
   }
 }
 
-export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
+export function LabelGenerator({
+  open, onClose, resultado, elaborador, anchoInicial, altoInicial, alDescargar, versionHistorica,
+}: Props) {
   const [cara, setCara] = useState<Cara>("posterior");
-  const [ancho, setAncho] = useState("90");
-  const [alto, setAlto] = useState("60");
+  const [ancho, setAncho] = useState(String(anchoInicial));
+  const [alto, setAlto] = useState(String(altoInicial));
   const [logo, setLogo] = useState<string | null>(null);
   const [generando, setGenerando] = useState(false);
   const contenedor = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    // El default sale de la config del negocio, no de una constante en el código.
-    setAncho(String(settings?.anchoMmDefault ?? 90));
-    setAlto(String(settings?.altoMmDefault ?? 60));
-    // Si el negocio subió su propio logo se usa ese; si no, el asset del repo.
-    comoDataUrl(settings?.logoFrontalUrl || LOGO_POR_DEFECTO).then((d) => {
+    setAncho(String(anchoInicial));
+    setAlto(String(altoInicial));
+    comoDataUrl(LOGO_POR_DEFECTO).then((d) => {
       setLogo(d);
-      if (!d) toast.error("No se pudo cargar el logo: la etiqueta frontal saldrá vacía");
+      if (!d) toast.error("No se pudo cargar el logo: la etiqueta saldrá sin él");
     });
-  }, [open, settings]);
+  }, [open, anchoInicial, altoInicial]);
 
   const num = (s: string, fallback: number) => {
     const n = parseFloat(s.trim().replace(",", "."));
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
 
-  const anchoMm = num(ancho, 90);
-  const altoMm = num(alto, 60);
+  const anchoMm = num(ancho, anchoInicial);
+  const altoMm = num(alto, altoInicial);
 
   const construir = (): Lienzo => {
     const opts = { anchoMm, altoMm, logoDataUrl: logo };
     if (cara === "frontal") return construirEtiquetaFrontal(opts);
-    const elaborador: DatosElaborador = {
-      razonSocial: settings?.razonSocial,
-      rut: settings?.rut,
-      direccion: settings?.direccion,
-      plantaElaboradora: settings?.plantaElaboradora,
-    };
     return construirEtiquetaPosterior(resultado, elaborador, opts);
   };
 
   const lienzo = construir();
   const esBorrador = resultado.veredicto.estado === "borrador";
 
-  // Previsualización. Se redibuja en cada cambio de tamaño o de cara.
   useEffect(() => {
     if (!open || !contenedor.current) return;
     let vigente = true;
@@ -107,7 +111,6 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
       // La previsualización se dibuja a 300 dpi y se muestra escalada por CSS.
       // A 150 se veía borrosa: el canvas se mostraba más grande que su resolución
       // real, y en pantallas retina el navegador lo escalaba el doble otra vez.
-      // Dibujar de más y achicar por CSS es lo que la deja nítida.
       const canvas = renderizarCanvas(lienzo, 300);
       canvas.style.width = "100%";
       canvas.style.height = "auto";
@@ -121,14 +124,29 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
 
   const sufijo = cara === "frontal" ? "frontal" : "etiqueta";
 
+  // Registrar la versión ANTES de entregar el archivo: si el guardado falla, es
+  // mejor no descargar que dejar circulando un PDF del que no queda registro.
+  const registrar = async (): Promise<boolean> => {
+    if (!alDescargar || versionHistorica) return true;
+    try {
+      const v = await alDescargar(anchoMm, altoMm);
+      if (v !== null) toast.success(`Guardada como etiqueta v${v}`);
+      return true;
+    } catch (e: any) {
+      console.error("Error guardando la version:", e);
+      toast.error(e.message || "No se pudo guardar la version de la etiqueta");
+      return false;
+    }
+  };
+
   const descargarPDF = async () => {
     if (generando) return;
     try {
       setGenerando(true);
+      if (!(await registrar())) return;
       await precargarImagenes(lienzo);
       const doc = renderizarPdf(lienzo);
       descargarPdf(doc, nombreArchivo(resultado.denominacion, sufijo, "pdf"));
-      toast.success("PDF generado");
     } catch (e: any) {
       console.error("Error generando PDF:", e);
       toast.error(e.message || "Error al generar el PDF");
@@ -141,15 +159,15 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
     if (generando) return;
     try {
       setGenerando(true);
+      if (!(await registrar())) return;
       await precargarImagenes(lienzo);
-      // 600 dpi para el PNG descargable: es un raster que puede terminar en una
-      // imprenta, y a 300 el texto chico de los sellos se empasta.
+      // 600 dpi: es un raster que puede terminar en una imprenta, y a 300 el
+      // texto chico de los sellos se empasta.
       const canvas = renderizarCanvas(lienzo, 600);
       const a = document.createElement("a");
       a.href = canvasAPng(canvas);
       a.download = nombreArchivo(resultado.denominacion, sufijo, "png");
       a.click();
-      toast.success("PNG generado");
     } catch (e: any) {
       console.error("Error generando PNG:", e);
       toast.error(e.message || "Error al generar el PNG");
@@ -167,11 +185,26 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-blue-600" />
-            Generar etiqueta — {resultado.denominacion}
+            {versionHistorica
+              ? `Etiqueta v${versionHistorica.version} — ${resultado.denominacion}`
+              : `Generar etiqueta — ${resultado.denominacion}`}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
+          {versionHistorica && (
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-300">
+              <p className="flex items-center gap-2 text-sm text-gray-900">
+                <History className="w-4 h-4 text-blue-600 shrink-0" />
+                Etiqueta ya emitida el {versionHistorica.fecha}.
+              </p>
+              <p className="text-xs text-gray-700 mt-1">
+                Se dibuja con los datos congelados en ese momento, no con la receta actual.
+                Descargarla no crea una versión nueva.
+              </p>
+            </div>
+          )}
+
           {esBorrador && (
             <div className="p-3 rounded-lg bg-yellow-50 border-2 border-yellow-400">
               <p className="flex items-center gap-2 text-gray-900">
@@ -184,7 +217,6 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
             </div>
           )}
 
-          {/* Cara */}
           <div className="flex flex-wrap gap-2">
             <Button
               variant={cara === "posterior" ? "default" : "outline"}
@@ -208,7 +240,6 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
               : "Información obligatoria del producto. Los sellos van acá como referencia; el pegado en la cara frontal es manual."}
           </p>
 
-          {/* Tamaño físico */}
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs text-gray-600 mb-1">Ancho (mm)</label>
@@ -225,7 +256,6 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
             </p>
           </div>
 
-          {/* Avisos del layout */}
           {lienzo.avisosLegibilidad.length > 0 && (
             <div className="p-3 rounded-lg bg-red-50 border border-red-300">
               <p className="text-sm text-gray-900">A este tamaño la etiqueta tiene problemas:</p>
@@ -237,7 +267,6 @@ export function LabelGenerator({ open, onClose, resultado, settings }: Props) {
             </div>
           )}
 
-          {/* Previsualización */}
           <div>
             <p className="text-xs text-gray-600 mb-1">
               Previsualización ({anchoMm} × {altoMm} mm)

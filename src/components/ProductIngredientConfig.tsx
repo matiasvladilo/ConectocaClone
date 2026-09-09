@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle, FlaskConical, Calculator, FileText } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, Package, ChefHat, AlertCircle, FlaskConical, Calculator, FileText, History } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import {
@@ -11,11 +11,15 @@ import {
   type Ingredient as APIIngredient,
   type ProductIngredient as APIProductIngredient,
   type NutritionDataset,
+  type LabelVersion,
 } from "../utils/api";
 import { NutritionPreview } from "./NutritionPreview";
 import { LabelGenerator } from "./LabelGenerator";
 import { armarEtiqueta } from "../utils/nutricion/armado";
 import type { ResultadoEtiqueta } from "../utils/nutricion/armado";
+import { construirSnapshot, mismaEtiqueta, restaurarDeSnapshot } from "../utils/nutricion/snapshot";
+import type { SnapshotEtiqueta } from "../utils/nutricion/snapshot";
+import { VERSION_REGLAS } from "../utils/nutricion/reglasChile";
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from "motion/react";
 
@@ -60,6 +64,9 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
   const [guardandoPesos, setGuardandoPesos] = useState(false);
   const [resultado, setResultado] = useState<ResultadoEtiqueta | null>(null);
   const [generadorAbierto, setGeneradorAbierto] = useState(false);
+  const [versiones, setVersiones] = useState<LabelVersion[]>([]);
+  // Cuando se está mirando una etiqueta ya emitida en vez de una recién calculada.
+  const [versionAbierta, setVersionAbierta] = useState<LabelVersion | null>(null);
 
   useEffect(() => {
     console.log("ProductIngredientConfig: Component mounted");
@@ -80,6 +87,7 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
       // pantalla mostraría la tabla nutricional de OTRO producto bajo este nombre.
       setResultado(null);
       setDataset(null);
+      setVersiones([]);
 
       const load = async () => {
         try {
@@ -101,10 +109,12 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
 
       load();
       loadDataset(selectedProduct.id, () => isActive);
+      loadVersiones(selectedProduct.id, () => isActive);
     } else {
       setProductIngredients([]);
       setResultado(null);
       setDataset(null);
+      setVersiones([]);
     }
 
     return () => {
@@ -166,6 +176,17 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
     }
   };
 
+  // El historial se carga siempre, no solo despues de calcular: la idea es
+  // justamente poder ver una etiqueta ya emitida SIN volver a calcularla.
+  const loadVersiones = async (productId: string, sigueVigente: () => boolean) => {
+    try {
+      const v = await nutritionAPI.getLabelVersions(accessToken, productId);
+      if (sigueVigente()) setVersiones(v);
+    } catch (error: any) {
+      console.error("Error loading label versions:", error);
+    }
+  };
+
   const aNumero = (s: string): number | null => {
     const limpio = s.trim().replace(",", ".");
     if (limpio === "") return null;
@@ -198,6 +219,60 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
       setGuardandoPesos(false);
     }
   };
+
+  const elaboradorDe = (d: NutritionDataset | null) => ({
+    razonSocial: d?.labelSettings?.razonSocial,
+    rut: d?.labelSettings?.rut,
+    direccion: d?.labelSettings?.direccion,
+    plantaElaboradora: d?.labelSettings?.plantaElaboradora,
+  });
+
+  /**
+   * Registra la etiqueta al descargarla. Devuelve el numero de version asignado,
+   * o null si no habia nada nuevo que guardar.
+   *
+   * Si el contenido es identico a la ultima version, NO crea una nueva: sin eso
+   * el historial se llena de copias y deja de servir para lo unico que importa,
+   * que es saber que cambio y cuando.
+   */
+  const registrarVersion = async (anchoMm: number, altoMm: number): Promise<number | null> => {
+    if (!selectedProduct || !resultado || !dataset) return null;
+
+    const nuevo = construirSnapshot({
+      resultado,
+      elaborador: elaboradorDe(dataset),
+      lineas: dataset.lineas.map((l) => ({
+        ingredienteId: l.ingredienteId,
+        nombre: l.nombre,
+        cantidad: l.cantidad,
+        unidad: l.unidad,
+        ficha: l.ficha,
+      })),
+      anchoMm,
+      altoMm,
+      regulationVersion: VERSION_REGLAS,
+    });
+
+    const ultima = versiones[0];
+    if (ultima && mismaEtiqueta(nuevo, ultima.snapshot as unknown as SnapshotEtiqueta)) {
+      return null;
+    }
+
+    const creada = await nutritionAPI.createLabelVersion(accessToken, selectedProduct.id, {
+      estado: resultado.veredicto.estado,
+      snapshot: nuevo as unknown as Record<string, unknown>,
+      regulationVersion: VERSION_REGLAS,
+      calculatedAt: new Date().toISOString(),
+      anchoMm,
+      altoMm,
+    });
+
+    setVersiones((prev) => [creada, ...prev]);
+    return creada.version;
+  };
+
+  // Una version historica se dibuja desde su snapshot, no desde la receta actual.
+  const restaurada = versionAbierta ? restaurarDeSnapshot(versionAbierta.snapshot) : null;
 
   const handleCalcular = () => {
     if (!dataset) return;
@@ -829,6 +904,51 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
                         <p className="text-sm text-gray-500">Cargando datos nutricionales...</p>
                       ) : (
                         <div className="space-y-4">
+                          {/* Etiquetas ya emitidas. Se muestran siempre, aunque no
+                              se haya calculado: el punto es poder reimprimir una
+                              etiqueta vieja sin volver a pasar por el calculo. */}
+                          {versiones.length > 0 && (
+                            <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                              <p className="flex items-center gap-2 text-sm text-gray-900 mb-2">
+                                <History className="w-4 h-4 text-blue-600" />
+                                Etiquetas generadas ({versiones.length})
+                              </p>
+                              <div className="space-y-1">
+                                {versiones.map((v) => (
+                                  <div key={v.id} className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm text-gray-900">v{v.version}</span>
+                                    <span className="text-xs text-gray-600">
+                                      {new Date(v.createdAt).toLocaleDateString("es-CL", {
+                                        day: "2-digit", month: "2-digit", year: "numeric",
+                                      })}
+                                    </span>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${v.estado === "lista"
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-yellow-100 text-yellow-700"}`}>
+                                      {v.estado === "lista" ? "Lista" : "Borrador"}
+                                    </span>
+                                    {v.anchoMm && v.altoMm && (
+                                      <span className="text-xs text-gray-500">
+                                        {v.anchoMm} x {v.altoMm} mm
+                                      </span>
+                                    )}
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => setVersionAbierta(v)}
+                                      className="text-xs"
+                                    >
+                                      Ver / descargar
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-2">
+                                Cada una guarda los datos con los que se calculo. Si cambia la receta,
+                                las etiquetas viejas siguen mostrando lo que decian.
+                              </p>
+                            </div>
+                          )}
+
                           {/* Estado de las fichas de las materias primas */}
                           {(() => {
                             const sinFicha = dataset.lineas.filter((l) => !l.ficha);
@@ -983,7 +1103,25 @@ export function ProductIngredientConfig({ onBack, accessToken, initialProduct }:
           open={generadorAbierto}
           onClose={() => setGeneradorAbierto(false)}
           resultado={resultado}
-          settings={dataset?.labelSettings || null}
+          elaborador={elaboradorDe(dataset)}
+          anchoInicial={dataset?.labelSettings?.anchoMmDefault ?? 90}
+          altoInicial={dataset?.labelSettings?.altoMmDefault ?? 60}
+          alDescargar={registrarVersion}
+        />
+      )}
+
+      {versionAbierta && restaurada && (
+        <LabelGenerator
+          open
+          onClose={() => setVersionAbierta(null)}
+          resultado={restaurada.resultado}
+          elaborador={restaurada.elaborador}
+          anchoInicial={restaurada.anchoMm}
+          altoInicial={restaurada.altoMm}
+          versionHistorica={{
+            version: versionAbierta.version,
+            fecha: new Date(versionAbierta.createdAt).toLocaleDateString("es-CL"),
+          }}
         />
       )}
     </div >
