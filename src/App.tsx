@@ -1720,7 +1720,7 @@ export default function App() {
           onUpdateProfile={handleUpdateProfile}
           onViewAnalytics={() => setCurrentScreen("analytics")}
           onViewDistribution={
-            currentUser.role === "admin"
+            currentUser.role === "admin" || currentUser.role === "production"
               ? () => setCurrentScreen("distribucion")
               : undefined
           }

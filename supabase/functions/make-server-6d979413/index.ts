@@ -1247,7 +1247,7 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
     const productId = c.req.param('id');
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-    if (profile.role !== 'admin') return c.json({ error: 'No autorizado' }, 403);
+    if (profile.role !== 'admin' && profile.role !== 'production') return c.json({ error: 'No autorizado' }, 403);
 
     // El tope duro evita que un limit gigante en la query traiga la tabla entera.
     // Number.isFinite atrapa el `limit=abc`: sin esto parseInt devuelve NaN,

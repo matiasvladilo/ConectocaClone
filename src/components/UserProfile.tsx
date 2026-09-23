@@ -745,8 +745,8 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
           </motion.div>
         )}
 
-        {/* Panel de Distribuidora (solo admin) */}
-        {user.role === 'admin' && onViewDistribution && (
+        {/* Panel de Distribuidora (Admin y Producción) */}
+        {(user.role === 'admin' || user.role === 'production') && onViewDistribution && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
