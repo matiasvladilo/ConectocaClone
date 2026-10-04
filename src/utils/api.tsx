@@ -387,6 +387,49 @@ export const ordersAPI = {
     return response?.data || response;
   },
 
+  updateWithStock: async (
+    token: string,
+    orderId: string,
+    updates: {
+      products: Array<{
+        productId: string;
+        name: string;
+        quantity: number;
+        price: number;
+        productionAreaId?: string | null;
+        areaStatus?: string;
+      }>;
+      total: number;
+      notes?: string;
+      deadline?: string;
+      customerName?: string;
+      deliveryAddress?: string;
+    }
+  ): Promise<void> => {
+    // Igual patrón que ordersAPI.create: la reconciliación de stock/lotes y el
+    // reemplazo de order_items pasan en el servidor, en una sola transacción
+    // (RPC update_order_with_stock) — no se calcula ningún delta acá.
+    const supabase = createClient(
+      `https://${projectId}.supabase.co`,
+      publicAnonKey,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+
+    const { error } = await supabase.rpc('update_order_with_stock', {
+      p_order_id: orderId,
+      new_data: updates,
+    });
+
+    if (error) {
+      console.error('RPC Error updating order:', error);
+      const stockMatch = (error.message || '').match(/STOCK_INSUFICIENTE:(.+)/);
+      if (stockMatch) {
+        throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
+      }
+      throw new Error(`Error guardando pedido: ${error.message}`);
+    }
+  },
+
   updateStatus: async (
     token: string,
     orderId: string,
