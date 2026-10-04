@@ -31,7 +31,7 @@ BEGIN
     SELECT id, cantidad_restante, pl.costo_unitario AS costo_unitario
     FROM product_lots pl
     WHERE pl.product_id = p_product_id AND pl.cantidad_restante > 0
-    ORDER BY pl.created_at ASC
+    ORDER BY pl.created_at ASC, pl.id ASC
     FOR UPDATE
   LOOP
     EXIT WHEN v_restante <= 0;
@@ -81,7 +81,7 @@ BEGIN
   SELECT pl.costo_unitario INTO v_nuevo_precio
   FROM product_lots pl
   WHERE pl.product_id = p_product_id AND pl.cantidad_restante > 0
-  ORDER BY pl.created_at ASC
+  ORDER BY pl.created_at ASC, pl.id ASC
   LIMIT 1;
 
   UPDATE products SET price = COALESCE(v_nuevo_precio, price) WHERE id = p_product_id;
