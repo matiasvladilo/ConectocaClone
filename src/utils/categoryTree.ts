@@ -28,6 +28,16 @@ export function tieneHijas(categories: Category[], id: string): boolean {
 }
 
 /**
+ * Encuentra la categoría Distribuidora entre la lista, buscando por nombre
+ * (reutiliza la misma estrategia que DistributionPanel). Devuelve su id, o
+ * 'all' si no existe.
+ */
+export function elegirCategoriaInicial(categories: Category[]): string {
+  const distri = categories.find(c => c.name.trim().toLowerCase().includes('distribuidora'));
+  return distri ? distri.id : 'all';
+}
+
+/**
  * Los ids que cuentan como "pertenece a esta categoría": la categoría misma más
  * sus subcategorías. Sin esto, filtrar por "Distribuidora" con una comparación
  * exacta esconde todo lo que se etiquetó como "Bebidas", y el listado se ve
