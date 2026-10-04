@@ -871,13 +871,27 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock, costoUnitario } = updates;
 
     let skuNorm: string | undefined;
     if (sku !== undefined) {
       skuNorm = (sku || '').trim();
       const skuError = await checkDuplicateSku(profile.businessId, skuNorm, productId);
       if (skuError) return c.json({ error: skuError }, 400);
+    }
+
+    // Si esto va a ser una reposición de un producto en alcance, el costo es
+    // obligatorio — y hay que saberlo ANTES de escribir nada: si se valida
+    // después del update, un request sin costo deja stock movido sin lote.
+    if (stock !== undefined && modo === 'sumar' && existing.unlimited_stock !== true) {
+      const deltaPrevisto = parseInt(stock) - Number(existing.stock);
+      if (deltaPrevisto > 0) {
+        const { data: enLotes } = await supabaseAdmin.rpc('producto_usa_lotes', { p_product_id: productId });
+        const costoValido = costoUnitario !== undefined && costoUnitario !== null && !isNaN(Number(costoUnitario)) && Number(costoUnitario) >= 0;
+        if (enLotes && !costoValido) {
+          return c.json({ error: 'Costo requerido para reponer stock de un producto de Distribuidora' }, 400);
+        }
+      }
     }
 
     const updateData: any = {};
@@ -971,7 +985,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
         // registrarStockEvent no lanza si el INSERT falla: solo loguea. El
         // evento es historia, no parte de la operación, así que un kardex
         // incompleto es mejor que un ajuste de stock que no se guarda.
-        await registrarStockEvent({
+        const eventId = await registrarStockEvent({
           businessId: profile.businessId,
           productId,
           productName: updated.name,
@@ -980,6 +994,56 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
           stockAfter: stockNuevo,
           createdBy: userId,
         });
+
+        const { data: enLotes } = await supabaseAdmin.rpc('producto_usa_lotes', { p_product_id: productId });
+
+        if (enLotes) {
+          if (tipo === 'reposicion') {
+            // Ya validado antes del update: costoUnitario existe y es válido acá.
+            const { error: loteError } = await supabaseAdmin.rpc('reponer_lote_fifo', {
+              p_product_id: productId,
+              p_cantidad: Math.abs(delta),
+              p_costo_unitario: Number(costoUnitario),
+              p_origen: 'reposicion',
+              p_stock_event_id: eventId,
+            });
+            if (loteError) console.error('Error creando lote de reposición:', loteError);
+          } else if (tipo === 'merma') {
+            const { error: loteError } = await supabaseAdmin.rpc('consumir_lotes_fifo', {
+              p_product_id: productId,
+              p_cantidad: Math.abs(delta),
+            });
+            if (loteError) console.error('Error consumiendo lote por merma:', loteError);
+          } else if (delta < 0) {
+            // Ajuste a la baja (corrección de conteo): FIFO, igual que una merma.
+            const { error: loteError } = await supabaseAdmin.rpc('consumir_lotes_fifo', {
+              p_product_id: productId,
+              p_cantidad: Math.abs(delta),
+            });
+            if (loteError) console.error('Error consumiendo lote por ajuste:', loteError);
+          } else {
+            // Ajuste al alza: no hay compra registrada para este stock que
+            // "apareció". Se crea un lote fantasma al costo del lote más
+            // reciente conocido, o al price actual si todavía no hay ninguno.
+            const { data: ultimoLote } = await supabaseAdmin
+              .from('product_lots')
+              .select('costo_unitario')
+              .eq('product_id', productId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            const costoFantasma = ultimoLote?.costo_unitario ?? Number(updated.price);
+
+            const { error: loteError } = await supabaseAdmin.rpc('reponer_lote_fifo', {
+              p_product_id: productId,
+              p_cantidad: delta,
+              p_costo_unitario: costoFantasma,
+              p_origen: 'ajuste',
+              p_stock_event_id: eventId,
+            });
+            if (loteError) console.error('Error creando lote fantasma de ajuste:', loteError);
+          }
+        }
       }
     }
 
