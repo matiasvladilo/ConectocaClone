@@ -38,6 +38,7 @@ import { StockAdjustDialog, type ModoAjuste } from './StockAdjustDialog';
 import { ProductNameFields } from './ProductNameFields';
 import { componerNombre, partesVacias, type ProductNameParts } from '../utils/productName';
 import { construirPayloadProducto, type ProductFormData } from '../utils/productPayload';
+import { productoUsaLotes } from '../utils/productLots';
 import { alternarStockIlimitado } from '../utils/stockForm';
 import { ProductIngredientConfig } from './ProductIngredientConfig';
 import { ProductDetailDialog } from './ProductDetailDialog';
@@ -283,10 +284,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
       // El stock no viaja en el payload de edición: se cambia sólo desde
       // StockAdjustDialog. Ver construirPayloadProducto.
+      const enLotes = editingProduct ? productoUsaLotes(editingProduct, categories) : false;
+
       const productData = construirPayloadProducto({
         formData,
         editingProduct,
         priceValue,
+        enLotes,
       });
 
       console.log('📦 [DEBUG] Sending Product Data:', JSON.stringify(productData, null, 2));
@@ -371,16 +375,19 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     }
   };
 
-  const handleAjustarStock = async (nuevoStock: number, modo: ModoAjuste) => {
+  const handleAjustarStock = async (nuevoStock: number, modo: ModoAjuste, costoUnitario?: number) => {
     if (!stockProduct) return;
     try {
       setSavingStock(true);
-      // Se manda SOLO el stock + el modo: el backend actualiza únicamente los
-      // campos presentes, así que la receta y el resto del producto quedan
-      // intactos (y no se dispara el chequeo de permisos de recetas).
+      // Se manda SOLO el stock + el modo (+ el costo, cuando corresponde): el
+      // backend actualiza únicamente los campos presentes, así que la receta y
+      // el resto del producto quedan intactos (y no se dispara el chequeo de
+      // permisos de recetas).
       // El `modo` no modifica el producto: le dice al backend si esto fue una
-      // reposición, una merma o una corrección de conteo.
-      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock, modo });
+      // reposición, una merma o una corrección de conteo. `costoUnitario` es el
+      // costo del lote nuevo cuando esto es una reposición de un producto en
+      // alcance (lo pide StockAdjustDialog solo en ese caso).
+      const actualizado = await productsAPI.update(accessToken, stockProduct.id, { stock: nuevoStock, modo, costoUnitario });
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
 
       // Si el ajuste salió del diálogo de edición, ese formulario sigue mostrando
@@ -434,6 +441,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   const recetaCount = editingProduct
     ? (products.find(p => p.id === editingProduct.id)?.ingredients?.length ?? 0)
     : 0;
+
+  // Si el producto en edición es de Distribuidora sin receta, el precio lo
+  // recalcula el backend según el lote activo: el campo se muestra de solo
+  // lectura (ver el bloque de "Precio de Venta" más abajo).
+  const enLotes = editingProduct ? productoUsaLotes(editingProduct, categories) : false;
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -1020,19 +1032,31 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
               </div>
 
               <div>
-                <Label htmlFor="price">Precio de Venta *</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    id="price"
-                    type="text"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: formatCLPInput(e.target.value) })}
-                    placeholder="0"
-                    className="pl-9"
-                    required
-                  />
-                </div>
+                <Label htmlFor={enLotes ? undefined : 'price'}>Precio de Venta *</Label>
+                {enLotes ? (
+                  // Mismo patrón visual que ya usa el bloque de stock al editar: el
+                  // precio de estos productos lo calcula el backend según el lote
+                  // activo, no se edita a mano.
+                  <div className="rounded-lg bg-blue-50 px-4 py-3">
+                    <span className="text-lg font-mono text-gray-900">{formatCLP(parseCLP(formData.price))}</span>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Se actualiza solo según el costo del lote de compra activo.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      id="price"
+                      type="text"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: formatCLPInput(e.target.value) })}
+                      placeholder="0"
+                      className="pl-9"
+                      required
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1384,6 +1408,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         open={!!stockProduct}
         onOpenChange={(abierto) => { if (!abierto) setStockProduct(null); }}
         product={stockProduct}
+        enLotes={stockProduct ? productoUsaLotes(stockProduct, categories) : false}
         onConfirm={handleAjustarStock}
         saving={savingStock}
       />
