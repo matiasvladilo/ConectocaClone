@@ -305,7 +305,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         toast.success('Producto actualizado exitosamente');
 
         // Notify if price changed
-        if (editingProduct.price !== productData.price) {
+        // `'price' in productData` primero: para un producto en alcance de
+        // lotes, construirPayloadProducto deliberadamente OMITE `price` del
+        // payload (lo recalcula el backend), así que productData.price es
+        // `undefined` acá. Sin este chequeo, `editingProduct.price !== undefined`
+        // es siempre true, y el mensaje de abajo (formatCLP(productData.price))
+        // mandaba "$NaN" a todo el equipo en cada guardado de un producto en
+        // alcance, haya cambiado el precio o no.
+        if ('price' in productData && editingProduct.price !== productData.price) {
           businessAPI.getMembers(accessToken).then(({ members }) => {
             const promises = members
               .filter(m => m.id !== currentUserId)
@@ -394,18 +401,28 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
 
       // Si el ajuste salió del diálogo de edición, ese formulario sigue mostrando
-      // el stock (y, si el producto está en alcance de lotes, el precio) viejo.
-      // Hay que sincronizar LAS DOS cosas: lo que se ve (formData) y la
-      // referencia contra la que se compara al guardar (editingProduct). Si solo
-      // se actualizara una, guardar volvería a mandar un valor desactualizado y
-      // pisaría este ajuste. El precio se formatea igual que al abrir el diálogo
-      // (ver handleOpenDialog) para que quede consistente con formData.price.
+      // el stock viejo. Hay que sincronizar LAS DOS cosas: lo que se ve
+      // (formData.stock) y la referencia contra la que se compara al guardar
+      // (editingProduct). Si solo se actualizara una, guardar volvería a mandar
+      // un stock desactualizado y pisaría este ajuste.
+      //
+      // El precio SOLO se sincroniza cuando el producto está en alcance de
+      // lotes (enLotes): en ese caso el campo es de solo lectura y formData.price
+      // nunca tiene nada "sin guardar" que proteger, así que pisarlo con el
+      // precio recién recalculado por el backend es seguro y necesario (si no,
+      // el campo de solo lectura queda mostrando el precio viejo hasta reabrir
+      // el diálogo). Pero "Ajustar" también está disponible para productos FUERA
+      // de alcance (merma/corregir total), donde el precio sigue siendo editable
+      // a mano: ahí el backend no toca price, así que sincronizar sin condición
+      // pisaría en silencio cualquier precio que el usuario hubiera tipeado sin
+      // guardar todavía — el mismo bug de pérdida silenciosa que ya describe el
+      // comentario original para el stock, aplicado por error al precio.
       if (editingProduct?.id === actualizado.id) {
         setEditingProduct(actualizado);
         setFormData(prev => ({
           ...prev,
           stock: actualizado.stock.toString(),
-          price: formatCLP(actualizado.price, false),
+          ...(enLotes ? { price: formatCLP(actualizado.price, false) } : {}),
         }));
       }
 
