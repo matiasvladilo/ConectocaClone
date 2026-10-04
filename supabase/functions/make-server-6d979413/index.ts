@@ -1839,7 +1839,7 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
 
     const { data: order } = await supabaseAdmin
       .from('orders')
-      .select('*, order_items(product_id, quantity)')
+      .select('*, order_items(id, product_id, quantity, order_item_lots(lot_id, cantidad))')
       .eq('id', orderId)
       .maybeSingle();
 
@@ -1878,6 +1878,23 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
             createdBy: userId,
             orderId,
           });
+
+          // Devolver cada unidad al lote exacto del que salió — aunque ese
+          // lote ya esté en 0, se reabre. El FIFO lo vuelve a consumir
+          // primero la próxima vez, así que no hace falta lógica extra.
+          for (const ol of (item.order_item_lots || [])) {
+            const { error: loteError } = await supabaseAdmin.rpc('devolver_a_lote', {
+              p_lot_id: ol.lot_id,
+              p_cantidad: ol.cantidad,
+            });
+            if (loteError) console.error('Error devolviendo unidades al lote:', loteError);
+          }
+
+          if ((item.order_item_lots || []).length > 0) {
+            // Puede haber reactivado un lote más viejo y más barato que el
+            // que estaba activo: recalcular el precio vigente.
+            await supabaseAdmin.rpc('recalcular_precio_producto', { p_product_id: product.id });
+          }
         }
       }
     }
