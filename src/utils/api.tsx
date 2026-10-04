@@ -566,9 +566,11 @@ export const productsAPI = {
     return response?.data || response;
   },
 
-  // `modo` no es un campo del producto: es metadato del ajuste que el backend
-  // usa para clasificar el movimiento en el kardex. No se persiste en products.
-  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }>; modo?: 'sumar' | 'total' }): Promise<Product> => {
+  // `modo` y `costoUnitario` no son campos del producto: son metadato del
+  // ajuste que el backend usa para clasificar el movimiento en el kardex y
+  // para crear el lote cuando corresponde. No se persisten tal cual en
+  // products (costoUnitario pasa a ser el costo del lote nuevo).
+  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }>; modo?: 'sumar' | 'total'; costoUnitario?: number }): Promise<Product> => {
     const response = await fetchAPI(`/products/${productId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
