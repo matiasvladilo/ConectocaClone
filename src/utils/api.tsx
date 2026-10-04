@@ -56,6 +56,10 @@ export interface Product {
   productionAreaId?: string; // New: ID of production area assigned to this product
   ingredients?: ProductIngredient[]; // New: Recipe ingredients for this product
   laborCost?: number; // Costo de mano de obra (opcional), separado de los ingredientes
+  // Suma de cantidad_restante × costo_unitario de los lotes vivos de este
+  // producto. Solo viene poblado en GET /products (lista); undefined si el
+  // producto no tiene lotes (fuera de alcance, o en alcance sin stock).
+  lotsValue?: number;
   createdAt?: string;
   updatedAt?: string;
 }

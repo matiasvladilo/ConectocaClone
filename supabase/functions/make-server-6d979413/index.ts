@@ -72,7 +72,7 @@ function toBusiness(r: any) {
   };
 }
 
-function toProduct(r: any) {
+function toProduct(r: any, lotsValue?: number) {
   const ingredients = (r.product_ingredients || []).map((pi: any) => ({
     ingredientId: pi.ingredient_id,
     quantity: pi.quantity,
@@ -98,6 +98,7 @@ function toProduct(r: any) {
     businessId: r.business_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    lotsValue,
   };
 }
 
@@ -748,8 +749,22 @@ app.get("/make-server-6d979413/products", async (c) => {
       .order('name', { ascending: true })
       .range(offset, offset + limit - 1);
 
+    // Agregado de lotes: una sola query extra para todo el negocio, no una
+    // por producto. Solo lotes con stock > 0 participan del valor.
+    const { data: filasLotes } = await supabaseAdmin
+      .from('product_lots')
+      .select('product_id, cantidad_restante, costo_unitario')
+      .eq('business_id', profile.businessId)
+      .gt('cantidad_restante', 0);
+
+    const lotsValueByProduct = new Map<string, number>();
+    for (const l of filasLotes || []) {
+      const previo = lotsValueByProduct.get(l.product_id) || 0;
+      lotsValueByProduct.set(l.product_id, previo + Number(l.cantidad_restante) * Number(l.costo_unitario));
+    }
+
     const total = count ?? 0;
-    const result = (products || []).map(toProduct);
+    const result = (products || []).map((p: any) => toProduct(p, lotsValueByProduct.get(p.id)));
 
     return c.json({
       data: result,
