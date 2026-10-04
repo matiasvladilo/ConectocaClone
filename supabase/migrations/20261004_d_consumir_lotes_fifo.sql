@@ -2,6 +2,7 @@
 -- NOTE: The brief's original SQL had unqualified references to `costo_unitario` that
 -- collide with the RETURN TABLE output column, causing "column reference is ambiguous"
 -- at runtime. This version qualifies table columns via aliases (pl.*) to resolve the collision.
+-- Also restores the brief's guarded UPDATE (with EXISTS) to avoid unnecessary updated_at triggers.
 CREATE OR REPLACE FUNCTION public.consumir_lotes_fifo(p_product_id uuid, p_cantidad integer)
 RETURNS TABLE(lot_id uuid, cantidad integer, costo_unitario numeric)
 LANGUAGE plpgsql
@@ -31,7 +32,7 @@ BEGIN
     SELECT id, cantidad_restante, pl.costo_unitario AS costo_unitario
     FROM product_lots pl
     WHERE pl.product_id = p_product_id AND pl.cantidad_restante > 0
-    ORDER BY pl.created_at ASC, pl.id ASC
+    ORDER BY pl.created_at ASC
     FOR UPDATE
   LOOP
     EXIT WHEN v_restante <= 0;
@@ -78,12 +79,16 @@ BEGIN
 
   -- Precio vigente = costo del lote más viejo que sigue con stock. Si no
   -- queda ninguno, products.price conserva el último valor conocido.
-  SELECT pl.costo_unitario INTO v_nuevo_precio
-  FROM product_lots pl
-  WHERE pl.product_id = p_product_id AND pl.cantidad_restante > 0
-  ORDER BY pl.created_at ASC, pl.id ASC
-  LIMIT 1;
-
-  UPDATE products SET price = COALESCE(v_nuevo_precio, price) WHERE id = p_product_id;
+  UPDATE products
+    SET price = (
+      SELECT pl.costo_unitario FROM product_lots pl
+      WHERE pl.product_id = p_product_id AND pl.cantidad_restante > 0
+      ORDER BY pl.created_at ASC
+      LIMIT 1
+    )
+    WHERE id = p_product_id
+      AND EXISTS (
+        SELECT 1 FROM product_lots WHERE product_id = p_product_id AND cantidad_restante > 0
+      );
 END;
 $$;
