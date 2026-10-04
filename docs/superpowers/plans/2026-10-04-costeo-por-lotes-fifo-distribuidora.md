@@ -20,11 +20,11 @@
 
 ---
 
-## Hallazgo importante antes de empezar: `EditOrderDialog` queda fuera de este plan
+## Hallazgo: `EditOrderDialog` necesitó su propia tarea (17 y 18)
 
-Durante el diseño se confirmó que la **creación** de un pedido (`create_order_with_stock`, usada por `NewOrderForm`) es el único camino que este plan cubre para el despacho. La **edición** de la cantidad de un pedido ya creado (`EditOrderDialog.tsx`) ajusta `products.stock` por un camino distinto (delta directo sobre el producto, sin pasar por `create_order_with_stock`), y ese camino no queda cubierto por `consumir_lotes_fifo`/`reponer_lote_fifo` en este plan. Si se edita la cantidad de un producto de Distribuidora en un pedido ya creado, el stock se ajusta correctamente pero el lote consumido/devuelto puede desincronizarse del costeo.
+La **creación** de un pedido (`create_order_with_stock`, usada por `NewOrderForm`) es el único camino que las Tasks 1-16 cubren para el despacho. La **edición** de la cantidad de un pedido ya creado (`EditOrderDialog.tsx`) ajusta `products.stock` por un camino totalmente distinto — y no solo le faltaba el consumo FIFO: `PUT /orders/:id` borra y reinserta **todas** las filas de `order_items` del pedido en cada guardado (línea 1589), lo que por `ON DELETE CASCADE` borra también `order_item_lots` — **incluso para líneas cuya cantidad no cambió**. Sin una tarea dedicada, cualquier edición de un pedido con productos de Distribuidora iba a dejar esas líneas sin rastro de qué lote consumieron, rompiendo una devolución posterior.
 
-Es una ampliación de alcance real respecto del spec (que tampoco la mencionaba), no una tarea de este plan. Queda anotado para decidir aparte: o se trata como seguimiento, o se agrega como tarea 17 antes de implementar. **No se resuelve en las tareas de abajo.**
+La Task 17 agrega una RPC nueva (`update_order_with_stock`, hermana de `create_order_with_stock`) que hace todo el ciclo — diff contra lo que el pedido tenía antes, consumo o devolución de lotes según corresponda, y reconstrucción de `order_item_lots` — en una sola transacción. La Task 18 cambia `EditOrderDialog` para que use esa RPC en vez de calcular el delta de stock a mano contra un snapshot de productos potencialmente desactualizado (que es, de paso, una clase de bug que esto elimina de yapa).
 
 ---
 
@@ -1843,7 +1843,419 @@ git commit -m "feat: Valor del inventario usa el costo por lotes cuando el produ
 
 ---
 
-### Task 16: Verificación end-to-end en navegador
+### Task 17: RPC `update_order_with_stock` — editar un pedido reconcilia lotes
+
+**Files:**
+- Create: `supabase/migrations/20261004_h_update_order_with_stock.sql`
+
+**Interfaces:**
+- Consumes: `producto_usa_lotes`, `consumir_lotes_fifo`, `devolver_a_lote`, `recalcular_precio_producto` (Tasks 2, 4, 8); tipo `consumo_lote`, tablas `product_lots`/`order_item_lots` (Task 1).
+- Produces: `public.update_order_with_stock(p_order_id text, new_data jsonb) RETURNS void`. La usan las Tasks 18 (`ordersAPI.updateWithStock`) y 19 (verificación).
+
+La idea: en vez de armar el detalle de consumo en un array plpgsql (como en la Task 5, donde alcanza porque todo es consumo nuevo), acá hace falta poder **sumar y restar** sobre el estado existente — así que se arma en una tabla temporal (`tmp_consumo_lotes`, con `ON COMMIT DROP`: se autodestruye al terminar la transacción, no hay riesgo de que quede pisada entre llamados). Se la siembra con el detalle actual de `order_item_lots`, se la ajusta según el delta de cada producto, y al final se usa para reconstruir `order_item_lots` desde cero.
+
+- [ ] **Step 1: Escribir la migración**
+
+```sql
+-- supabase/migrations/20261004_h_update_order_with_stock.sql
+CREATE OR REPLACE FUNCTION public.update_order_with_stock(p_order_id text, new_data jsonb)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $function$
+DECLARE
+  v_order_id uuid := p_order_id::uuid;
+  item jsonb;
+  pid uuid;
+  qty_nueva numeric;
+  qty_vieja numeric;
+  delta numeric;
+  prod record;
+  v_vistos uuid[] := ARRAY[]::uuid[];
+  v_item_id uuid;
+  v_consumo record;
+  v_ol record;
+  v_restante integer;
+  v_tomar integer;
+BEGIN
+  CREATE TEMP TABLE tmp_consumo_lotes (
+    product_id uuid,
+    lot_id uuid,
+    cantidad integer,
+    costo_unitario numeric
+  ) ON COMMIT DROP;
+
+  -- Sembrar con el desglose actual (antes de tocar nada).
+  INSERT INTO tmp_consumo_lotes (product_id, lot_id, cantidad, costo_unitario)
+  SELECT oi.product_id, ol.lot_id, ol.cantidad, ol.costo_unitario
+  FROM order_item_lots ol
+  JOIN order_items oi ON oi.id = ol.order_item_id
+  WHERE oi.order_id = v_order_id;
+
+  -- 1. Por cada producto en la lista NUEVA: delta contra lo que el pedido
+  --    tenía antes, y aplicar el movimiento de stock/lotes correspondiente.
+  FOR item IN SELECT value FROM jsonb_array_elements(COALESCE(new_data->'products', '[]'::jsonb)) AS t(value)
+  LOOP
+    IF (item->>'productId') IS NULL OR (item->>'productId') = '' OR (item->>'productId') = 'null' THEN
+      CONTINUE;
+    END IF;
+    pid := (item->>'productId')::uuid;
+    qty_nueva := GREATEST(COALESCE((item->>'quantity')::numeric, 0), 0);
+    v_vistos := v_vistos || pid;
+
+    SELECT COALESCE(SUM(oi.quantity), 0) INTO qty_vieja
+      FROM order_items oi WHERE oi.order_id = v_order_id AND oi.product_id = pid;
+
+    delta := qty_nueva - qty_vieja;
+    IF delta = 0 THEN CONTINUE; END IF;
+
+    SELECT id, name, stock, unlimited_stock, track_stock, business_id
+      INTO prod FROM products WHERE id = pid FOR UPDATE;
+    IF NOT FOUND THEN CONTINUE; END IF;
+    IF prod.unlimited_stock OR NOT prod.track_stock OR prod.stock = -1 THEN CONTINUE; END IF;
+
+    IF delta > 0 THEN
+      -- Piden más unidades de esta línea: es un despacho nuevo sobre el delta.
+      IF prod.stock < delta THEN
+        RAISE EXCEPTION 'STOCK_INSUFICIENTE:%', prod.name;
+      END IF;
+      UPDATE products SET stock = stock - delta WHERE id = pid;
+      INSERT INTO stock_events (business_id, product_id, product_name, type, quantity, stock_after, order_id, created_by)
+        VALUES (prod.business_id, pid, prod.name, 'despacho', delta, prod.stock - delta, v_order_id, auth.uid());
+
+      IF public.producto_usa_lotes(pid) THEN
+        FOR v_consumo IN SELECT * FROM public.consumir_lotes_fifo(pid, delta::integer) LOOP
+          INSERT INTO tmp_consumo_lotes (product_id, lot_id, cantidad, costo_unitario)
+          VALUES (pid, v_consumo.lot_id, v_consumo.cantidad, v_consumo.costo_unitario);
+        END LOOP;
+      END IF;
+    ELSE
+      -- Piden menos: devolver |delta| unidades.
+      UPDATE products SET stock = stock - delta WHERE id = pid; -- delta negativo = stock sube
+      INSERT INTO stock_events (business_id, product_id, product_name, type, quantity, stock_after, order_id, created_by)
+        VALUES (prod.business_id, pid, prod.name, 'devolucion', -delta, prod.stock - delta, v_order_id, auth.uid());
+
+      IF public.producto_usa_lotes(pid) THEN
+        -- Se devuelve a los lotes que esta línea había consumido, empezando
+        -- por el más nuevo: es la contraparte simétrica de "se pidió de
+        -- más" (lo último que se tomó es lo primero que se suelta).
+        v_restante := (-delta)::integer;
+        FOR v_ol IN
+          SELECT t.lot_id, t.cantidad
+          FROM tmp_consumo_lotes t
+          JOIN product_lots pl ON pl.id = t.lot_id
+          WHERE t.product_id = pid
+          ORDER BY pl.created_at DESC
+        LOOP
+          EXIT WHEN v_restante <= 0;
+          v_tomar := LEAST(v_ol.cantidad, v_restante);
+          PERFORM public.devolver_a_lote(v_ol.lot_id, v_tomar);
+          UPDATE tmp_consumo_lotes
+            SET cantidad = cantidad - v_tomar
+            WHERE product_id = pid AND lot_id = v_ol.lot_id;
+          v_restante := v_restante - v_tomar;
+        END LOOP;
+        DELETE FROM tmp_consumo_lotes WHERE product_id = pid AND cantidad <= 0;
+        PERFORM public.recalcular_precio_producto(pid);
+      END IF;
+    END IF;
+  END LOOP;
+
+  -- 2. Líneas que existían y ya no están en la lista nueva: se devuelven enteras.
+  FOR pid IN
+    SELECT DISTINCT oi.product_id
+    FROM order_items oi
+    WHERE oi.order_id = v_order_id AND oi.product_id IS NOT NULL AND NOT (oi.product_id = ANY(v_vistos))
+  LOOP
+    SELECT COALESCE(SUM(oi.quantity), 0) INTO qty_vieja
+      FROM order_items oi WHERE oi.order_id = v_order_id AND oi.product_id = pid;
+
+    SELECT id, name, stock, unlimited_stock, track_stock, business_id
+      INTO prod FROM products WHERE id = pid FOR UPDATE;
+    IF NOT FOUND THEN CONTINUE; END IF;
+    IF prod.unlimited_stock OR NOT prod.track_stock OR prod.stock = -1 THEN CONTINUE; END IF;
+
+    UPDATE products SET stock = stock + qty_vieja WHERE id = pid;
+    INSERT INTO stock_events (business_id, product_id, product_name, type, quantity, stock_after, order_id, created_by)
+      VALUES (prod.business_id, pid, prod.name, 'devolucion', qty_vieja, prod.stock + qty_vieja, v_order_id, auth.uid());
+
+    IF public.producto_usa_lotes(pid) THEN
+      FOR v_ol IN SELECT lot_id, cantidad FROM tmp_consumo_lotes WHERE product_id = pid
+      LOOP
+        PERFORM public.devolver_a_lote(v_ol.lot_id, v_ol.cantidad);
+      END LOOP;
+      DELETE FROM tmp_consumo_lotes WHERE product_id = pid;
+      PERFORM public.recalcular_precio_producto(pid);
+    END IF;
+  END LOOP;
+
+  -- 3. Actualizar los campos del pedido y reconstruir order_items.
+  UPDATE orders SET
+    total = COALESCE((new_data->>'total')::numeric, total),
+    notes = COALESCE(NULLIF(TRIM(new_data->>'notes'), ''), notes),
+    deadline = CASE WHEN new_data->>'deadline' IS NOT NULL AND new_data->>'deadline' <> ''
+                    THEN (new_data->>'deadline')::timestamptz ELSE deadline END,
+    customer_name = COALESCE(NULLIF(TRIM(new_data->>'customerName'), ''), customer_name),
+    delivery_address = COALESCE(NULLIF(TRIM(new_data->>'deliveryAddress'), ''), delivery_address),
+    updated_at = now()
+  WHERE id = v_order_id;
+
+  DELETE FROM order_items WHERE order_id = v_order_id; -- cascada borra order_item_lots viejos
+
+  FOR item IN SELECT value FROM jsonb_array_elements(COALESCE(new_data->'products', '[]'::jsonb)) AS t(value)
+  LOOP
+    pid := CASE WHEN (item->>'productId') IS NOT NULL AND (item->>'productId') <> '' AND (item->>'productId') <> 'null'
+                THEN (item->>'productId')::uuid ELSE NULL END;
+
+    INSERT INTO order_items (order_id, product_id, product_name, quantity, price, production_area_id, area_status)
+    VALUES (
+      v_order_id,
+      pid,
+      COALESCE(NULLIF(item->>'name', ''), 'Producto'),
+      GREATEST(COALESCE((item->>'quantity')::numeric, 1), 0.001),
+      COALESCE((item->>'price')::numeric, 0),
+      CASE WHEN (item->>'productionAreaId') IS NOT NULL AND (item->>'productionAreaId') <> '' AND (item->>'productionAreaId') <> 'null'
+           THEN (item->>'productionAreaId')::uuid ELSE NULL END,
+      COALESCE(NULLIF(item->>'areaStatus', ''), 'pending')::area_status_type
+    )
+    RETURNING id INTO v_item_id;
+
+    IF pid IS NOT NULL AND EXISTS (SELECT 1 FROM tmp_consumo_lotes WHERE product_id = pid) THEN
+      INSERT INTO order_item_lots (order_item_id, lot_id, cantidad, costo_unitario)
+      SELECT v_item_id, lot_id, cantidad, costo_unitario
+      FROM tmp_consumo_lotes
+      WHERE product_id = pid;
+
+      UPDATE order_items
+        SET price = (
+          SELECT SUM(cantidad * costo_unitario) / SUM(cantidad)
+          FROM tmp_consumo_lotes WHERE product_id = pid
+        )
+        WHERE id = v_item_id;
+    END IF;
+  END LOOP;
+END;
+$function$;
+```
+
+- [ ] **Step 2: Aplicar la migración** (`name: "20261004_h_update_order_with_stock"`)
+
+- [ ] **Step 3: Verificar en base — el mismo pedido de prueba de la Task 5, editado tres veces**
+
+```sql
+DO $$
+DECLARE
+  v_business_id uuid;
+  v_categoria_id uuid;
+  v_user_id uuid;
+  v_product_id uuid;
+  v_order_id uuid := gen_random_uuid();
+  v_item record;
+BEGIN
+  SELECT business_id, id INTO v_business_id, v_categoria_id
+  FROM categories WHERE lower(name) LIKE '%distribuidora%' LIMIT 1;
+  SELECT id INTO v_user_id FROM profiles WHERE business_id = v_business_id LIMIT 1;
+
+  INSERT INTO products (business_id, name, price, stock, category_id)
+  VALUES (v_business_id, '__TEST_LOTES_EDIT__', 0, 8, v_categoria_id)
+  RETURNING id INTO v_product_id;
+
+  PERFORM reponer_lote_fifo(v_product_id, 3, 1000);
+  PERFORM reponer_lote_fifo(v_product_id, 5, 1200);
+
+  -- Crear el pedido original: 2 unidades (sale del lote de 1000)
+  PERFORM create_order_with_stock(
+    v_order_id::text,
+    jsonb_build_object(
+      'businessId', v_business_id, 'userId', v_user_id, 'status', 'pending', 'total', 2000,
+      'products', jsonb_build_array(jsonb_build_object('productId', v_product_id, 'name', '__TEST_LOTES_EDIT__', 'quantity', 2, 'price', 1000))
+    )
+  );
+  ASSERT (SELECT stock FROM products WHERE id = v_product_id) = 6, 'stock tras crear';
+
+  -- Editar: subir a 5 unidades (consume 3 más, cruza al lote de 1200: 1@1000 + 2@1200)
+  PERFORM update_order_with_stock(
+    v_order_id::text,
+    jsonb_build_object(
+      'total', 5400,
+      'products', jsonb_build_array(jsonb_build_object('productId', v_product_id, 'name', '__TEST_LOTES_EDIT__', 'quantity', 5, 'price', 1080))
+    )
+  );
+  ASSERT (SELECT stock FROM products WHERE id = v_product_id) = 3, 'stock tras subir a 5';
+  SELECT id, price, quantity INTO v_item FROM order_items WHERE order_id = v_order_id;
+  ASSERT round(v_item.price * v_item.quantity) = 5400, format('total tras subir, dio %', v_item.price * v_item.quantity);
+
+  -- Editar: bajar a 1 unidad (devuelve 4: primero al lote de 1200, que es el más nuevo)
+  PERFORM update_order_with_stock(
+    v_order_id::text,
+    jsonb_build_object(
+      'total', 1000,
+      'products', jsonb_build_array(jsonb_build_object('productId', v_product_id, 'name', '__TEST_LOTES_EDIT__', 'quantity', 1, 'price', 1000))
+    )
+  );
+  ASSERT (SELECT stock FROM products WHERE id = v_product_id) = 7, 'stock tras bajar a 1';
+  ASSERT (SELECT price FROM products WHERE id = v_product_id) = 1000, 'vuelve a estar en el lote barato';
+
+  RAISE NOTICE 'OK: update_order_with_stock reconcilia lotes en los tres pasos';
+
+  DELETE FROM orders WHERE id = v_order_id;
+  DELETE FROM products WHERE id = v_product_id;
+END $$;
+```
+
+Expected: `NOTICE: OK: ...` sin `ASSERT` fallido.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add supabase/migrations/20261004_h_update_order_with_stock.sql
+git commit -m "feat: RPC para editar pedidos reconciliando lotes FIFO"
+```
+
+---
+
+### Task 18: `EditOrderDialog` usa `update_order_with_stock`
+
+**Files:**
+- Modify: `src/utils/api.tsx` (agregar `ordersAPI.updateWithStock`)
+- Modify: `src/components/EditOrderDialog.tsx:168-281` (`handleSave`)
+
+**Interfaces:**
+- Produces: `ordersAPI.updateWithStock(token: string, orderId: string, updates: { products: Array<{productId, name, quantity, price, productionAreaId, areaStatus}>, total: number, notes?: string, deadline?: string, customerName?: string, deliveryAddress?: string }): Promise<void>`.
+
+- [ ] **Step 1: Agregar el método a `ordersAPI`, al lado de `create` (línea ~368), con el mismo patrón**
+
+```ts
+updateWithStock: async (
+  token: string,
+  orderId: string,
+  updates: {
+    products: Array<{
+      productId: string;
+      name: string;
+      quantity: number;
+      price: number;
+      productionAreaId?: string | null;
+      areaStatus?: string;
+    }>;
+    total: number;
+    notes?: string;
+    deadline?: string;
+    customerName?: string;
+    deliveryAddress?: string;
+  }
+): Promise<void> => {
+  // Igual patrón que ordersAPI.create: la reconciliación de stock/lotes y el
+  // reemplazo de order_items pasan en el servidor, en una sola transacción
+  // (RPC update_order_with_stock) — no se calcula ningún delta acá.
+  const supabase = createClient(
+    `https://${projectId}.supabase.co`,
+    publicAnonKey,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
+
+  const { error } = await supabase.rpc('update_order_with_stock', {
+    p_order_id: orderId,
+    new_data: updates,
+  });
+
+  if (error) {
+    console.error('RPC Error updating order:', error);
+    const stockMatch = (error.message || '').match(/STOCK_INSUFICIENTE:(.+)/);
+    if (stockMatch) {
+      throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
+    }
+    throw new Error(`Error guardando pedido: ${error.message}`);
+  }
+},
+```
+
+- [ ] **Step 2: Reescribir `handleSave` en `EditOrderDialog.tsx`**
+
+Reemplaza el `handleSave` completo (líneas 168-281): desaparece todo el bloque de `freshProducts`/`stockUpdates` (líneas 183-224) — el cálculo de delta y el chequeo de stock insuficiente ahora los hace la RPC, contra el stock real en el servidor, no contra un snapshot que pudo quedar viejo entre que se abrió el diálogo y se tocó "Guardar".
+
+```ts
+const handleSave = async () => {
+    if (!canEditOrder(userRole)) {
+        toast.error('No tienes permiso para editar este pedido');
+        return;
+    }
+
+    if (orderItems.length === 0) {
+        toast.error('El pedido debe tener al menos un producto');
+        return;
+    }
+
+    try {
+        setIsSaving(true);
+
+        const enrichedProducts = orderItems.map(item => {
+            const productDef = products.find(p => p.id === item.productId);
+            const existingItem = order.products?.find(p => p.productId === item.productId);
+            return {
+                productId: item.productId,
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price,
+                productionAreaId: productDef?.productionAreaId || (existingItem as any)?.productionAreaId || null,
+                areaStatus: (existingItem as any)?.areaStatus || 'pending'
+            };
+        });
+
+        if (enrichedProducts.length === 0) {
+            console.error('Error Crítico: Intentando guardar pedido sin productos. Abortando.');
+            toast.error('Error interno: Lista de productos vacía. No se guardaron cambios.');
+            setIsSaving(false);
+            return;
+        }
+
+        await ordersAPI.updateWithStock(accessToken, order.id, {
+            products: enrichedProducts,
+            total: calculateTotal(),
+            notes,
+            deadline: deadline || order.deadline,
+            customerName: order.customerName,
+            deliveryAddress: order.deliveryAddress,
+        });
+
+        toast.success('Pedido actualizado correctamente');
+        onOrderUpdated();
+        onClose();
+
+    } catch (error: any) {
+        console.error('Error updating order:', error);
+        toast.error(error.message || 'Error al actualizar: verifica la conexión');
+    } finally {
+        setIsSaving(false);
+    }
+};
+```
+
+`products` (el `useState<APIProduct[]>` ya cargado por `loadProducts()` al abrir el diálogo) sigue sirviendo para la búsqueda de `productionAreaId` — ya no hace falta volver a pedir `productsAPI.getAll` justo antes de guardar.
+
+- [ ] **Step 3: Verificar tipos**
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: sin errores. (Si `freshProducts`, `stockUpdates`, `quantityDiff`, `newStock`, `originalProductIds`, `removedProductIds` quedaron sin usar en algún otro lado del archivo, el linter los marca — ya no deberían existir tras el Step 2.)
+
+- [ ] **Step 4: Verificación en navegador — reproducir el escenario de la Task 17 pero desde la UI**
+
+Con el mismo producto de prueba de dos lotes ($1000 y $1200): crear un pedido de 2 unidades, editarlo para subir a 5 (cruza lotes, igual que un pedido nuevo), confirmar el total cobrado, editarlo de nuevo para bajar a 1, y confirmar que el precio de venta del producto vuelve a $1000 (se reactivó el lote barato). Repetir con un producto fuera de alcance para confirmar que editar sus pedidos sigue funcionando igual que siempre.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/utils/api.tsx src/components/EditOrderDialog.tsx
+git commit -m "feat: EditOrderDialog reconcilia stock y lotes vía update_order_with_stock"
+```
+
+---
+
+### Task 19: Verificación end-to-end en navegador
 
 **Files:** ninguno (solo verificación manual, sin código nuevo).
 
@@ -1865,6 +2277,7 @@ npm run dev
 8. Hacer una merma de 1 unidad → se descuenta del lote más viejo con stock.
 9. Hacer un "Corregir total" que suba el stock sin que haya una compra registrada (ajuste al alza) → se crea un lote de origen `ajuste` al costo del último lote conocido.
 10. Confirmar con un producto fuera de la categoría Distribuidora (o uno con receta dentro de ella) que **nada** de este flujo aplica: el precio se sigue editando a mano, y `StockAdjustDialog` no pide costo.
+11. Editar (no borrar) un pedido que tiene una línea de un producto con dos lotes: subir la cantidad cruza al lote nuevo igual que un pedido nuevo, y bajarla devuelve al lote correcto — ver el detalle paso a paso en la Task 18, Step 4.
 
 - [ ] **Step 3: Revisar la consola del navegador y los logs de la Edge Function durante toda la prueba**
 
@@ -1896,5 +2309,6 @@ Task 9 (GET /products + tipo Product.lotsValue) — independiente del resto de S
 Task 11 (productoUsaLotes frontend) — independiente, solo necesita categoryTree.ts existente
 Task 12 (productsAPI.update) → Task 13 (StockAdjustDialog) → Task 14 (ProductManagement)
 Task 9 → Task 15 (DistributionPanel)
-Task 16 depende de TODO lo anterior desplegado
+Task 1+2+4+8 (consumir_lotes_fifo, devolver_a_lote, recalcular_precio_producto) → Task 17 (update_order_with_stock) → Task 18 (EditOrderDialog)
+Task 19 depende de TODO lo anterior desplegado, incluidas las Tasks 17 y 18
 ```
