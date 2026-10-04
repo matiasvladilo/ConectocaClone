@@ -130,7 +130,10 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     total: productosDelAmbito.length,
     agotados: productosDelAmbito.filter(x => x.estado === 'agotado').length,
     bajos: productosDelAmbito.filter(x => x.estado === 'bajo').length,
-    valor: productosDelAmbito.reduce((sum, x) => sum + x.producto.price * x.producto.stock, 0),
+    valor: productosDelAmbito.reduce(
+      (sum, x) => sum + (x.producto.lotsValue ?? x.producto.price * x.producto.stock),
+      0
+    ),
   }), [productosDelAmbito]);
 
   const filas = useMemo(() => {
