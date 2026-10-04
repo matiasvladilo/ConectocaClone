@@ -284,8 +284,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
 
       // El stock no viaja en el payload de edición: se cambia sólo desde
       // StockAdjustDialog. Ver construirPayloadProducto.
-      const enLotes = editingProduct ? productoUsaLotes(editingProduct, categories) : false;
-
+      // `enLotes` viene del closure de más abajo (ver su declaración junto a
+      // `recetaCount`): se calcula una sola vez, contra el producto
+      // refrescado, y handleSubmit lo reutiliza así en vez de recalcularlo
+      // contra `editingProduct` directamente, que puede haber quedado
+      // desactualizado (ver comentario de `productoEditado`).
       const productData = construirPayloadProducto({
         formData,
         editingProduct,
@@ -391,13 +394,19 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
       setProducts(products.map(p => (p.id === actualizado.id ? actualizado : p)));
 
       // Si el ajuste salió del diálogo de edición, ese formulario sigue mostrando
-      // el stock viejo. Hay que sincronizar LAS DOS cosas: lo que se ve
-      // (formData.stock) y la referencia contra la que se compara al guardar
-      // (editingProduct). Si solo se actualizara una, guardar volvería a mandar
-      // un stock desactualizado y pisaría este ajuste.
+      // el stock (y, si el producto está en alcance de lotes, el precio) viejo.
+      // Hay que sincronizar LAS DOS cosas: lo que se ve (formData) y la
+      // referencia contra la que se compara al guardar (editingProduct). Si solo
+      // se actualizara una, guardar volvería a mandar un valor desactualizado y
+      // pisaría este ajuste. El precio se formatea igual que al abrir el diálogo
+      // (ver handleOpenDialog) para que quede consistente con formData.price.
       if (editingProduct?.id === actualizado.id) {
         setEditingProduct(actualizado);
-        setFormData(prev => ({ ...prev, stock: actualizado.stock.toString() }));
+        setFormData(prev => ({
+          ...prev,
+          stock: actualizado.stock.toString(),
+          price: formatCLP(actualizado.price, false),
+        }));
       }
 
       toast.success(`Stock de "${actualizado.name}" actualizado a ${nuevoStock}`);
@@ -436,16 +445,30 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   // nivel de filtro (ver comentario de idsDelFiltro), pero acá no había llegado.
   const hayFiltroActivo = !!searchQuery || selectedCategoryFilter !== 'all';
 
-  // El contador sale de `products` y no de `formData`: así el loadProducts(true)
-  // que corre al cerrar la capa de receta lo refresca solo, sin cablear nada más.
-  const recetaCount = editingProduct
-    ? (products.find(p => p.id === editingProduct.id)?.ingredients?.length ?? 0)
-    : 0;
+  // `editingProduct` puede quedar desactualizado sin que este componente se
+  // desmonte: cerrar la capa de receta (cerrarReceta) refresca `products` vía
+  // loadProducts(true) pero deliberadamente NO toca `editingProduct` (conserva
+  // lo que el usuario no guardó). Cualquier cálculo que dependa de datos que
+  // cambian por fuera del formulario —ingredients, price— tiene que mirar la
+  // versión fresca en `products`, no `editingProduct` directamente. Sin esto,
+  // borrar la receta de un producto (quedando en alcance de lotes) seguía
+  // viendo `enLotes` en false hasta reabrir el diálogo, y el campo de precio
+  // mandaba `price` para un producto que el backend ya trata como en alcance.
+  const productoEditado = editingProduct
+    ? (products.find(p => p.id === editingProduct.id) ?? editingProduct)
+    : null;
+
+  // El contador sale de `productoEditado` y no de `formData`: así el
+  // loadProducts(true) que corre al cerrar la capa de receta lo refresca solo,
+  // sin cablear nada más.
+  const recetaCount = productoEditado?.ingredients?.length ?? 0;
 
   // Si el producto en edición es de Distribuidora sin receta, el precio lo
   // recalcula el backend según el lote activo: el campo se muestra de solo
-  // lectura (ver el bloque de "Precio de Venta" más abajo).
-  const enLotes = editingProduct ? productoUsaLotes(editingProduct, categories) : false;
+  // lectura (ver el bloque de "Precio de Venta" más abajo). `handleSubmit`
+  // reutiliza este mismo valor (ver su comentario) en vez de recalcularlo
+  // contra `editingProduct`, por la misma razón de frescura.
+  const enLotes = productoEditado ? productoUsaLotes(productoEditado, categories) : false;
 
   const filteredProducts = products.filter(p => {
     const q = searchQuery.trim().toLowerCase();
@@ -1032,7 +1055,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
               </div>
 
               <div>
-                <Label htmlFor={enLotes ? undefined : 'price'}>Precio de Venta *</Label>
+                <Label htmlFor={enLotes ? undefined : 'price'}>Precio de Venta {!enLotes && '*'}</Label>
                 {enLotes ? (
                   // Mismo patrón visual que ya usa el bloque de stock al editar: el
                   // precio de estos productos lo calcula el backend según el lote
@@ -1079,7 +1102,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => setStockProduct(editingProduct)}
+                        // `productoEditado` y no `editingProduct`: ver su comentario
+                        // más arriba. Abrir el diálogo de ajuste con datos viejos (p.ej.
+                        // ingredients desactualizados) le haría calcular mal `enLotes`
+                        // en StockAdjustDialog.
+                        onClick={() => setStockProduct(productoEditado)}
                         disabled={submitting}
                         className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
                       >
