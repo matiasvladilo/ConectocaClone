@@ -179,14 +179,14 @@ async function registrarStockEvent(params: {
   productId: string;
   productName: string;
   type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
-  quantity: number;      // siempre positiva; el signo lo da el type
+  quantity: number;
   stockAfter: number;
   createdBy?: string | null;
   orderId?: string | null;
-}): Promise<void> {
-  if (!(params.quantity > 0)) return;
+}): Promise<string | null> {
+  if (!(params.quantity > 0)) return null;
 
-  const { error } = await supabaseAdmin.from('stock_events').insert({
+  const { data, error } = await supabaseAdmin.from('stock_events').insert({
     business_id: params.businessId,
     product_id: params.productId,
     product_name: params.productName,
@@ -195,11 +195,14 @@ async function registrarStockEvent(params: {
     stock_after: params.stockAfter,
     order_id: params.orderId ?? null,
     created_by: params.createdBy ?? null,
-  });
+  }).select('id').single();
 
   if (error) {
     console.error('Error registrando stock_event:', error);
+    return null;
   }
+
+  return data?.id ?? null;
 }
 
 function toOrderItem(r: any) {
