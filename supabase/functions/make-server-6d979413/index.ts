@@ -1893,7 +1893,8 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
           if ((item.order_item_lots || []).length > 0) {
             // Puede haber reactivado un lote más viejo y más barato que el
             // que estaba activo: recalcular el precio vigente.
-            await supabaseAdmin.rpc('recalcular_precio_producto', { p_product_id: product.id });
+            const { error: recalculoError } = await supabaseAdmin.rpc('recalcular_precio_producto', { p_product_id: product.id });
+            if (recalculoError) console.error('Error recalculando precio tras devolución:', recalculoError);
           }
         }
       }
