@@ -1,4 +1,4 @@
--- supabase/migrations/20261004_e_create_order_with_stock_fifo.sql
+-- supabase/migrations/20261004_e1_create_order_with_stock_fifo.sql
 -- create_order_with_stock() ahora, además del descuento atómico de stock que
 -- ya hacía, consume lotes FIFO para los productos de Distribuidora sin
 -- receta y reparte el detalle de consumo hacia order_item_lots.

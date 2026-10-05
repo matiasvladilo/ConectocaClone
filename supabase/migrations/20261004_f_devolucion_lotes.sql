@@ -7,7 +7,7 @@
 --
 -- Ambas son LANGUAGE sql (no plpgsql): no hay variables declaradas, así que
 -- la clase de bug de "columna ambigua con parámetro/variable" que afectó a
--- las Tasks 4 y 5 (ver 20261004_d_consumir_lotes_fifo.sql y
+-- las Tasks 4 y 5 (ver 20261004_d1_consumir_lotes_fifo.sql y
 -- 20261004_e3_create_order_with_stock_total_sync.sql) no aplica acá — se
 -- verificó de todas formas en vivo (ver task-8-report.md) que los nombres de
 -- parámetro (p_lot_id, p_cantidad, p_product_id) no colisionan con ninguna

@@ -1,4 +1,4 @@
--- supabase/migrations/20261004_d_consumir_lotes_fifo.sql
+-- supabase/migrations/20261004_d1_consumir_lotes_fifo.sql
 -- NOTE: The brief's original SQL had unqualified references to `costo_unitario` that
 -- collide with the RETURN TABLE output column, causing "column reference is ambiguous"
 -- at runtime. This version qualifies table columns via aliases (pl.*) to resolve the collision.
@@ -16,7 +16,6 @@ DECLARE
   v_ultimo_costo numeric;
   v_business_id uuid;
   v_lote_fantasma_id uuid;
-  v_nuevo_precio numeric;
 BEGIN
   IF p_cantidad <= 0 THEN
     RAISE EXCEPTION 'CANTIDAD_INVALIDA';
