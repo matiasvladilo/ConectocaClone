@@ -37,7 +37,11 @@ export function StockAdjustDialog({
     if (open) {
       setModo('sumar');
       setValor('');
-      setCosto('');
+      // Se sugiere el último costo conocido (el precio actual, que en un
+      // producto con lotes YA ES el costo del lote activo) para no obligar
+      // a retipear el mismo número cuando no cambió. Sigue siendo editable:
+      // si compró a otro precio, lo pisa.
+      setCosto(product && product.price > 0 ? String(product.price) : '');
     }
   }, [open, product?.id]);
 
@@ -125,6 +129,7 @@ export function StockAdjustDialog({
                 id="stock-costo"
                 value={costo}
                 onChange={(e) => setCosto(e.target.value)}
+                onFocus={(e) => e.target.select()}
                 placeholder="Ej: 1000"
                 inputMode="decimal"
                 className="pl-9"
@@ -132,7 +137,9 @@ export function StockAdjustDialog({
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              Este producto es de Distribuidora: el precio de venta se actualiza solo según el costo de cada compra.
+              {product && product.price > 0
+                ? 'Se sugiere el último costo conocido. Dejalo así si no cambió, o escribí el nuevo si compraste más caro o más barato.'
+                : 'Este producto es de Distribuidora: el precio de venta se actualiza solo según el costo de cada compra.'}
             </p>
           </div>
         )}
