@@ -6,6 +6,8 @@ import { Label } from './ui/label';
 import { BoxIcon, DollarSign } from 'lucide-react';
 import type { Product } from '../utils/api';
 
+// Se exporta porque el backend necesita saber con qué modo se hizo el ajuste
+// para clasificar el movimiento en el kardex (reposición vs corrección).
 export type ModoAjuste = 'sumar' | 'total';
 
 interface StockAdjustDialogProps {
@@ -33,6 +35,10 @@ export function StockAdjustDialog({
 
   const stockActual = product?.stock ?? 0;
 
+  // Resetear al abrir/cambiar de producto: arrastrar el valor de un producto
+  // anterior es la clase de error que deja stock mal cargado sin que se note.
+  // Con el costo es todavía más importante: un costo viejo de OTRO producto
+  // se vería como una sugerencia legítima y se confirmaría sin mirarlo.
   useEffect(() => {
     if (open) {
       setModo('sumar');
@@ -45,6 +51,8 @@ export function StockAdjustDialog({
     }
   }, [open, product?.id]);
 
+  // Se acepta el signo menos para poder restar en modo "sumar" (mermas o
+  // roturas) sin necesitar un modo aparte.
   const cantidad = /^-?\d+$/.test(valor.trim()) ? parseInt(valor.trim(), 10) : null;
   const hayNumero = cantidad !== null;
   const nuevoStock = !hayNumero ? null : modo === 'sumar' ? stockActual + cantidad : cantidad;
@@ -64,6 +72,7 @@ export function StockAdjustDialog({
     await onConfirm(nuevoStock, modo, requiereCosto ? Number(costo.trim()) : undefined);
   };
 
+  // No se puede cerrar mientras guarda, para no perder la operación a mitad.
   const handleOpenChange = (next: boolean) => {
     if (!next && saving) return;
     onOpenChange(next);
