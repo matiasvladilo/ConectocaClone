@@ -426,6 +426,11 @@ export const ordersAPI = {
       if (stockMatch) {
         throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
       }
+      // La RPC rechaza si el pedido no es del negocio del usuario o su rol no
+      // puede editar (mismo criterio que canEditOrder, pero del lado servidor).
+      if (error.message?.includes('NO_AUTORIZADO')) {
+        throw new Error('No tenés permiso para editar este pedido');
+      }
       throw new Error(`Error guardando pedido: ${error.message}`);
     }
   },
