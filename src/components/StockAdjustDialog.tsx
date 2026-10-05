@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { BoxIcon } from 'lucide-react';
+import { BoxIcon, DollarSign } from 'lucide-react';
 import type { Product } from '../utils/api';
 
 // Se exporta porque el backend necesita saber con qué modo se hizo el ajuste
@@ -14,7 +14,10 @@ interface StockAdjustDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   product: Product | null;
-  onConfirm: (nuevoStock: number, modo: ModoAjuste) => Promise<void>;
+  // true si el producto es de Distribuidora sin receta: pide costo al
+  // reponer. Lo calcula quien use el diálogo (tiene las categorías a mano).
+  enLotes?: boolean;
+  onConfirm: (nuevoStock: number, modo: ModoAjuste, costoUnitario?: number) => Promise<void>;
   saving?: boolean;
 }
 
@@ -22,33 +25,51 @@ export function StockAdjustDialog({
   open,
   onOpenChange,
   product,
+  enLotes = false,
   onConfirm,
   saving = false,
 }: StockAdjustDialogProps) {
   const [modo, setModo] = useState<ModoAjuste>('sumar');
   const [valor, setValor] = useState('');
+  const [costo, setCosto] = useState('');
 
   const stockActual = product?.stock ?? 0;
 
   // Resetear al abrir/cambiar de producto: arrastrar el valor de un producto
   // anterior es la clase de error que deja stock mal cargado sin que se note.
+  // Con el costo es todavía más importante: un costo viejo de OTRO producto
+  // se vería como una sugerencia legítima y se confirmaría sin mirarlo.
   useEffect(() => {
     if (open) {
       setModo('sumar');
       setValor('');
+      // Se sugiere el último costo conocido (el precio actual, que en un
+      // producto con lotes YA ES el costo del lote activo) para no obligar
+      // a retipear el mismo número cuando no cambió. Sigue siendo editable:
+      // si compró a otro precio, lo pisa.
+      setCosto(product && product.price > 0 ? String(product.price) : '');
     }
   }, [open, product?.id]);
 
-  // Se acepta el signo menos para poder restar en modo "sumar" (mermas).
+  // Se acepta el signo menos para poder restar en modo "sumar" (mermas o
+  // roturas) sin necesitar un modo aparte.
   const cantidad = /^-?\d+$/.test(valor.trim()) ? parseInt(valor.trim(), 10) : null;
   const hayNumero = cantidad !== null;
   const nuevoStock = !hayNumero ? null : modo === 'sumar' ? stockActual + cantidad : cantidad;
   const quedaNegativo = nuevoStock !== null && nuevoStock < 0;
-  const puedeConfirmar = hayNumero && !quedaNegativo && !saving;
+
+  // El costo solo es obligatorio cuando esto va a ser una reposición real
+  // (modo sumar, cantidad positiva) de un producto en alcance.
+  const esReposicion = modo === 'sumar' && hayNumero && cantidad! > 0;
+  const requiereCosto = enLotes && esReposicion;
+  const costoNumerico = costo.trim() === '' ? null : Number(costo.trim());
+  const costoValido = !requiereCosto || (costoNumerico !== null && !isNaN(costoNumerico) && costoNumerico >= 0);
+
+  const puedeConfirmar = hayNumero && !quedaNegativo && costoValido && !saving;
 
   const handleConfirmar = async () => {
     if (!puedeConfirmar || nuevoStock === null) return;
-    await onConfirm(nuevoStock, modo);
+    await onConfirm(nuevoStock, modo, requiereCosto ? Number(costo.trim()) : undefined);
   };
 
   // No se puede cerrar mientras guarda, para no perder la operación a mitad.
@@ -69,20 +90,10 @@ export function StockAdjustDialog({
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            variant={modo === 'sumar' ? 'default' : 'outline'}
-            onClick={() => setModo('sumar')}
-            disabled={saving}
-          >
+          <Button type="button" variant={modo === 'sumar' ? 'default' : 'outline'} onClick={() => setModo('sumar')} disabled={saving}>
             Sumar
           </Button>
-          <Button
-            type="button"
-            variant={modo === 'total' ? 'default' : 'outline'}
-            onClick={() => setModo('total')}
-            disabled={saving}
-          >
+          <Button type="button" variant={modo === 'total' ? 'default' : 'outline'} onClick={() => setModo('total')} disabled={saving}>
             Corregir total
           </Button>
         </div>
@@ -118,13 +129,37 @@ export function StockAdjustDialog({
           </p>
         </div>
 
+        {requiereCosto && (
+          <div>
+            <Label htmlFor="stock-costo">Costo de esta compra (por unidad)</Label>
+            <div className="relative">
+              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                id="stock-costo"
+                value={costo}
+                onChange={(e) => setCosto(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                placeholder="Ej: 1000"
+                inputMode="decimal"
+                className="pl-9"
+                disabled={saving}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {product && product.price > 0
+                ? 'Se sugiere el último costo conocido. Dejalo así si no cambió, o escribí el nuevo si compraste más caro o más barato.'
+                : 'Este producto es de Distribuidora: el precio de venta se actualiza solo según el costo de cada compra.'}
+            </p>
+          </div>
+        )}
+
         <div className="bg-blue-50 border border-blue-300 rounded-lg py-2 px-3 text-center">
           {!hayNumero ? (
             <span className="text-sm text-gray-500">Ingresá una cantidad</span>
           ) : quedaNegativo ? (
-            <span className="text-sm text-red-600">
-              El stock no puede quedar negativo
-            </span>
+            <span className="text-sm text-red-600">El stock no puede quedar negativo</span>
+          ) : requiereCosto && !costoValido ? (
+            <span className="text-sm text-red-600">Ingresá el costo de esta compra</span>
           ) : (
             <span className="text-blue-700">
               {modo === 'sumar' ? (

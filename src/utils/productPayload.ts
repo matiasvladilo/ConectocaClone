@@ -19,6 +19,10 @@ interface Params {
   formData: ProductFormData;
   editingProduct: Product | null;
   priceValue: number;
+  // true si el producto es de Distribuidora sin receta: el precio lo
+  // recalcula el backend según el lote activo, así que no se manda al
+  // editar (mismo criterio que ya se usa para `stock`).
+  enLotes: boolean;
 }
 
 /**
@@ -29,7 +33,7 @@ interface Params {
  * product_ingredients con lo que reciba. Mandar la copia que el diálogo tenía
  * al abrirse revierte cualquier cambio hecho mientras tanto.
  */
-export function construirPayloadProducto({ formData, editingProduct, priceValue }: Params) {
+export function construirPayloadProducto({ formData, editingProduct, priceValue, enLotes }: Params) {
   // El stock viaja SÓLO al crear, donde es el stock inicial y no hay nada que
   // pisar. Al editar nunca: el formulario de edición ya no tiene campo de stock
   // (se cambia por StockAdjustDialog, que confirma en el acto). Mandarlo desde
@@ -38,7 +42,7 @@ export function construirPayloadProducto({ formData, editingProduct, priceValue 
   return {
     name: formData.name.trim(),
     description: formData.description.trim(),
-    price: priceValue,
+    ...(editingProduct && enLotes ? {} : { price: priceValue }),
     minStock: formData.minStock.trim() === '' ? null : (parseInt(formData.minStock) || 0),
     unlimitedStock: formData.unlimitedStock,
     trackStock: !formData.unlimitedStock,

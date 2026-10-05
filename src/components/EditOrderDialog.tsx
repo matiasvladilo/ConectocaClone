@@ -178,79 +178,18 @@ export function EditOrderDialog({
         try {
             setIsSaving(true);
 
-            // 1. Calculate and Apply Stock Changes
-            const freshProducts = await productsAPI.getAll(accessToken);
-            const stockUpdates = [];
-
-            // Process all items in the NEW order
-            for (const item of orderItems) {
-                const product = freshProducts.find(p => p.id === item.productId);
-                if (!product) continue;
-
-                // Skip unlimited stock items (-1 or trackStock false)
-                if (product.stock === -1 || product.unlimitedStock || product.trackStock === false) continue;
-
-                const quantityDiff = item.quantity - item.originalQuantity;
-
-                // If quantity changed
-                if (quantityDiff !== 0) {
-                    const newStock = Math.max(0, product.stock - quantityDiff);
-
-                    if (newStock < 0 && product.stock !== -1 && !product.unlimitedStock && product.trackStock !== false) {
-                        toast.error(`No hay suficiente stock para ${product.name}`);
-                        setIsSaving(false);
-                        return;
-                    }
-
-                    stockUpdates.push(productsAPI.update(accessToken, product.id, { stock: newStock }));
-                }
-            }
-
-            // Process removed items
-            const originalProductIds = order.products?.map(p => p.productId) || [];
-            const currentProductIds = new Set(orderItems.map(i => i.productId));
-            const removedProductIds = originalProductIds.filter(id => !currentProductIds.has(id));
-
-            for (const removedId of removedProductIds) {
-                const originalItem = order.products?.find(p => p.productId === removedId);
-                if (!originalItem) continue;
-
-                const product = freshProducts.find(p => p.id === removedId);
-                if (!product) continue;
-
-                if (product.stock === -1 || product.unlimitedStock || product.trackStock === false) continue;
-
-                const newStock = product.stock + originalItem.quantity;
-                stockUpdates.push(productsAPI.update(accessToken, product.id, { stock: newStock }));
-            }
-
-            // Run stock updates
-            await Promise.all(stockUpdates);
-
-            // 2. Update the Order using RPC to bypass RLS
             const enrichedProducts = orderItems.map(item => {
-                // Try to find product definition in fresh list, or fallback to local products list
-                const productDef = freshProducts.find(p => p.id === item.productId) ||
-                    products.find(p => p.id === item.productId);
-
+                const productDef = products.find(p => p.id === item.productId);
                 const existingItem = order.products?.find(p => p.productId === item.productId);
-
-                // Log if product definition is missing (critical for debugging)
-                if (!productDef && !existingItem) {
-                    console.warn(`Producto ${item.name} (${item.productId}) no encontrado ni en freshProducts ni en existingItems`);
-                }
-
                 return {
                     productId: item.productId,
                     name: item.name,
                     quantity: item.quantity,
                     price: item.price,
-                    // Preserve or Assign production area info
                     productionAreaId: productDef?.productionAreaId || (existingItem as any)?.productionAreaId || null,
                     areaStatus: (existingItem as any)?.areaStatus || 'pending'
                 };
             });
-            console.log('Enriched Products to Save:', enrichedProducts);
 
             if (enrichedProducts.length === 0) {
                 console.error('Error Crítico: Intentando guardar pedido sin productos. Abortando.');
@@ -259,14 +198,14 @@ export function EditOrderDialog({
                 return;
             }
 
-            await ordersAPI.update(accessToken, order.id, {
+            await ordersAPI.updateWithStock(accessToken, order.id, {
                 products: enrichedProducts,
                 total: calculateTotal(),
                 notes,
                 deadline: deadline || order.deadline,
                 customerName: order.customerName,
-                deliveryAddress: order.deliveryAddress
-            } as any);
+                deliveryAddress: order.deliveryAddress,
+            });
 
             toast.success('Pedido actualizado correctamente');
             onOrderUpdated();
@@ -274,7 +213,7 @@ export function EditOrderDialog({
 
         } catch (error: any) {
             console.error('Error updating order:', error);
-            toast.error(`Error al actualizar: ${error.message || 'Verifica la conexión'}`);
+            toast.error(error.message || 'Error al actualizar: verifica la conexión');
         } finally {
             setIsSaving(false);
         }

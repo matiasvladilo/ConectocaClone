@@ -72,7 +72,7 @@ function toBusiness(r: any) {
   };
 }
 
-function toProduct(r: any) {
+function toProduct(r: any, lotsValue?: number) {
   const ingredients = (r.product_ingredients || []).map((pi: any) => ({
     ingredientId: pi.ingredient_id,
     quantity: pi.quantity,
@@ -98,6 +98,7 @@ function toProduct(r: any) {
     businessId: r.business_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    lotsValue,
   };
 }
 
@@ -179,14 +180,14 @@ async function registrarStockEvent(params: {
   productId: string;
   productName: string;
   type: 'despacho' | 'reposicion' | 'merma' | 'ajuste' | 'devolucion';
-  quantity: number;      // siempre positiva; el signo lo da el type
+  quantity: number;
   stockAfter: number;
   createdBy?: string | null;
   orderId?: string | null;
-}): Promise<void> {
-  if (!(params.quantity > 0)) return;
+}): Promise<string | null> {
+  if (!(params.quantity > 0)) return null;
 
-  const { error } = await supabaseAdmin.from('stock_events').insert({
+  const { data, error } = await supabaseAdmin.from('stock_events').insert({
     business_id: params.businessId,
     product_id: params.productId,
     product_name: params.productName,
@@ -195,11 +196,14 @@ async function registrarStockEvent(params: {
     stock_after: params.stockAfter,
     order_id: params.orderId ?? null,
     created_by: params.createdBy ?? null,
-  });
+  }).select('id').single();
 
   if (error) {
     console.error('Error registrando stock_event:', error);
+    return null;
   }
+
+  return data?.id ?? null;
 }
 
 function toOrderItem(r: any) {
@@ -745,8 +749,22 @@ app.get("/make-server-6d979413/products", async (c) => {
       .order('name', { ascending: true })
       .range(offset, offset + limit - 1);
 
+    // Agregado de lotes: una sola query extra para todo el negocio, no una
+    // por producto. Solo lotes con stock > 0 participan del valor.
+    const { data: filasLotes } = await supabaseAdmin
+      .from('product_lots')
+      .select('product_id, cantidad_restante, costo_unitario')
+      .eq('business_id', profile.businessId)
+      .gt('cantidad_restante', 0);
+
+    const lotsValueByProduct = new Map<string, number>();
+    for (const l of filasLotes || []) {
+      const previo = lotsValueByProduct.get(l.product_id) || 0;
+      lotsValueByProduct.set(l.product_id, previo + Number(l.cantidad_restante) * Number(l.costo_unitario));
+    }
+
     const total = count ?? 0;
-    const result = (products || []).map(toProduct);
+    const result = (products || []).map((p: any) => toProduct(p, lotsValueByProduct.get(p.id)));
 
     return c.json({
       data: result,
@@ -868,13 +886,41 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
     const updates = await c.req.json();
-    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock } = updates;
+    const { ingredients, imageUrl, image, name, description, price, stock, categoryId, productionAreaId, unlimitedStock, trackStock, allowDecimal, laborCost, sku, modo, minStock, costoUnitario } = updates;
 
     let skuNorm: string | undefined;
     if (sku !== undefined) {
       skuNorm = (sku || '').trim();
       const skuError = await checkDuplicateSku(profile.businessId, skuNorm, productId);
       if (skuError) return c.json({ error: skuError }, 400);
+    }
+
+    // Si esto va a ser una reposición de un producto en alcance, el costo es
+    // obligatorio — y hay que saberlo ANTES de escribir nada: si se valida
+    // después del update, un request sin costo deja stock movido sin lote.
+    //
+    // `enLotesParaReposicion` queda cacheada con la decisión de ESTE chequeo
+    // (contra el estado PREVIO al update) para que el bloque de abajo la
+    // reutilice en vez de volver a preguntarle a `producto_usa_lotes` después
+    // del update: el mismo request puede cambiar `categoryId`/`allowDecimal`
+    // Y hacer la reposición a la vez, y si para decidir qué RPC llamar se
+    // re-consultara el producto YA actualizado, un producto que ERA fuera de
+    // alcance (sin costo exigido) podría pasar a estar en alcance después
+    // del update y disparar `reponer_lote_fifo` con `costoUnitario` nunca
+    // validado — RPC que falla por el NOT NULL de `costo_unitario`, error que
+    // queda silenciado por el `console.error`, dejando stock incrementado sin
+    // lote correspondiente.
+    let enLotesParaReposicion = false;
+    if (stock !== undefined && modo === 'sumar' && existing.unlimited_stock !== true) {
+      const deltaPrevisto = parseInt(stock) - Number(existing.stock);
+      if (deltaPrevisto > 0) {
+        const { data: enLotes } = await supabaseAdmin.rpc('producto_usa_lotes', { p_product_id: productId });
+        enLotesParaReposicion = enLotes === true;
+        const costoValido = costoUnitario !== undefined && costoUnitario !== null && !isNaN(Number(costoUnitario)) && Number(costoUnitario) >= 0;
+        if (enLotes && !costoValido) {
+          return c.json({ error: 'Costo requerido para reponer stock de un producto de Distribuidora' }, 400);
+        }
+      }
     }
 
     const updateData: any = {};
@@ -968,7 +1014,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
         // registrarStockEvent no lanza si el INSERT falla: solo loguea. El
         // evento es historia, no parte de la operación, así que un kardex
         // incompleto es mejor que un ajuste de stock que no se guarda.
-        await registrarStockEvent({
+        const eventId = await registrarStockEvent({
           businessId: profile.businessId,
           productId,
           productName: updated.name,
@@ -977,6 +1023,67 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
           stockAfter: stockNuevo,
           createdBy: userId,
         });
+
+        if (tipo === 'reposicion') {
+          // Usa la decisión CACHEADA de más arriba (contra el estado PREVIO
+          // al update), no una nueva consulta a `producto_usa_lotes`: ver el
+          // comentario junto a `enLotesParaReposicion` sobre por qué
+          // re-consultar acá sería un TOCTOU entre el chequeo de costo y la
+          // creación del lote.
+          if (enLotesParaReposicion) {
+            const { error: loteError } = await supabaseAdmin.rpc('reponer_lote_fifo', {
+              p_product_id: productId,
+              p_cantidad: Math.abs(delta),
+              p_costo_unitario: Number(costoUnitario),
+              p_origen: 'reposicion',
+              p_stock_event_id: eventId,
+            });
+            if (loteError) console.error('Error creando lote de reposición:', loteError);
+          }
+        } else {
+          // merma y ajuste nunca dependen de un costo validado de antemano,
+          // así que no hay riesgo de TOCTOU en re-consultar el alcance acá
+          // contra el producto YA actualizado.
+          const { data: enLotes } = await supabaseAdmin.rpc('producto_usa_lotes', { p_product_id: productId });
+
+          if (enLotes) {
+            if (tipo === 'merma') {
+              const { error: loteError } = await supabaseAdmin.rpc('consumir_lotes_fifo', {
+                p_product_id: productId,
+                p_cantidad: Math.abs(delta),
+              });
+              if (loteError) console.error('Error consumiendo lote por merma:', loteError);
+            } else if (delta < 0) {
+              // Ajuste a la baja (corrección de conteo): FIFO, igual que una merma.
+              const { error: loteError } = await supabaseAdmin.rpc('consumir_lotes_fifo', {
+                p_product_id: productId,
+                p_cantidad: Math.abs(delta),
+              });
+              if (loteError) console.error('Error consumiendo lote por ajuste:', loteError);
+            } else {
+              // Ajuste al alza: no hay compra registrada para este stock que
+              // "apareció". Se crea un lote fantasma al costo del lote más
+              // reciente conocido, o al price actual si todavía no hay ninguno.
+              const { data: ultimoLote } = await supabaseAdmin
+                .from('product_lots')
+                .select('costo_unitario')
+                .eq('product_id', productId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              const costoFantasma = ultimoLote?.costo_unitario ?? Number(updated.price);
+
+              const { error: loteError } = await supabaseAdmin.rpc('reponer_lote_fifo', {
+                p_product_id: productId,
+                p_cantidad: Math.abs(delta),
+                p_costo_unitario: costoFantasma,
+                p_origen: 'ajuste',
+                p_stock_event_id: eventId,
+              });
+              if (loteError) console.error('Error creando lote fantasma de ajuste:', loteError);
+            }
+          }
+        }
       }
     }
 
@@ -1747,7 +1854,7 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
 
     const { data: order } = await supabaseAdmin
       .from('orders')
-      .select('*, order_items(product_id, quantity)')
+      .select('*, order_items(id, product_id, quantity, order_item_lots(lot_id, cantidad))')
       .eq('id', orderId)
       .maybeSingle();
 
@@ -1786,6 +1893,24 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
             createdBy: userId,
             orderId,
           });
+
+          // Devolver cada unidad al lote exacto del que salió — aunque ese
+          // lote ya esté en 0, se reabre. El FIFO lo vuelve a consumir
+          // primero la próxima vez, así que no hace falta lógica extra.
+          for (const ol of (item.order_item_lots || [])) {
+            const { error: loteError } = await supabaseAdmin.rpc('devolver_a_lote', {
+              p_lot_id: ol.lot_id,
+              p_cantidad: ol.cantidad,
+            });
+            if (loteError) console.error('Error devolviendo unidades al lote:', loteError);
+          }
+
+          if ((item.order_item_lots || []).length > 0) {
+            // Puede haber reactivado un lote más viejo y más barato que el
+            // que estaba activo: recalcular el precio vigente.
+            const { error: recalculoError } = await supabaseAdmin.rpc('recalcular_precio_producto', { p_product_id: product.id });
+            if (recalculoError) console.error('Error recalculando precio tras devolución:', recalculoError);
+          }
         }
       }
     }

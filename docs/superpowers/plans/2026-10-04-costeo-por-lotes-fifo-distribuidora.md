@@ -10,8 +10,9 @@
 
 ## Global Constraints
 
-- Solo entran en costeo por lotes los productos **sin receta** (`product_ingredients` vacío) que pertenecen a la categoría "Distribuidora" **o una subcategoría directa suya** — mismo criterio (un solo nivel, no recursivo) que ya usa `idsDeCategoriaConHijas` en `src/utils/categoryTree.ts`.
-- El consumo es estrictamente FIFO: se agota primero el lote con `created_at` más antiguo que tenga `cantidad_restante > 0`.
+- Solo entran en costeo por lotes los productos **sin receta** (`product_ingredients` vacío), **sin `allow_decimal`** (los lotes son en unidades enteras — `products.stock` ya es `integer`, no `numeric`, y este plan no diseña costeo fraccionario), que pertenecen a la categoría "Distribuidora" **o una subcategoría directa suya** — mismo criterio (un solo nivel, no recursivo) que ya usa `idsDeCategoriaConHijas` en `src/utils/categoryTree.ts`. (La exclusión de `allow_decimal` se agregó durante la implementación de la Task 5, tras encontrar en vivo que `qty::integer` rompe pedidos fraccionarios — ver `producto_usa_lotes` en la Task 2, ya actualizada.)
+- El consumo es estrictamente FIFO: se agota primero el lote con `created_at` más antiguo que tenga `cantidad_restante > 0`. `product_lots.created_at` usa `clock_timestamp()` (no `now()`) como default — `now()` es hora de inicio de transacción, así que dos lotes creados en la misma transacción quedarían con el mismo timestamp y romperían el orden FIFO (encontrado en vivo durante la Task 4).
+- `orders.total` se recalcula siempre desde `Σ order_items.price × quantity` al final de `create_order_with_stock` (Task 5) y `update_order_with_stock` (Task 17) — nunca se confía en el `total` que mandó el cliente, porque una línea que cruza lotes reescribe su `price` al promedio ponderado y el total tiene que reflejar eso (encontrado en vivo durante la Task 5).
 - `products.price`, para estos productos, deja de ser editable a mano: lo recalculan las funciones de Postgres.
 - Toda función nueva `SECURITY DEFINER` lleva `SET search_path = public` (convención ya establecida en `2026-09-07-stock-una-sola-via-design.md`, aunque las funciones viejas del repo no la tengan).
 - No hay framework de tests de componentes. `npm test` corre `node --test src/utils/*.test.ts`. Todo lo demás (Edge Function, SQL, componentes React) se verifica manualmente con evidencia (consulta SQL directa o navegador).
@@ -2035,6 +2036,15 @@ BEGIN
         WHERE id = v_item_id;
     END IF;
   END LOOP;
+
+  -- Recalcular el total desde las líneas reales, no desde lo que mandó el
+  -- cliente: si alguna línea cruzó lotes, su price ya quedó reescrito al
+  -- promedio ponderado exacto más arriba, y el total tiene que reflejar eso
+  -- (mismo motivo por el que create_order_with_stock, Task 5, lo hace al
+  -- final — sin esto el pedido queda cobrando el total viejo).
+  UPDATE orders SET total = (
+    SELECT COALESCE(SUM(price * quantity), 0) FROM order_items WHERE order_id = v_order_id
+  ) WHERE id = v_order_id;
 END;
 $function$;
 ```

@@ -31,6 +31,7 @@ test('nunca incluye ingredients', () => {
     formData: formBase,
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('ingredients' in payload, false);
 });
@@ -40,6 +41,7 @@ test('recorta los campos de texto', () => {
     formData: formBase,
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal(payload.name, 'Queque Vainilla 500 grs');
   assert.equal(payload.description, 'rico');
@@ -52,6 +54,7 @@ test('omite stock cuando no se tocó', () => {
     formData: formBase,
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('stock' in payload, false);
 });
@@ -64,6 +67,7 @@ test('al editar, un stock distinto en el formulario tampoco se incluye', () => {
     formData: { ...formBase, stock: '25' },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('stock' in payload, false);
 });
@@ -75,6 +79,7 @@ test('al editar, un stock decimal tampoco se incluye', () => {
     formData: { ...formBase, stock: '9.5', allowDecimal: true },
     editingProduct: { ...productoBase, stock: 9.5 },
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('stock' in payload, false);
 });
@@ -84,6 +89,7 @@ test('al crear siempre manda stock', () => {
     formData: formBase,
     editingProduct: null,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal(payload.stock, 10);
 });
@@ -93,6 +99,7 @@ test('al editar, marcar ilimitado manda trackStock false y sigue sin incluir sto
     formData: { ...formBase, unlimitedStock: true },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('stock' in payload, false);
   assert.equal(payload.trackStock, false);
@@ -104,6 +111,7 @@ test('minStock vacío viaja como null', () => {
     formData: { ...formBase, minStock: '   ' },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal(payload.minStock, null);
 });
@@ -113,6 +121,7 @@ test('categoría vacía cae en General', () => {
     formData: { ...formBase, category: '   ' },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal(payload.category, 'General');
 });
@@ -122,6 +131,7 @@ test('al EDITAR, el payload nunca incluye stock', () => {
     formData: { ...formBase, stock: '999', unlimitedStock: true },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal('stock' in payload, false);
 });
@@ -131,6 +141,7 @@ test('al CREAR, el payload incluye stock', () => {
     formData: { ...formBase, stock: '40' },
     editingProduct: null,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal((payload as { stock: number }).stock, 40);
 });
@@ -140,6 +151,7 @@ test('al CREAR un producto ilimitado, el stock viaja en 0', () => {
     formData: { ...formBase, stock: '40', unlimitedStock: true },
     editingProduct: null,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal((payload as { stock: number }).stock, 0);
 });
@@ -154,6 +166,27 @@ test('categoryId vacío viaja como undefined (no borra la categoría)', () => {
     formData: { ...formBase, categoryId: '' },
     editingProduct: productoBase,
     priceValue: 2500,
+    enLotes: false,
   });
   assert.equal(payload.categoryId, undefined);
+});
+
+test('al editar un producto en alcance de lotes, no manda price', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, price: '9999' },
+    editingProduct: productoBase,
+    priceValue: 9999,
+    enLotes: true,
+  });
+  assert.equal('price' in payload, false);
+});
+
+test('al editar un producto fuera de alcance, sigue mandando price', () => {
+  const payload = construirPayloadProducto({
+    formData: { ...formBase, price: '500' },
+    editingProduct: productoBase,
+    priceValue: 500,
+    enLotes: false,
+  });
+  assert.equal(payload.price, 500);
 });

@@ -56,6 +56,10 @@ export interface Product {
   productionAreaId?: string; // New: ID of production area assigned to this product
   ingredients?: ProductIngredient[]; // New: Recipe ingredients for this product
   laborCost?: number; // Costo de mano de obra (opcional), separado de los ingredientes
+  // Suma de cantidad_restante × costo_unitario de los lotes vivos de este
+  // producto. Solo viene poblado en GET /products (lista); undefined si el
+  // producto no tiene lotes (fuera de alcance, o en alcance sin stock).
+  lotsValue?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -383,6 +387,54 @@ export const ordersAPI = {
     return response?.data || response;
   },
 
+  updateWithStock: async (
+    token: string,
+    orderId: string,
+    updates: {
+      products: Array<{
+        productId: string;
+        name: string;
+        quantity: number;
+        price: number;
+        productionAreaId?: string | null;
+        areaStatus?: string;
+      }>;
+      total: number;
+      notes?: string;
+      deadline?: string;
+      customerName?: string;
+      deliveryAddress?: string;
+    }
+  ): Promise<void> => {
+    // Igual patrón que ordersAPI.create: la reconciliación de stock/lotes y el
+    // reemplazo de order_items pasan en el servidor, en una sola transacción
+    // (RPC update_order_with_stock) — no se calcula ningún delta acá.
+    const supabase = createClient(
+      `https://${projectId}.supabase.co`,
+      publicAnonKey,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+
+    const { error } = await supabase.rpc('update_order_with_stock', {
+      p_order_id: orderId,
+      new_data: updates,
+    });
+
+    if (error) {
+      console.error('RPC Error updating order:', error);
+      const stockMatch = (error.message || '').match(/STOCK_INSUFICIENTE:(.+)/);
+      if (stockMatch) {
+        throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
+      }
+      // La RPC rechaza si el pedido no es del negocio del usuario o su rol no
+      // puede editar (mismo criterio que canEditOrder, pero del lado servidor).
+      if (error.message?.includes('NO_AUTORIZADO')) {
+        throw new Error('No tenés permiso para editar este pedido');
+      }
+      throw new Error(`Error guardando pedido: ${error.message}`);
+    }
+  },
+
   updateStatus: async (
     token: string,
     orderId: string,
@@ -562,9 +614,11 @@ export const productsAPI = {
     return response?.data || response;
   },
 
-  // `modo` no es un campo del producto: es metadato del ajuste que el backend
-  // usa para clasificar el movimiento en el kardex. No se persiste en products.
-  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }>; modo?: 'sumar' | 'total' }): Promise<Product> => {
+  // `modo` y `costoUnitario` no son campos del producto: son metadato del
+  // ajuste que el backend usa para clasificar el movimiento en el kardex y
+  // para crear el lote cuando corresponde. No se persisten tal cual en
+  // products (costoUnitario pasa a ser el costo del lote nuevo).
+  update: async (token: string, productId: string, updates: Partial<Product> & { ingredients?: Array<{ ingredientId: string; quantity: number }>; modo?: 'sumar' | 'total'; costoUnitario?: number }): Promise<Product> => {
     const response = await fetchAPI(`/products/${productId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
