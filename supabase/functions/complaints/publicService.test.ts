@@ -74,7 +74,7 @@ function publicServiceForTest({
   logger,
 }: {
   repository: ComplaintRepository;
-  mailer?: { send(input: { from: string; to: string; subject: string; html: string; text: string }): Promise<void> };
+  mailer?: { send(input: { from: string; to: string; subject: string; html: string; text: string }): Promise<void> } | null;
   logger?: { error(event: string, context: Record<string, unknown>): void };
 }) {
   return createPublicComplaintService({
@@ -440,4 +440,25 @@ test('reporta fallos al registrar correo pero conserva el caso', async () => {
     'complaint_email_result_update_failed',
   ]);
   assert.equal(JSON.stringify(telemetry).includes('cliente@mail.cl'), false);
+});
+
+test('sin correo configurado guarda el caso y deja ambos correos sin enviar', async () => {
+  const events: string[] = [];
+  const repository = baseRepository({
+    insertComplaint: async () => {
+      events.push('insert');
+      return storedComplaint;
+    },
+    updateEmailResult: async (_id, kind) => {
+      events.push(`result:${kind}`);
+    },
+  });
+  const service = publicServiceForTest({ repository, mailer: null });
+
+  const result = await service.submit(submissionForTest());
+
+  assert.deepEqual(events, ['insert']);
+  assert.equal(result.caseNumber, storedComplaint.caseNumber);
+  assert.equal(result.confirmationEmailStatus, 'pending');
+  assert.equal(result.notificationEmailStatus, 'pending');
 });

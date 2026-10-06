@@ -30,8 +30,8 @@ export interface PublicComplaintSubmission {
 export interface PublicComplaintResult {
   caseNumber: string;
   receivedAt: string;
-  confirmationEmailStatus: 'sent' | 'failed';
-  notificationEmailStatus: 'sent' | 'failed';
+  confirmationEmailStatus: 'pending' | 'sent' | 'failed';
+  notificationEmailStatus: 'pending' | 'sent' | 'failed';
 }
 
 export interface PublicBranchesResult {
@@ -66,7 +66,9 @@ interface PublicComplaintServiceOptions {
   recipientEmail: string;
   fromEmail: string;
   repository: ComplaintRepository;
-  mailer: ComplaintMailer;
+  // null mientras el correo no está configurado: el caso se guarda y los
+  // correos quedan en 'pending' sin intentarse.
+  mailer: ComplaintMailer | null;
   logger?: ComplaintTelemetry;
   now?: () => Date;
   uuid?: () => string;
@@ -125,7 +127,8 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
     kind: 'confirmation' | 'notification',
     message: { subject: string; html: string; text: string },
     to: string,
-  ): Promise<'sent' | 'failed'> {
+  ): Promise<'pending' | 'sent' | 'failed'> {
+    if (!options.mailer) return 'pending';
     let result: EmailResult;
     try {
       await options.mailer.send({ from: options.fromEmail, to, ...message });

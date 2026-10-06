@@ -20,7 +20,9 @@ El proyecto Supabase vivo es **conectocadev** (`xxmiujtywnnlqmekakzq`), el que t
 
 ### Secretos de la Edge Function
 
-La función lee todos estos valores **al arrancar**. Si falta uno, cada request —incluido el formulario público— responde 500 hasta que se configure y se vuelva a desplegar.
+La función lee estos valores **al arrancar**. `COMPLAINTS_BUSINESS_ID`, `APP_PUBLIC_URL` y `COMPLAINTS_RATE_LIMIT_SECRET` son obligatorios: si falta uno, cada request —incluido el formulario público— responde 500.
+
+Los tres de correo (`COMPLAINTS_RECIPIENT_EMAIL`, `COMPLAINTS_FROM_EMAIL`, `RESEND_API_KEY`) son opcionales y van juntos. Mientras falte cualquiera, los reclamos se guardan y aparecen en el panel, pero no se envía ningún correo: ambos quedan como **Sin enviar** (`pending`). Al activar el correo, solo los casos nuevos lo reciben; los anteriores siguen sin enviar y no tienen botón de reintento.
 
 | Secreto | Valor |
 |---|---|
@@ -33,7 +35,7 @@ La función lee todos estos valores **al arrancar**. Si falta uno, cada request 
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase.
 
-`APP_PUBLIC_URL` define dos cosas: el enlace al caso dentro del correo central y el único origen web aceptado por CORS (además de `localhost`/`127.0.0.1` en los puertos 3000 y 5173).
+`APP_PUBLIC_URL` define dos cosas: el enlace al caso dentro del correo central y el único origen web aceptado por CORS (además de `localhost`/`127.0.0.1` en los puertos 3000, 3010 y 5173).
 
 ### Variable del frontend
 

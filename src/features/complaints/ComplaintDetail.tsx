@@ -57,7 +57,7 @@ function originLabel(complaint: ComplaintDetailData): string {
 }
 
 function emailStatusLabel(status: ComplaintEmailStatus): string {
-  if (status === 'pending') return 'Pendiente';
+  if (status === 'pending') return 'Sin enviar';
   if (status === 'sending') return 'Enviando';
   if (status === 'sent') return 'Enviado';
   return 'Falló';
@@ -68,7 +68,9 @@ function EmailStatusBadge({ status }: { status: ComplaintEmailStatus }) {
     ? 'border-green-200 bg-green-50 text-green-800'
     : status === 'failed'
       ? 'border-red-200 bg-red-50 text-red-800'
-      : 'border-amber-200 bg-amber-50 text-amber-900';
+      : status === 'sending'
+        ? 'border-amber-200 bg-amber-50 text-amber-900'
+        : 'border-gray-200 bg-gray-50 text-gray-600';
   return <Badge variant="outline" className={styles}>{emailStatusLabel(status)}</Badge>;
 }
 

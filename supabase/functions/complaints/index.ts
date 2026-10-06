@@ -10,15 +10,19 @@ import {
   parseStatus,
   type AdminContext,
 } from './adminService.ts';
-import { createResendMailer } from './mailer.ts';
+import { createResendMailer, type ComplaintMailer } from './mailer.ts';
 import { createPublicComplaintService, PublicComplaintError } from './publicService.ts';
 import {
   ComplaintNotFoundError,
   createSupabaseComplaintRepository,
 } from './repository.ts';
 
+function optionalEnv(name: string): string | null {
+  return Deno.env.get(name)?.trim() || null;
+}
+
 function requiredEnv(name: string): string {
-  const value = Deno.env.get(name)?.trim();
+  const value = optionalEnv(name);
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
@@ -27,9 +31,12 @@ const supabaseUrl = requiredEnv('SUPABASE_URL');
 const anonKey = requiredEnv('SUPABASE_ANON_KEY');
 const serviceRoleKey = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
 const businessId = requiredEnv('COMPLAINTS_BUSINESS_ID');
-const recipientEmail = requiredEnv('COMPLAINTS_RECIPIENT_EMAIL');
-const fromEmail = requiredEnv('COMPLAINTS_FROM_EMAIL');
-const resendApiKey = requiredEnv('RESEND_API_KEY');
+// El correo es opcional: sin estos tres valores los reclamos igual se guardan
+// y se ven en el panel, solo que no se envía ningún aviso.
+const recipientEmail = optionalEnv('COMPLAINTS_RECIPIENT_EMAIL');
+const fromEmail = optionalEnv('COMPLAINTS_FROM_EMAIL');
+const resendApiKey = optionalEnv('RESEND_API_KEY');
+const emailEnabled = Boolean(recipientEmail && fromEmail && resendApiKey);
 const appPublicUrl = requiredEnv('APP_PUBLIC_URL');
 const rateLimitSecret = requiredEnv('COMPLAINTS_RATE_LIMIT_SECRET');
 
@@ -40,21 +47,26 @@ const supabaseAuth = createClient(supabaseUrl, anonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 const repository = createSupabaseComplaintRepository(supabase);
-const mailer = createResendMailer({ apiKey: resendApiKey });
+const mailer = emailEnabled ? createResendMailer({ apiKey: resendApiKey! }) : null;
+const disabledMailer: ComplaintMailer = {
+  send: async () => {
+    throw new Error('El correo de reclamos no está configurado');
+  },
+};
 const publicService = createPublicComplaintService({
   businessId,
   appPublicUrl,
   rateLimitSecret,
-  recipientEmail,
-  fromEmail,
+  recipientEmail: recipientEmail ?? '',
+  fromEmail: fromEmail ?? '',
   repository,
   mailer,
 });
 const adminService = createAdminComplaintService({
   repository,
-  mailer,
-  fromEmail,
-  recipientEmail,
+  mailer: mailer ?? disabledMailer,
+  fromEmail: fromEmail ?? '',
+  recipientEmail: recipientEmail ?? '',
   appPublicUrl,
 });
 
@@ -68,6 +80,8 @@ const allowedOrigins = new Set([
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:3010',
+  'http://127.0.0.1:3010',
 ]);
 
 app.use('/complaints/*', cors({
