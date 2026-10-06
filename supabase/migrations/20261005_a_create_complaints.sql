@@ -2,7 +2,7 @@
 -- El acceso a estas tablas y al bucket queda exclusivamente en la Edge Function
 -- de reclamos, que usa service_role.
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
 
 CREATE TABLE public.complaints (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -99,11 +99,16 @@ CREATE INDEX complaints_business_origin_created_at_idx
 CREATE INDEX complaints_business_branch_created_at_idx
   ON public.complaints (business_id, branch_profile_id, created_at DESC);
 
-CREATE INDEX complaints_search_idx
-  ON public.complaints
-  USING gin (
-    lower(concat_ws(' ', case_number, customer_email, customer_name, description)) gin_trgm_ops
-  );
+-- Un índice por columna porque la bandeja busca con ilike en cada una por
+-- separado. (concat_ws no es IMMUTABLE y no puede usarse en un índice.)
+CREATE INDEX complaints_case_number_trgm_idx
+  ON public.complaints USING gin (case_number extensions.gin_trgm_ops);
+CREATE INDEX complaints_customer_email_trgm_idx
+  ON public.complaints USING gin (customer_email extensions.gin_trgm_ops);
+CREATE INDEX complaints_customer_name_trgm_idx
+  ON public.complaints USING gin (customer_name extensions.gin_trgm_ops);
+CREATE INDEX complaints_description_trgm_idx
+  ON public.complaints USING gin (description extensions.gin_trgm_ops);
 
 ALTER TABLE public.complaints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.complaint_attachments ENABLE ROW LEVEL SECURITY;
