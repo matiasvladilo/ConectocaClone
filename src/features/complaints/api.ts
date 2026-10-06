@@ -1,5 +1,6 @@
 import { publicAnonKey, projectId } from '../../utils/supabase/info';
 import { createClient } from '../../utils/supabase/client';
+import { readComplaintResponse } from './apiError';
 import type {
   ComplaintDetail,
   ComplaintDraft,
@@ -9,6 +10,8 @@ import type {
   EmailStatuses,
   PublicComplaintConfig,
 } from './types';
+
+export { ComplaintApiError } from './apiError';
 
 const COMPLAINTS_API_URL = `https://${projectId}.supabase.co/functions/v1/complaints`;
 
@@ -30,18 +33,6 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
-  if (response.ok) return response.json() as Promise<T>;
-
-  const payload = await response.json().catch(() => null) as { message?: unknown; error?: unknown } | null;
-  const message = typeof payload?.message === 'string'
-    ? payload.message
-    : typeof payload?.error === 'string'
-      ? payload.error
-      : `No pudimos procesar la solicitud (${response.status}).`;
-  throw new Error(message);
-}
-
 async function publicRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${COMPLAINTS_API_URL}${path}`, {
     ...options,
@@ -50,7 +41,7 @@ async function publicRequest<T>(path: string, options: RequestInit = {}): Promis
       ...(options.headers ?? {}),
     },
   });
-  return readResponse<T>(response);
+  return readComplaintResponse<T>(response);
 }
 
 async function adminRequest<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
@@ -68,7 +59,7 @@ async function adminRequest<T>(path: string, token: string, options: RequestInit
     const refreshedToken = await refreshAccessToken();
     if (refreshedToken) response = await request(refreshedToken);
   }
-  return readResponse<T>(response);
+  return readComplaintResponse<T>(response);
 }
 
 function publicComplaintForm(input: ComplaintDraft, formToken: string): FormData {

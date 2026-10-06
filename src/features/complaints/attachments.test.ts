@@ -36,3 +36,24 @@ test('formatFileSize presents bytes and megabytes without exposing raw byte coun
   assert.equal(formatFileSize(800), '800 B');
   assert.equal(formatFileSize(1_572_864), '1,5 MB');
 });
+
+test('selectComplaintFiles rejects invalid MIME types and oversized files before they reach previews', async () => {
+  const attachments = await import('./attachments.ts') as typeof import('./attachments.ts') & {
+    selectComplaintFiles?: (current: File[], selected: Iterable<File>) => {
+      files: File[];
+      errors: string[];
+    };
+  };
+
+  const result = attachments.selectComplaintFiles!([], [
+    makeFile('nota.txt', 'text/plain'),
+    makeFile('grande.pdf', 'application/pdf', 10 * 1024 * 1024 + 1),
+    makeFile('foto.jpg'),
+  ]);
+
+  assert.deepEqual(result.files.map(file => file.name), ['foto.jpg']);
+  assert.deepEqual(result.errors, [
+    'Solo puedes adjuntar archivos JPG, PNG, WebP o PDF.',
+    'Cada archivo debe pesar como máximo 10 MB.',
+  ]);
+});

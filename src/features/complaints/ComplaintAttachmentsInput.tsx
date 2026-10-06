@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, FileText, Image as ImageIcon, Paperclip, Trash2, Upload } from 'lucide-react';
 
-import { appendComplaintFiles, formatFileSize } from './attachments';
+import { formatFileSize, selectComplaintFiles } from './attachments';
 
 interface ComplaintAttachmentsInputProps {
   files: File[];
@@ -43,19 +43,24 @@ export function ComplaintAttachmentsInput({
 }: ComplaintAttachmentsInputProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [limitError, setLimitError] = useState<string | null>(null);
-  const visibleErrors = limitError ? [limitError, ...errors] : errors;
+  const [selectionErrors, setSelectionErrors] = useState<string[]>([]);
+  const visibleErrors = [...selectionErrors, ...errors];
+  const errorDescriptionId = visibleErrors.length > 0 ? 'complaint-files-error' : undefined;
+  const describedBy = [
+    'complaint-files-help',
+    errorDescriptionId,
+  ].filter(Boolean).join(' ');
 
   function addFiles(selectedFiles: FileList | null, input: HTMLInputElement) {
     if (!selectedFiles) return;
-    const result = appendComplaintFiles(files, selectedFiles);
-    setLimitError(result.rejectedCount > 0 ? 'Puedes adjuntar hasta cinco archivos.' : null);
-    if (result.files !== files) onChange(result.files);
+    const result = selectComplaintFiles(files, selectedFiles);
+    setSelectionErrors(result.errors);
+    if (result.files.length > files.length) onChange(result.files);
     input.value = '';
   }
 
   function removeFile(index: number) {
-    setLimitError(null);
+    setSelectionErrors([]);
     onChange(files.filter((_, fileIndex) => fileIndex !== index));
   }
 
@@ -77,7 +82,8 @@ export function ComplaintAttachmentsInput({
         accept={ACCEPTED_FILES}
         multiple
         className="sr-only"
-        aria-describedby="complaint-files-help"
+        aria-invalid={visibleErrors.length > 0 || undefined}
+        aria-describedby={describedBy}
         disabled={disabled || files.length >= 5}
         onChange={event => addFiles(event.currentTarget.files, event.currentTarget)}
       />
@@ -87,7 +93,8 @@ export function ComplaintAttachmentsInput({
         accept="image/jpeg,image/png,image/webp"
         capture="environment"
         className="sr-only"
-        aria-describedby="complaint-files-help"
+        aria-invalid={visibleErrors.length > 0 || undefined}
+        aria-describedby={describedBy}
         disabled={disabled || files.length >= 5}
         onChange={event => addFiles(event.currentTarget.files, event.currentTarget)}
       />
@@ -140,7 +147,7 @@ export function ComplaintAttachmentsInput({
       )}
 
       {visibleErrors.length > 0 && (
-        <ul className="space-y-1 text-sm text-red-700" role="alert">
+        <ul id="complaint-files-error" className="space-y-1 text-sm text-red-700" role="alert">
           {visibleErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
         </ul>
       )}

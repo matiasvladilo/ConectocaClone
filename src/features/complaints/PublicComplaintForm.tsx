@@ -17,6 +17,8 @@ import { Toaster, toast } from 'sonner';
 
 import { complaintsAPI } from './api';
 import { ComplaintAttachmentsInput } from './ComplaintAttachmentsInput';
+import { firstInvalidComplaintField } from './formAccessibility';
+import { getPublicComplaintRecovery } from './submissionRecovery';
 import type {
   ComplaintDraft,
   ComplaintOrigin,
@@ -80,14 +82,20 @@ function ComplaintLoadError({ onRetry }: { onRetry: () => void }) {
 }
 
 function ComplaintSuccess({ result }: { result: { caseNumber: string; receivedAt: string } }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   return (
     <main className="grid min-h-screen place-items-center bg-gradient-to-b from-blue-700 to-blue-900 p-6">
-      <section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
+      <section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl" role="status" aria-live="polite" aria-atomic="true">
         <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-green-100 text-green-700">
           <CheckCircle2 className="h-11 w-11" aria-hidden="true" />
         </span>
         <p className="mt-6 text-sm font-bold uppercase tracking-widest text-blue-700">Envío confirmado</p>
-        <h1 className="mt-2 text-3xl font-bold text-gray-900">Recibimos tu reclamo</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-3xl font-bold text-gray-900">Recibimos tu reclamo</h1>
         <p className="mt-6 text-sm text-gray-500">Tu número de caso es</p>
         <p className="mt-1 break-words text-3xl font-black tracking-tight text-blue-900">{result.caseNumber}</p>
         <p className="mt-5 leading-7 text-gray-600">
@@ -104,24 +112,32 @@ export function PublicComplaintForm() {
   const [draft, setDraft] = useState<ComplaintDraft>(EMPTY_COMPLAINT_DRAFT);
   const [errors, setErrors] = useState<ComplaintValidationErrors>({});
   const [result, setResult] = useState<{ caseNumber: string; receivedAt: string } | null>(null);
+  const [submissionMessage, setSubmissionMessage] = useState<string | null>(null);
   const submissionLocked = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const errorSummaryRef = useRef<HTMLElement>(null);
 
-  const loadConfig = useCallback(async () => {
-    setState('loading');
+  const refreshConfig = useCallback(async ({ clearBranch = false }: { clearBranch?: boolean } = {}) => {
     try {
       const nextConfig = await complaintsAPI.getPublicConfig();
       setConfig(nextConfig);
       setDraft(current => {
+        if (clearBranch) return { ...current, branchId: '' };
         if (!current.branchId || nextConfig.branches.some(branch => branch.id === current.branchId)) {
           return current;
         }
         return { ...current, branchId: '' };
       });
-      setState('ready');
+      return true;
     } catch {
-      setState('error');
+      return false;
     }
   }, []);
+
+  const loadConfig = useCallback(async () => {
+    setState('loading');
+    setState(await refreshConfig() ? 'ready' : 'error');
+  }, [refreshConfig]);
 
   useEffect(() => {
     void loadConfig();
@@ -129,10 +145,20 @@ export function PublicComplaintForm() {
 
   function update(patch: Partial<ComplaintDraft>, fieldsToClear: Array<keyof ComplaintValidationErrors>) {
     setDraft(current => ({ ...current, ...patch }));
+    setSubmissionMessage(null);
     setErrors(current => {
       const next = { ...current };
       fieldsToClear.forEach(field => delete next[field]);
       return next;
+    });
+  }
+
+  function focusValidationError(nextErrors: ComplaintValidationErrors) {
+    window.requestAnimationFrame(() => {
+      const fieldId = firstInvalidComplaintField(nextErrors);
+      const target = fieldId ? document.getElementById(fieldId) ?? errorSummaryRef.current : errorSummaryRef.current;
+      target?.focus();
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
   }
 
@@ -142,18 +168,42 @@ export function PublicComplaintForm() {
 
     const nextErrors = validateComplaintDraft(draft);
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0 || !config) return;
+    if (Object.keys(nextErrors).length > 0 || !config) {
+      focusValidationError(nextErrors);
+      return;
+    }
 
     submissionLocked.current = true;
+    setSubmissionMessage(null);
     setState('submitting');
     try {
       const nextResult = await complaintsAPI.submitPublic(draft, config.formToken);
       setResult(nextResult);
       setState('success');
-    } catch {
-      submissionLocked.current = false;
+    } catch (error) {
+      const recovery = getPublicComplaintRecovery(error);
+      if (recovery === 'refresh-token') {
+        const refreshed = await refreshConfig();
+        setSubmissionMessage(refreshed
+          ? 'Actualizamos el formulario porque expiró. Tus datos y archivos se conservaron; puedes enviarlo nuevamente.'
+          : 'El formulario expiró y no pudimos actualizarlo. Tus datos y archivos se conservaron; revisa tu conexión e inténtalo nuevamente.');
+      } else if (recovery === 'refresh-branches') {
+        const refreshed = await refreshConfig({ clearBranch: true });
+        setErrors(current => ({
+          ...current,
+          branchId: refreshed
+            ? 'La sucursal seleccionada ya no está disponible. Selecciona otra sucursal.'
+            : 'La sucursal seleccionada ya no está disponible. Revisa tu conexión y selecciona otra sucursal.',
+        }));
+        setSubmissionMessage('Actualizamos las sucursales y limpiamos la selección que ya no está disponible. Tus datos y archivos se conservaron.');
+      } else if (recovery === 'rate-limited') {
+        setSubmissionMessage('No podemos recibir más reclamos desde esta conexión por ahora. Espera una hora e inténtalo nuevamente.');
+      } else {
+        setSubmissionMessage('No pudimos enviar el reclamo. Tus datos y archivos se conservaron; inténtalo nuevamente.');
+        toast.error('No pudimos enviar el reclamo. Inténtalo nuevamente.');
+      }
       setState('ready');
-      toast.error('No pudimos enviar el reclamo. Inténtalo nuevamente.');
+      submissionLocked.current = false;
     }
   }
 
@@ -177,7 +227,20 @@ export function PublicComplaintForm() {
       </header>
 
       <main className="mx-auto -mt-8 max-w-2xl px-4 pb-12 sm:px-6">
-        <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-5">
+          {Object.keys(errors).length > 0 && (
+            <section ref={errorSummaryRef} tabIndex={-1} role="alert" aria-labelledby="complaint-error-summary-title" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900">
+              <h2 id="complaint-error-summary-title" className="font-bold">Revisa los campos marcados antes de enviar</h2>
+              <ul className="mt-2 list-inside list-disc text-sm">
+                {Object.values(errors).map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}
+              </ul>
+            </section>
+          )}
+          {submissionMessage && (
+            <p role="alert" aria-live="assertive" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+              {submissionMessage}
+            </p>
+          )}
           <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-xl sm:p-7">
             <div className="mb-5 flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-800">
@@ -198,6 +261,8 @@ export function PublicComplaintForm() {
                   <select
                     id="complaint-origin"
                     value={draft.originType}
+                    required
+                    aria-required="true"
                     disabled={isSubmitting}
                     aria-invalid={Boolean(errors.originType)}
                     aria-describedby={errors.originType ? 'complaint-origin-error' : undefined}
@@ -241,6 +306,8 @@ export function PublicComplaintForm() {
                       <select
                         id="complaint-branch"
                         value={draft.branchId}
+                        required
+                        aria-required="true"
                         disabled={isSubmitting}
                         aria-invalid={Boolean(errors.branchId)}
                         aria-describedby={errors.branchId ? 'complaint-branch-error' : undefined}
@@ -282,6 +349,8 @@ export function PublicComplaintForm() {
                   <input
                     id="complaint-email"
                     type="email"
+                    required
+                    aria-required="true"
                     inputMode="email"
                     autoComplete="email"
                     value={draft.email}
@@ -357,6 +426,8 @@ export function PublicComplaintForm() {
               id="complaint-description"
               value={draft.description}
               disabled={isSubmitting}
+              required
+              aria-required="true"
               minLength={20}
               maxLength={5000}
               rows={7}
