@@ -46,19 +46,19 @@ const EMPTY_COMPLAINT_DRAFT: ComplaintDraft = {
   files: [],
 };
 
-const fieldClassName = 'h-12 w-full rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-600 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500';
-const fieldErrorClassName = `${fieldClassName} border-red-500 focus:border-red-600 focus:ring-red-100`;
+const fieldClassName = 'h-12 w-full rounded-xl border border-gray-300 bg-white px-4 text-base text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50';
+const fieldErrorClassName = `${fieldClassName} border-red-500`;
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
-  return <p id={id} className="mt-1.5 text-sm text-red-700" role="alert">{message}</p>;
+  return <p id={id} className="mt-1.5 text-sm text-red-600" role="alert">{message}</p>;
 }
 
 function ComplaintFormSkeleton() {
   return (
     <div role="status" aria-label="Cargando formulario" className="min-h-screen animate-pulse bg-gray-100">
-      <div className="h-40 bg-gray-900" />
-      <div className="mx-auto -mt-8 max-w-2xl space-y-4 px-4 pb-12">
+      <div className="h-40" style={{ background: 'linear-gradient(135deg, #0059FF 0%, #0c3c84 100%)' }} />
+      <div className="mx-auto max-w-2xl space-y-4 px-4 pb-8" style={{ marginTop: '-2rem' }}>
         <div className="h-64 rounded-3xl bg-white shadow-xl" />
         <div className="h-64 rounded-3xl bg-white shadow-xl" />
       </div>
@@ -68,9 +68,9 @@ function ComplaintFormSkeleton() {
 
 function ComplaintLoadError({ onRetry }: { onRetry: () => void }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-gray-50 p-6">
+    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
       <section className="w-full max-w-md rounded-3xl border border-gray-200 bg-white p-8 text-center shadow-xl">
-        <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-red-50 text-red-700">
+        <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-red-600">
           <AlertCircle className="h-8 w-8" aria-hidden="true" />
         </span>
         <h1 className="mt-5 text-2xl font-bold text-gray-900">No pudimos cargar el formulario</h1>
@@ -78,7 +78,7 @@ function ComplaintLoadError({ onRetry }: { onRetry: () => void }) {
         <button
           type="button"
           onClick={onRetry}
-          className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
+          className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700"
         >
           <RotateCw className="h-5 w-5" aria-hidden="true" />
           Reintentar
@@ -96,16 +96,16 @@ function ComplaintSuccess({ result }: { result: { caseNumber: string; receivedAt
   }, []);
 
   return (
-    <main className="grid min-h-screen place-items-center bg-gradient-to-b from-blue-700 to-blue-900 p-6">
+    <main className="flex min-h-screen items-center justify-center p-6" style={{ background: 'linear-gradient(135deg, #0059FF 0%, #0c3c84 100%)' }}>
       <section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl" role="status" aria-live="polite" aria-atomic="true">
-        <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-green-100 text-green-700">
+        <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-green-700">
           <CheckCircle2 className="h-11 w-11" aria-hidden="true" />
         </span>
         <p className="mt-6 text-sm font-bold uppercase tracking-widest text-blue-700">Envío confirmado</p>
         <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-3xl font-bold text-gray-900">Recibimos tu reclamo</h1>
         <p className="mt-6 text-sm text-gray-500">Tu número de caso es</p>
-        <p className="mt-1 break-words text-3xl font-black tracking-tight text-blue-900">{result.caseNumber}</p>
-        <p className="mt-5 leading-7 text-gray-600">
+        <p className="mt-1 text-3xl font-black tracking-tight text-blue-900" style={{ overflowWrap: 'anywhere' }}>{result.caseNumber}</p>
+        <p className="mt-5 text-gray-600" style={{ lineHeight: 1.7 }}>
           Guarda este número. Recibirás la respuesta por correo.
         </p>
       </section>
@@ -234,34 +234,34 @@ export function PublicComplaintForm() {
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
       <Toaster richColors position="top-center" />
-      <header className="bg-gradient-to-br from-blue-700 to-blue-900 px-5 pb-14 pt-10 text-white">
+      <header className="px-4 pt-8 text-white sm:px-6" style={{ background: 'linear-gradient(135deg, #0059FF 0%, #0c3c84 100%)', paddingBottom: '3.5rem' }}>
         <div className="mx-auto max-w-2xl">
-          <p className="text-sm font-bold uppercase tracking-widest text-blue-200">CONECTOCA</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Cuéntanos qué ocurrió</h1>
-          <p className="mt-3 max-w-xl leading-7 text-blue-100">
+          <p className="text-sm font-bold uppercase tracking-widest text-blue-200">La Oca</p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight">Cuéntanos qué ocurrió</h1>
+          <p className="mt-3 max-w-lg text-blue-100" style={{ lineHeight: 1.7 }}>
             Completa este formulario y nuestro equipo revisará tu reclamo.
           </p>
         </div>
       </header>
 
-      <main className="mx-auto -mt-8 max-w-2xl px-4 pb-12 sm:px-6">
+      <main className="mx-auto max-w-2xl px-4 pb-8 sm:px-6" style={{ marginTop: '-2rem' }}>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
           {Object.keys(errors).length > 0 && (
-            <section ref={errorSummaryRef} tabIndex={-1} role="alert" aria-labelledby="complaint-error-summary-title" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900">
+            <section ref={errorSummaryRef} tabIndex={-1} role="alert" aria-labelledby="complaint-error-summary-title" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900">
               <h2 id="complaint-error-summary-title" className="font-bold">Revisa los campos marcados antes de enviar</h2>
-              <ul className="mt-2 list-inside list-disc text-sm">
+              <ul className="mt-2 text-sm" style={{ listStyle: 'disc inside' }}>
                 {Object.values(errors).map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}
               </ul>
             </section>
           )}
           {submissionMessage && (
-            <p id="complaint-recovery-alert" ref={recoveryAlertRef} tabIndex={-1} role="alert" aria-live="assertive" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+            <p id="complaint-recovery-alert" ref={recoveryAlertRef} tabIndex={-1} role="alert" aria-live="assertive" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" style={{ lineHeight: 1.6 }}>
               {submissionMessage}
             </p>
           )}
-          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-xl sm:p-7">
+          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-xl">
             <div className="mb-5 flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-800">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
                 <MapPin className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
@@ -291,7 +291,8 @@ export function PublicComplaintForm() {
                         ['originType', 'branchId'],
                       );
                     }}
-                    className={`${errors.originType ? fieldErrorClassName : fieldClassName} appearance-none pr-11`}
+                    className={errors.originType ? fieldErrorClassName : fieldClassName}
+                    style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: '2.75rem' }}
                   >
                     <option value="branch">Sucursal</option>
                     <option value="production">Producción o producto</option>
@@ -330,7 +331,8 @@ export function PublicComplaintForm() {
                         aria-invalid={Boolean(errors.branchId)}
                         aria-describedby={errors.branchId ? 'complaint-branch-error' : undefined}
                         onChange={event => update({ branchId: event.target.value }, ['branchId'])}
-                        className={`${errors.branchId ? fieldErrorClassName : fieldClassName} appearance-none pr-11`}
+                        className={errors.branchId ? fieldErrorClassName : fieldClassName}
+                        style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: '2.75rem' }}
                       >
                         <option value="">Selecciona una sucursal</option>
                         {config?.branches.map(branch => (
@@ -346,9 +348,9 @@ export function PublicComplaintForm() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg sm:p-7">
+          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg">
             <div className="mb-5 flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-800">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
                 <UserRound className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
@@ -377,7 +379,7 @@ export function PublicComplaintForm() {
                     aria-describedby={errors.email ? 'complaint-email-error' : undefined}
                     placeholder="tu@correo.cl"
                     onChange={event => update({ email: event.target.value }, ['email'])}
-                    className={`${errors.email ? fieldErrorClassName : fieldClassName} pl-12`}
+                    className={`${errors.email ? fieldErrorClassName : fieldClassName} pl-11`}
                   />
                 </div>
                 <FieldError id="complaint-email-error" message={errors.email} />
@@ -426,9 +428,9 @@ export function PublicComplaintForm() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg sm:p-7">
+          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg">
             <div className="mb-5 flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-800">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
                 <MessageSquareText className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
@@ -453,7 +455,8 @@ export function PublicComplaintForm() {
               aria-describedby={`complaint-description-count${errors.description ? ' complaint-description-error' : ''}`}
               placeholder="Cuéntanos qué pasó, cuándo ocurrió y cualquier detalle que nos ayude a entenderlo."
               onChange={event => update({ description: event.target.value }, ['description'])}
-              className={`${errors.description ? fieldErrorClassName : fieldClassName} h-40 resize-y py-3 leading-6`}
+              className={`${errors.description ? fieldErrorClassName : fieldClassName} h-40 py-3`}
+              style={{ resize: 'vertical', lineHeight: 1.6 }}
             />
             <div className="mt-1.5 flex items-start justify-between gap-4">
               <FieldError id="complaint-description-error" message={errors.description} />
@@ -463,9 +466,9 @@ export function PublicComplaintForm() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg sm:p-7">
+          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg">
             <div className="mb-5 flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-800">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
                 <PackageOpen className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
@@ -484,7 +487,7 @@ export function PublicComplaintForm() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-yellow-500 px-6 py-4 text-lg font-bold text-blue-900 shadow-lg transition hover:bg-yellow-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-200 disabled:cursor-wait disabled:opacity-70"
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 px-6 py-4 text-lg font-bold text-blue-900 shadow-lg transition hover:bg-yellow-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (
               <>
@@ -499,7 +502,7 @@ export function PublicComplaintForm() {
             )}
           </button>
 
-          <p className="flex items-start justify-center gap-2 px-3 text-center text-xs leading-5 text-gray-500">
+          <p className="flex items-start justify-center gap-2 px-3 text-center text-xs text-gray-500">
             <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             Usaremos tus datos únicamente para gestionar y responder este reclamo.
           </p>

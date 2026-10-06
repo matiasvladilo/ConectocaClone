@@ -27,7 +27,7 @@ function AttachmentPreview({ file }: { file: File }) {
   }
 
   return (
-    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-700">
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
       {file.type === 'application/pdf'
         ? <FileText className="h-6 w-6" aria-hidden="true" />
         : <ImageIcon className="h-6 w-6" aria-hidden="true" />}
@@ -71,7 +71,7 @@ export function ComplaintAttachmentsInput({
           <Paperclip className="h-4 w-4 text-blue-700" aria-hidden="true" />
           Evidencias <span className="font-normal text-gray-500">(opcional)</span>
         </div>
-        <p id="complaint-files-help" className="mt-1 text-xs leading-5 text-gray-500">
+        <p id="complaint-files-help" className="mt-1 text-xs text-gray-500">
           Hasta 5 imágenes o PDF. Máximo 10 MB por archivo.
         </p>
       </div>
@@ -104,7 +104,7 @@ export function ComplaintAttachmentsInput({
           type="button"
           onClick={() => cameraInputRef.current?.click()}
           disabled={disabled || files.length >= 5}
-          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-semibold text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Camera className="h-5 w-5" aria-hidden="true" />
           Tomar foto
@@ -113,10 +113,10 @@ export function ComplaintAttachmentsInput({
           type="button"
           onClick={() => galleryInputRef.current?.click()}
           disabled={disabled || files.length >= 5}
-          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Upload className="h-5 w-5" aria-hidden="true" />
-          Elegir archivos
+          Adjuntar
         </button>
       </div>
 
@@ -137,7 +137,7 @@ export function ComplaintAttachmentsInput({
                 onClick={() => removeFile(index)}
                 disabled={disabled}
                 aria-label={`Quitar ${file.name}`}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-gray-500 transition hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-500 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -147,7 +147,7 @@ export function ComplaintAttachmentsInput({
       )}
 
       {visibleErrors.length > 0 && (
-        <ul id="complaint-files-error" className="space-y-1 text-sm text-red-700" role="alert">
+        <ul id="complaint-files-error" className="space-y-1 text-sm text-red-600" role="alert">
           {visibleErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
         </ul>
       )}
