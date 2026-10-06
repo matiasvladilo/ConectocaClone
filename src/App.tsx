@@ -48,6 +48,7 @@ import {
   complaintDeepLinkDecision,
   complaintIdFromLocation,
 } from "./features/complaints/deepLink";
+import { ProfileRestoreGuard } from "./features/complaints/profileRestoreGuard";
 
 // CONECTOCA - Sistema de gestión de pedidos y producción
 
@@ -216,6 +217,8 @@ export default function App() {
   const hasLoadedInitialOrders = useRef(false);
   const initialOrderIds = useRef<Set<string>>(new Set());
   const previousNotificationIds = useRef<Set<string>>(new Set());
+  const profileRestoreGuardRef = useRef(new ProfileRestoreGuard());
+  const activeSessionRef = useRef<{ sessionIdentity: string; token: string } | null>(null);
 
   const supabase = createClient();
 
@@ -271,6 +274,20 @@ export default function App() {
       console.log(`🔑 Evento de sesión Supabase: ${event}`, session ? "Sesión activa" : "Sin sesión");
 
       if (session?.access_token) {
+        const nextSession = { sessionIdentity: session.user.id, token: session.access_token };
+        const previousSession = activeSessionRef.current;
+        if (
+          profileRestoreGuardRef.current.hasActiveAttempt()
+          && !profileRestoreGuardRef.current.matchesActiveSession(nextSession.sessionIdentity, nextSession.token)
+        ) {
+          profileRestoreGuardRef.current.invalidate();
+        }
+        if (previousSession && previousSession.sessionIdentity !== nextSession.sessionIdentity) {
+          setIsProfileVerified(false);
+          setCurrentUser(null);
+          setCurrentScreen("login");
+        }
+        activeSessionRef.current = nextSession;
         // Restaurar silenciosamente o en background si recibimos un nuevo token refescado
         if (accessToken !== session.access_token) {
           console.log("✅ Token actualizado por evento automático");
@@ -278,6 +295,8 @@ export default function App() {
         }
       } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
         console.log("⚠️ Sesión cerrada detectada");
+        profileRestoreGuardRef.current.invalidate();
+        activeSessionRef.current = null;
         localStorage.removeItem('conectoca_cached_user');
         setAccessToken(null);
         setCurrentUser(null);
@@ -602,15 +621,19 @@ export default function App() {
 
       if (session?.access_token) {
         console.log("✅ Valid session found, restoring...");
-        await handleSessionRestore(session.access_token);
+        await handleSessionRestore(session.access_token, session.user.id);
       } else {
         console.log("⚠️ No valid session found");
+        profileRestoreGuardRef.current.invalidate();
+        activeSessionRef.current = null;
         setAccessToken(null); // Explicitly set to null when no session
         setCurrentUser(null);
         setLoading(false);
       }
     } catch (error) {
       console.error("Error in checkSession:", error);
+      profileRestoreGuardRef.current.invalidate();
+      activeSessionRef.current = null;
       setAccessToken(null); // Explicitly set to null on exception
       setCurrentUser(null);
       setLoading(false);
@@ -650,7 +673,17 @@ export default function App() {
     return "complaints";
   };
 
-  const handleSessionRestore = async (token: string) => {
+  const handleSessionRestore = async (
+    token: string,
+    sessionIdentity: string,
+    expectedGeneration?: number,
+  ): Promise<boolean> => {
+    const attempt = expectedGeneration === undefined
+      ? profileRestoreGuardRef.current.begin(sessionIdentity, token)
+      : profileRestoreGuardRef.current.begin(sessionIdentity, token, expectedGeneration);
+    if (!attempt) return false;
+
+    activeSessionRef.current = { sessionIdentity, token };
     try {
       console.log("🔄 Restoring session...");
       setAccessToken(token);
@@ -659,6 +692,7 @@ export default function App() {
 
       console.log("📋 Fetching user profile...");
       const profile = await profileAPI.get(token);
+      if (!profileRestoreGuardRef.current.isCurrent(attempt)) return false;
       console.log(
         `✓ Profile loaded: ${profile.name} (${profile.role})`,
       );
@@ -691,7 +725,9 @@ export default function App() {
 
       console.log("✓ Session restored successfully");
       setLoading(false); // CRITICAL: Set loading to false after successful restore
+      return true;
     } catch (error: any) {
+      if (!profileRestoreGuardRef.current.isCurrent(attempt)) return false;
       console.error("❌ Error restoring session:", error);
 
       const errorMessage = error.message || "";
@@ -731,6 +767,7 @@ export default function App() {
             setLoading(false);
             // Refrescar perfil en segundo plano
             profileAPI.get(token).then((profile) => {
+              if (!profileRestoreGuardRef.current.isCurrent(attempt)) return;
               const updatedUser: User = {
                 id: profile.id,
                 name: profile.name,
@@ -743,9 +780,10 @@ export default function App() {
               setIsProfileVerified(true);
               setCurrentScreen(restoredScreenForUser(updatedUser, 'remote'));
             }).catch((profileError) => {
+              if (!profileRestoreGuardRef.current.isCurrent(attempt)) return;
               console.warn("No se pudo verificar el perfil remoto; el enlace de reclamos sigue pendiente", profileError);
             });
-            return;
+            return true;
           } catch {
             // Si el caché está corrupto, ignorar y mostrar login
           }
@@ -758,6 +796,7 @@ export default function App() {
       }
 
       setLoading(false); // Liberar carga
+      return false;
     }
   };
 
@@ -1239,6 +1278,11 @@ export default function App() {
     password: string,
     rememberMe: boolean = true,
   ) => {
+    const loginGeneration = profileRestoreGuardRef.current.invalidate();
+    activeSessionRef.current = null;
+    setIsProfileVerified(false);
+    setCurrentUser(null);
+    setCurrentScreen("login");
     try {
       console.log(`🔐 Attempting login for: ${email}`);
       // Aplicar la preferencia ANTES de iniciar sesión para que el token se persista
@@ -1265,7 +1309,12 @@ export default function App() {
       }
 
       console.log("✓ Login successful, restoring session...");
-      await handleSessionRestore(session.access_token);
+      const restored = await handleSessionRestore(
+        session.access_token,
+        session.user.id,
+        loginGeneration,
+      );
+      if (!restored) return;
 
       // Initialize audio context on successful login
       const { initializeAudio } = await import('./utils/notificationSound');
@@ -1282,6 +1331,9 @@ export default function App() {
 
 
   const handleLogout = async (silent: boolean = false) => {
+    profileRestoreGuardRef.current.invalidate();
+    activeSessionRef.current = null;
+    setIsProfileVerified(false);
     try {
       await supabase.auth.signOut();
       localStorage.removeItem('conectoca_cached_user');
