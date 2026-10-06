@@ -37,10 +37,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
-import { productsAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
+import { productsAPI, categoriesAPI, type Product as APIProduct, type Category, type ProductIngredient } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { hijasDe, idsDeCategoriaConHijas, raicesDe } from '../utils/categoryTree';
 import { calcularCantidadAgregable } from '../utils/cartStock';
+import { productoUsaLotes } from '../utils/productLots';
 import { projectId } from '../utils/supabase/info';
 
 // Carga diferida, mismo motivo que en ImageUpload.tsx: no hace falta en la
@@ -71,6 +72,8 @@ interface Product {
   category?: string;
   categoryId?: string;
   trackStock?: boolean; // Si es false, stock ilimitado
+  allowDecimal?: boolean;
+  ingredients?: ProductIngredient[];
 }
 
 interface CartItem extends Product {
@@ -113,6 +116,12 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     return localStorage.getItem('conectoca_orderNotes') || '';
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Precio real (promedio ponderado de lotes FIFO) por producto del carrito,
+  // para productos de Distribuidora. Se rellena de forma asíncrona vía RPC;
+  // mientras no hay entrada para un producto, se usa price × quantity como
+  // antes. Ver handleAddToCart/handleUpdateCartQuantity/handleSetCartQuantity
+  // para qué dispara el recálculo.
+  const [lotPreviews, setLotPreviews] = useState<Record<string, { quantity: number; precioUnitario: number; total: number }>>({});
 
   // Load products from API
   useEffect(() => {
@@ -139,6 +148,33 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     localStorage.setItem('conectoca_orderNotes', notes);
   }, [notes]);
 
+  // Precio real del carrito para productos de Distribuidora con lotes FIFO:
+  // price × quantity (lo que se muestra por defecto) puede quedar lejos del
+  // cobro real si la cantidad pedida cruza dos lotes de costo distinto — el
+  // precio exacto recién se sabe pidiéndoselo al servidor (previsualizar_precio_lotes,
+  // misma lógica de consumo que create_order_with_stock, de solo lectura).
+  // Debounce de 300ms para no disparar una consulta por cada click de +/-.
+  useEffect(() => {
+    if (categories.length === 0 || cart.length === 0) return;
+
+    const itemsEnLotes = cart.filter(item => productoUsaLotes(item, categories));
+    if (itemsEnLotes.length === 0) return;
+
+    const timeoutId = setTimeout(() => {
+      itemsEnLotes.forEach(item => {
+        const cantidad = item.quantity;
+        productsAPI.previewLotPrice(accessToken, item.id, cantidad)
+          .then(preview => {
+            if (!preview) return;
+            setLotPreviews(prev => ({ ...prev, [item.id]: { quantity: cantidad, ...preview } }));
+          })
+          .catch(() => {}); // Fallo silencioso: se sigue mostrando price × quantity.
+      });
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [cart, categories, accessToken]);
+
   const loadProducts = async (silent = false) => {
     try {
       if (!silent) setIsLoadingProducts(true);
@@ -157,7 +193,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
         category: p.category,
         categoryId: p.categoryId,
         trackStock: p.unlimitedStock !== true && p.trackStock !== false,
-        allowDecimal: p.allowDecimal === true
+        allowDecimal: p.allowDecimal === true,
+        ingredients: p.ingredients
       }));
 
       if (transformedProducts.length > 0) {
@@ -532,8 +569,21 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     }
   };
 
+  // Si hay una previsualización vigente para la cantidad actual del item, usa
+  // el precio real de lotes FIFO; si no (todavía no llegó, o el producto no
+  // está en alcance), cae a price × quantity como antes.
+  const getItemUnitPrice = (item: CartItem): number => {
+    const preview = lotPreviews[item.id];
+    return preview && preview.quantity === item.quantity ? preview.precioUnitario : item.price;
+  };
+
+  const getItemTotal = (item: CartItem): number => {
+    const preview = lotPreviews[item.id];
+    return preview && preview.quantity === item.quantity ? preview.total : item.price * item.quantity;
+  };
+
   const calculateTotal = () => {
-    return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    return cart.reduce((sum, item) => sum + getItemTotal(item), 0);
   };
 
   const handleConfirmOrder = async () => {
@@ -691,10 +741,10 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                             <div className="flex-1 min-w-0">
                               <h4 className="text-sm text-gray-900 line-clamp-1">{item.name}</h4>
                               <p className="text-xs text-gray-500">
-                                {item.quantity} × {formatCLP(item.price)}
+                                {item.quantity} × {formatCLP(getItemUnitPrice(item))}
                               </p>
                               <p className="text-xs text-blue-700 mt-1">
-                                {formatCLP(item.price * item.quantity)}
+                                {formatCLP(getItemTotal(item))}
                               </p>
                             </div>
 
@@ -939,40 +989,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                           </Badge>
                         </div>
 
-                        {/* Cost Display - Added for consistency with ProductManagement if needed, but maybe not relevant for OrderForm? 
-                            The user asked to "implementalo" (implement it), referring to the fix for missing ingredients/cost.
-                            Wait, NewOrderForm is DIFFERENT from ProductManagement. 
-                            The user prompt context was "ingredients not saved on product creation".
-                            I am editing NewOrderForm.tsx. Is this correct? 
-                            The error might be in NewOrderForm if it uses products that have missing ingredients.
-                            But the fix for saving ingredients was in backend.
-                            Frontend fix for displaying cost was in ProductManagement.tsx.
-                            
-                            Let's verify NewOrderForm usage. 
-                            It seems NewOrderForm displays products to add to an order.
-                            It does NOT show cost of ingredients usually.
-                            
-                            Wait, I viewed NewOrderForm.tsx in step 1063.
-                            And ProductManagement.tsx in step 1045.
-                            
-                            The user said "implementalo" after I corrected backend. 
-                            And I was looking at ProductManagement.tsx cost calculation in step 1050.
-                            
-                            Ah, I selected NewOrderForm.tsx by mistake in my thought process or regex?
-                            No, I am viewing NewOrderForm.tsx NOW.
-                            
-                            The user wants me to implement the fix.
-                            I already applied the fix to ProductManagement.tsx in step 1050.
-                            
-                            Let's check if I need to apply similar fix to NewOrderForm.tsx?
-                            NewOrderForm does not seem to display ingredient cost.
-                            
-                            Wait, step 1050 FAILED with "improper format stop reason".
-                            So the fix to ProductManagement.tsx was NOT applied?
-                            Let me re-apply the fix to ProductManagement.tsx.
-                        */}
-
-
                         <div className="space-y-2 quantity-controls" onClick={(e) => e.stopPropagation()}>
                           <Label htmlFor={`qty-${product.id}`} className="text-xs text-gray-600">
                             Cantidad
@@ -1081,6 +1097,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                         {cart.map((item) => {
                           const isNearLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock * 0.8;
                           const atLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock;
+                          const previewVigente = lotPreviews[item.id]?.quantity === item.quantity ? lotPreviews[item.id] : null;
+                          const precioMixto = previewVigente !== null && previewVigente.precioUnitario !== item.price;
 
                           return (
                             <div key={item.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
@@ -1095,8 +1113,13 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
                               <div className="flex-1 min-w-0">
                                 <h4 className="text-sm text-gray-900 mb-1">{item.name}</h4>
                                 <p className="text-xs text-gray-500">
-                                  {formatCLP(item.price)} x {item.quantity} = {formatCLP(item.price * item.quantity)}
+                                  {formatCLP(getItemUnitPrice(item))} x {item.quantity} = {formatCLP(getItemTotal(item))}
                                 </p>
+                                {precioMixto && (
+                                  <p className="text-xs text-blue-600 mt-0.5">
+                                    Cruza stock de distinto costo: precio promedio para esta cantidad
+                                  </p>
+                                )}
                                 {atLimit && (
                                   <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
                                     <AlertCircle className="w-3 h-3" />
