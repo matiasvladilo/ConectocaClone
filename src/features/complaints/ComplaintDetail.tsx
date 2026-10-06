@@ -9,6 +9,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  RefreshCw,
   RotateCcw,
   UserRound,
   X,
@@ -28,11 +29,12 @@ export interface ComplaintDetailProps {
   complaint: ComplaintDetailData;
   onStatusChange: (status: ComplaintStatus) => Promise<void>;
   onRetryEmail: (kinds: Array<'confirmation' | 'notification'>) => Promise<void>;
+  onRefresh: () => Promise<void>;
   onOpenAttachment: (attachmentId: string) => Promise<void>;
   onClose: () => void;
 }
 
-type DetailAction = 'status' | 'confirmation' | 'notification' | `attachment:${string}` | null;
+type DetailAction = 'status' | 'confirmation' | 'notification' | 'refresh' | `attachment:${string}` | null;
 
 const dateFormatter = new Intl.DateTimeFormat('es-CL', {
   dateStyle: 'medium',
@@ -81,6 +83,7 @@ export function ComplaintDetail({
   complaint,
   onStatusChange,
   onRetryEmail,
+  onRefresh,
   onOpenAttachment,
   onClose,
 }: ComplaintDetailProps) {
@@ -123,8 +126,22 @@ export function ComplaintDetail({
     }
   }
 
+  async function refreshDetail() {
+    setAction('refresh');
+    setActionError(null);
+    try {
+      await onRefresh();
+    } catch (error) {
+      setActionError(actionErrorMessage(error, 'No pudimos actualizar el detalle. Inténtalo nuevamente.'));
+    } finally {
+      setAction(null);
+    }
+  }
+
   const nextStatus: ComplaintStatus = complaint.status === 'pending' ? 'attended' : 'pending';
   const statusActionLabel = nextStatus === 'attended' ? 'Marcar como atendido' : 'Reabrir';
+  const hasSendingEmail = complaint.confirmationEmailStatus === 'sending'
+    || complaint.notificationEmailStatus === 'sending';
 
   function confirmStatusChange() {
     const confirmed = window.confirm(nextStatus === 'attended'
@@ -246,6 +263,12 @@ export function ComplaintDetail({
             )}
           </div>
         </div>
+        {hasSendingEmail && (
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refreshDetail()} disabled={action !== null}>
+            {action === 'refresh' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            {action === 'refresh' ? 'Actualizando…' : 'Actualizar estado de correos'}
+          </Button>
+        )}
       </section>
 
       {complaint.status === 'attended' && (

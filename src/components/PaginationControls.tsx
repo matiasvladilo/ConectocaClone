@@ -18,8 +18,9 @@ export function PaginationControls({ pagination, onPageChange, compact = false, 
 
   // Generate page numbers to display
   const getPageNumbers = () => {
+    if (compact) return [page];
     const pages: (number | string)[] = [];
-    const maxVisible = compact ? 3 : 5;
+    const maxVisible = 5;
 
     if (totalPages <= maxVisible) {
       // Show all pages if total is small
@@ -83,6 +84,7 @@ export function PaginationControls({ pagination, onPageChange, compact = false, 
           size="sm"
           onClick={() => onPageChange(page - 1)}
           disabled={!hasPrev || isLoading}
+          aria-label="Página anterior"
           className={`h-8 w-8 p-0 ${isLoading ? 'opacity-50 cursor-wait' : ''}`}
         >
           <ChevronLeft className="h-4 w-4" />
@@ -108,6 +110,8 @@ export function PaginationControls({ pagination, onPageChange, compact = false, 
                 size="sm"
                 onClick={() => onPageChange(pageNum as number)}
                 disabled={isLoading}
+                aria-label={`Página ${pageNum}`}
+                aria-current={isActive ? 'page' : undefined}
                 className={`h-8 w-8 p-0 ${isActive
                   ? 'bg-blue-600 hover:bg-blue-700 text-white'
                   : 'hover:bg-gray-100'
@@ -125,6 +129,7 @@ export function PaginationControls({ pagination, onPageChange, compact = false, 
           size="sm"
           onClick={() => onPageChange(page + 1)}
           disabled={!hasNext || isLoading}
+          aria-label="Página siguiente"
           className={`h-8 w-8 p-0 ${isLoading ? 'opacity-50 cursor-wait' : ''}`}
         >
           <ChevronRight className="h-4 w-4" />

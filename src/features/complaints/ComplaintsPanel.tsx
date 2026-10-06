@@ -15,10 +15,16 @@ import { PaginationControls } from '../../components/PaginationControls';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import {
+  ComplaintDetailRequestGuard,
   DEFAULT_COMPLAINT_FILTERS,
   getComplaintEmptyMessage,
+  isCompactPaginationWidth,
   mergeComplaintEmailStatuses,
+  normalizeComplaintPage,
   replaceComplaintInPage,
+  requestedEmailsAreSending,
+  type ComplaintDetailRequestToken,
+  type ComplaintEmailKind,
 } from './adminPanelState';
 import { ComplaintApiError, complaintsAPI } from './api';
 import { ComplaintDetail } from './ComplaintDetail';
@@ -52,7 +58,10 @@ type BranchState =
   | { kind: 'error' }
   | { kind: 'ready'; branches: Array<{ id: string; name: string }> };
 
-type PanelNotice = { tone: 'success' | 'warning'; message: string } | null;
+type PanelNotice = { tone: 'success' | 'warning'; message: string; action?: 'list' } | null;
+
+const EMAIL_RECONCILIATION_ATTEMPTS = 4;
+const EMAIL_RECONCILIATION_DELAY_MS = 750;
 
 const dateFormatter = new Intl.DateTimeFormat('es-CL', {
   dateStyle: 'medium',
@@ -74,35 +83,88 @@ function safeErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ComplaintApiError && error.message ? error.message : fallback;
 }
 
+function waitForReconciliation(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve(true);
+    }, EMAIL_RECONCILIATION_DELAY_MS);
+    const handleAbort = () => {
+      window.clearTimeout(timer);
+      resolve(false);
+    };
+    signal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
 export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack }: ComplaintsPanelProps) {
   const [filters, setFilters] = useState<ComplaintFiltersValue>({ ...DEFAULT_COMPLAINT_FILTERS });
   const [listState, setListState] = useState<ListState>({ kind: 'loading' });
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'closed' });
   const [branchState, setBranchState] = useState<BranchState>({ kind: 'loading' });
   const [notice, setNotice] = useState<PanelNotice>(null);
+  const [compactPagination, setCompactPagination] = useState(() => (
+    typeof window !== 'undefined' && isCompactPaginationWidth(window.innerWidth)
+  ));
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const detailDialogRef = useRef<HTMLElement>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
+  const filtersRef = useRef(filters);
+  const detailStateRef = useRef<DetailState>(detailState);
+  const mountedRef = useRef(true);
+  const detailOperationGuardRef = useRef(new ComplaintDetailRequestGuard());
+
+  const setCurrentFilters = useCallback((next: ComplaintFiltersValue) => {
+    filtersRef.current = next;
+    setFilters(next);
+  }, []);
+
+  const commitDetailState = useCallback((next: DetailState) => {
+    detailStateRef.current = next;
+    if (mountedRef.current) setDetailState(next);
+  }, []);
+
+  function openComplaintId(): string | null {
+    const current = detailStateRef.current;
+    if (current.kind === 'closed') return null;
+    return current.kind === 'ready' ? current.complaint.id : current.id;
+  }
+
+  function detailOperationIsCurrent(token: ComplaintDetailRequestToken): boolean {
+    return mountedRef.current
+      && detailOperationGuardRef.current.isCurrent(token, openComplaintId());
+  }
 
   const loadList = useCallback(async (nextFilters: ComplaintFiltersValue, showLoading = true) => {
     const requestId = ++listRequestRef.current;
     if (showLoading) setListState({ kind: 'loading' });
     try {
       const page = await complaintsAPI.list(accessToken, nextFilters);
-      if (requestId === listRequestRef.current) setListState({ kind: 'ready', page });
+      if (requestId !== listRequestRef.current || nextFilters !== filtersRef.current) return;
+      const normalizedPage = normalizeComplaintPage(nextFilters.page, page.pagination.totalPages);
+      if (normalizedPage !== nextFilters.page) {
+        setCurrentFilters({ ...nextFilters, page: normalizedPage });
+        return;
+      }
+      setListState({ kind: 'ready', page });
     } catch (error) {
-      if (requestId !== listRequestRef.current) return;
+      if (requestId !== listRequestRef.current || nextFilters !== filtersRef.current) return;
       if (showLoading) {
         setListState({
           kind: 'error',
           message: safeErrorMessage(error, 'No pudimos cargar los reclamos. Revisa tu conexión e inténtalo nuevamente.'),
         });
       } else {
-        setNotice({ tone: 'warning', message: 'El cambio se guardó, pero no pudimos actualizar la bandeja. Vuelve a intentarlo.' });
+        setNotice({
+          tone: 'warning',
+          message: 'El cambio se guardó, pero no pudimos actualizar la bandeja. Vuelve a intentarlo.',
+          action: 'list',
+        });
       }
     }
-  }, [accessToken]);
+  }, [accessToken, setCurrentFilters]);
 
   const loadBranches = useCallback(async () => {
     setBranchState({ kind: 'loading' });
@@ -115,22 +177,30 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
   }, []);
 
   const openDetail = useCallback(async (id: string) => {
-    detailTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (detailStateRef.current.kind === 'closed') {
+      const activeElement = document.activeElement;
+      detailTriggerRef.current = activeElement instanceof HTMLElement
+        && activeElement.isConnected
+        && !detailDialogRef.current?.contains(activeElement)
+        ? activeElement
+        : null;
+    }
+    detailOperationGuardRef.current.invalidate();
     const requestId = ++detailRequestRef.current;
-    setDetailState({ kind: 'loading', id });
+    commitDetailState({ kind: 'loading', id });
     try {
       const complaint = await complaintsAPI.get(accessToken, id);
-      if (requestId === detailRequestRef.current) setDetailState({ kind: 'ready', complaint });
+      if (requestId === detailRequestRef.current) commitDetailState({ kind: 'ready', complaint });
     } catch (error) {
       if (requestId === detailRequestRef.current) {
-        setDetailState({
+        commitDetailState({
           kind: 'error',
           id,
           message: safeErrorMessage(error, 'No pudimos cargar este reclamo. Inténtalo nuevamente.'),
         });
       }
     }
-  }, [accessToken]);
+  }, [accessToken, commitDetailState]);
 
   useEffect(() => {
     void loadList(filters);
@@ -143,6 +213,24 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
   useEffect(() => {
     if (initialComplaintId) void openDetail(initialComplaintId);
   }, [initialComplaintId, openDetail]);
+
+  useEffect(() => {
+    const updateCompactPagination = () => {
+      setCompactPagination(isCompactPaginationWidth(window.innerWidth));
+    };
+    window.addEventListener('resize', updateCompactPagination);
+    return () => window.removeEventListener('resize', updateCompactPagination);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      listRequestRef.current += 1;
+      detailRequestRef.current += 1;
+      detailOperationGuardRef.current.invalidate();
+    };
+  }, []);
 
   useEffect(() => {
     if (detailState.kind === 'closed') return;
@@ -160,16 +248,24 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
   }, [detailState.kind]);
 
   function closeDetail() {
+    const trigger = detailTriggerRef.current;
+    detailTriggerRef.current = null;
     detailRequestRef.current += 1;
-    setDetailState({ kind: 'closed' });
-    window.requestAnimationFrame(() => detailTriggerRef.current?.focus());
+    detailOperationGuardRef.current.invalidate();
+    commitDetailState({ kind: 'closed' });
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected && !trigger.closest('[role="dialog"]')) trigger.focus();
+    });
   }
 
   async function handleStatusChange(status: ComplaintStatus) {
-    if (detailState.kind !== 'ready') return;
+    const current = detailStateRef.current;
+    if (current.kind !== 'ready') return;
+    const token = detailOperationGuardRef.current.begin(current.complaint.id);
     try {
-      const updated = await complaintsAPI.setStatus(accessToken, detailState.complaint.id, status);
-      setDetailState({ kind: 'ready', complaint: updated });
+      const updated = await complaintsAPI.setStatus(accessToken, current.complaint.id, status);
+      if (!detailOperationIsCurrent(token)) return;
+      commitDetailState({ kind: 'ready', complaint: updated });
       setListState(current => current.kind === 'ready'
         ? { kind: 'ready', page: replaceComplaintInPage(current.page, updated) }
         : current);
@@ -177,37 +273,107 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
         tone: 'success',
         message: status === 'attended' ? 'Reclamo marcado como atendido.' : 'Reclamo reabierto como pendiente.',
       });
-      await loadList(filters, false);
+      await loadList(filtersRef.current, false);
     } catch (error) {
+      if (!detailOperationIsCurrent(token)) return;
       throw new Error(safeErrorMessage(error, 'No pudimos cambiar el estado. Inténtalo nuevamente.'));
     }
   }
 
-  async function handleRetryEmail(kinds: Array<'confirmation' | 'notification'>) {
-    if (detailState.kind !== 'ready') return;
-    const previous = detailState.complaint;
+  function applyDetailToOpenComplaint(token: ComplaintDetailRequestToken, complaint: ComplaintDetailData): boolean {
+    if (!detailOperationIsCurrent(token)) return false;
+    commitDetailState({ kind: 'ready', complaint });
+    setListState(current => current.kind === 'ready'
+      ? { kind: 'ready', page: replaceComplaintInPage(current.page, complaint) }
+      : current);
+    return true;
+  }
+
+  async function reconcileEmailSending(
+    token: ComplaintDetailRequestToken,
+    kinds: ComplaintEmailKind[],
+  ): Promise<ComplaintDetailData | null> {
+    let latest = detailStateRef.current.kind === 'ready' ? detailStateRef.current.complaint : null;
+    let lastReadFailed = false;
+
+    for (let attempt = 0; attempt < EMAIL_RECONCILIATION_ATTEMPTS; attempt += 1) {
+      if (attempt > 0 && !await waitForReconciliation(token.signal)) return null;
+      if (!detailOperationIsCurrent(token)) return null;
+      try {
+        const refreshed = await complaintsAPI.get(accessToken, token.complaintId);
+        lastReadFailed = false;
+        if (!applyDetailToOpenComplaint(token, refreshed)) return null;
+        latest = refreshed;
+        if (!requestedEmailsAreSending(refreshed, kinds)) return refreshed;
+      } catch {
+        lastReadFailed = true;
+      }
+    }
+
+    if (detailOperationIsCurrent(token)) {
+      setNotice({
+        tone: 'warning',
+        message: lastReadFailed
+          ? 'No pudimos confirmar el resultado del correo. Actualiza el detalle para volver a consultarlo.'
+          : 'El correo sigue procesándose. Actualiza el detalle para confirmar el resultado.',
+      });
+    }
+    return latest;
+  }
+
+  function setEmailResultNotice(complaint: ComplaintDetailData, kinds: ComplaintEmailKind[]) {
+    const requestedFailed = kinds.some(kind => kind === 'confirmation'
+      ? complaint.confirmationEmailStatus === 'failed'
+      : complaint.notificationEmailStatus === 'failed');
+    setNotice(requestedFailed
+      ? { tone: 'warning', message: 'El correo volvió a fallar. Puedes reintentarlo desde el detalle.' }
+      : { tone: 'success', message: 'Correo reenviado correctamente.' });
+  }
+
+  async function handleRetryEmail(kinds: ComplaintEmailKind[]) {
+    const current = detailStateRef.current;
+    if (current.kind !== 'ready') return;
+    const previous = current.complaint;
+    const token = detailOperationGuardRef.current.begin(previous.id);
     const optimistic = mergeComplaintEmailStatuses(previous, {
       confirmationEmailStatus: kinds.includes('confirmation') ? 'sending' : previous.confirmationEmailStatus,
       notificationEmailStatus: kinds.includes('notification') ? 'sending' : previous.notificationEmailStatus,
-    });
-    setDetailState({ kind: 'ready', complaint: optimistic });
+    }, kinds);
+    applyDetailToOpenComplaint(token, optimistic);
     try {
       const statuses = await complaintsAPI.retryEmails(accessToken, previous.id, kinds);
-      const updated = mergeComplaintEmailStatuses(previous, statuses);
-      setDetailState({ kind: 'ready', complaint: updated });
-      setListState(current => current.kind === 'ready'
-        ? { kind: 'ready', page: replaceComplaintInPage(current.page, updated) }
-        : current);
-      const requestedFailed = (kinds.includes('confirmation') && statuses.confirmationEmailStatus === 'failed')
-        || (kinds.includes('notification') && statuses.notificationEmailStatus === 'failed');
-      setNotice(requestedFailed
-        ? { tone: 'warning', message: 'El correo volvió a fallar. Puedes reintentarlo desde el detalle.' }
-        : { tone: 'success', message: 'Correo reenviado correctamente.' });
+      if (!detailOperationIsCurrent(token)) return;
+      const updated = mergeComplaintEmailStatuses(previous, statuses, kinds);
+      if (!applyDetailToOpenComplaint(token, updated)) return;
+      if (requestedEmailsAreSending(statuses, kinds)) {
+        const reconciled = await reconcileEmailSending(token, kinds);
+        if (reconciled && detailOperationIsCurrent(token)
+          && !requestedEmailsAreSending(reconciled, kinds)) {
+          setEmailResultNotice(reconciled, kinds);
+        }
+        return;
+      }
+      setEmailResultNotice(updated, kinds);
     } catch (error) {
-      setDetailState(current => current.kind === 'ready' && current.complaint.id === previous.id
-        ? { kind: 'ready', complaint: previous }
-        : current);
+      if (!detailOperationIsCurrent(token)) return;
+      applyDetailToOpenComplaint(token, previous);
       throw new Error(safeErrorMessage(error, 'No pudimos reintentar el correo. Inténtalo nuevamente.'));
+    }
+  }
+
+  async function handleRefreshDetail() {
+    const current = detailStateRef.current;
+    if (current.kind !== 'ready') return;
+    const token = detailOperationGuardRef.current.begin(current.complaint.id);
+    try {
+      const refreshed = await complaintsAPI.get(accessToken, current.complaint.id);
+      if (!applyDetailToOpenComplaint(token, refreshed)) return;
+      if (!requestedEmailsAreSending(refreshed, ['confirmation', 'notification'])) {
+        setNotice({ tone: 'success', message: 'Detalle actualizado.' });
+      }
+    } catch (error) {
+      if (!detailOperationIsCurrent(token)) return;
+      throw new Error(safeErrorMessage(error, 'No pudimos actualizar el detalle. Inténtalo nuevamente.'));
     }
   }
 
@@ -223,7 +389,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
   function trapDetailFocus(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Tab') return;
     const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])',
     ));
     if (focusable.length === 0) {
       event.preventDefault();
@@ -232,10 +398,14 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
     }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    const activeElement = document.activeElement;
+    if (activeElement === event.currentTarget || !event.currentTarget.contains(activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && activeElement === first) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (!event.shiftKey && activeElement === last) {
       event.preventDefault();
       first.focus();
     }
@@ -266,7 +436,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
           >
             <p>{notice.message}</p>
             <div className="flex gap-2">
-              {notice.tone === 'warning' && <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filters)}>Actualizar</Button>}
+              {notice.action === 'list' && <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filtersRef.current)}>Actualizar</Button>}
               <Button type="button" variant="ghost" size="sm" onClick={() => setNotice(null)}>Cerrar</Button>
             </div>
           </div>
@@ -275,7 +445,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
         <ComplaintFilters
           value={filters}
           branches={branches}
-          onChange={setFilters}
+          onChange={setCurrentFilters}
           disabled={listState.kind === 'loading'}
         />
 
@@ -304,7 +474,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
               <AlertCircle className="mx-auto h-10 w-10 text-red-700" aria-hidden="true" />
               <h2 className="mt-4 text-lg font-bold">No pudimos cargar la bandeja</h2>
               <p className="mt-2 text-sm leading-6 text-gray-600">{listState.message}</p>
-              <Button type="button" className="mt-5" onClick={() => void loadList(filters)}>
+              <Button type="button" className="mt-5" onClick={() => void loadList(filtersRef.current)}>
                 <RefreshCw aria-hidden="true" />
                 Reintentar
               </Button>
@@ -319,7 +489,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
                 <h2 id="complaints-list-title" className="font-bold">Bandeja de reclamos</h2>
                 <p className="mt-1 text-sm text-gray-500">{listState.page.pagination.total} {listState.page.pagination.total === 1 ? 'caso' : 'casos'}</p>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filters)}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filtersRef.current)}>
                 <RefreshCw aria-hidden="true" />
                 Actualizar
               </Button>
@@ -385,8 +555,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
             <div className="border-t border-gray-200">
               <PaginationControls
                 pagination={listState.page.pagination}
-                onPageChange={page => setFilters(current => ({ ...current, page }))}
-                compact={typeof window !== 'undefined' && window.innerWidth < 640}
+                onPageChange={page => setCurrentFilters({ ...filtersRef.current, page })}
+                compact={compactPagination}
               />
             </div>
           </section>
@@ -433,6 +603,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
               complaint={detailState.complaint}
               onStatusChange={handleStatusChange}
               onRetryEmail={handleRetryEmail}
+              onRefresh={handleRefreshDetail}
               onOpenAttachment={handleOpenAttachment}
               onClose={closeDetail}
             />
