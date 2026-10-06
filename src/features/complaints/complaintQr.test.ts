@@ -5,7 +5,24 @@ import {
   ComplaintQrDownloadGate,
   complaintQrUrl,
   downloadComplaintQrFile,
+  resolveComplaintQrOrigin,
 } from './complaintQr.ts';
+
+test('prefers the configured public URL over the current browser origin', () => {
+  assert.equal(
+    resolveComplaintQrOrigin(' https://conectocadev.netlify.app/ ', 'http://localhost:3000'),
+    'https://conectocadev.netlify.app/',
+  );
+});
+
+test('falls back to the browser origin when no public URL is configured', () => {
+  assert.equal(resolveComplaintQrOrigin(undefined, 'http://localhost:3000'), 'http://localhost:3000');
+  assert.equal(resolveComplaintQrOrigin('   ', 'http://localhost:3000'), 'http://localhost:3000');
+});
+
+test('falls back to the browser origin when the configured URL is invalid', () => {
+  assert.equal(resolveComplaintQrOrigin('conectoca', 'http://localhost:3000'), 'http://localhost:3000');
+});
 
 test('builds the universal QR URL at the origin root without business data', () => {
   assert.equal(

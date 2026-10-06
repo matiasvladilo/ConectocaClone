@@ -1,3 +1,18 @@
+// El QR impreso debe sobrevivir a que el admin lo descargue desde otro dominio,
+// por eso se prefiere la URL pública configurada en el build.
+export function resolveComplaintQrOrigin(
+  configuredUrl: string | undefined,
+  browserOrigin: string,
+): string {
+  const candidate = configuredUrl?.trim();
+  if (!candidate) return browserOrigin;
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return browserOrigin;
+  }
+}
+
 export function complaintQrUrl(publicUrl: string): string {
   return new URL('/reclamos', publicUrl).toString();
 }

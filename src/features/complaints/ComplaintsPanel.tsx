@@ -30,6 +30,7 @@ import { ComplaintApiError, complaintsAPI } from './api';
 import { ComplaintDetail } from './ComplaintDetail';
 import { ComplaintFilters } from './ComplaintFilters';
 import { ComplaintQrDownload } from './ComplaintQrDownload';
+import { resolveComplaintQrOrigin } from './complaintQr';
 import type {
   ComplaintDetail as ComplaintDetailData,
   ComplaintFilters as ComplaintFiltersValue,
@@ -428,7 +429,12 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
             <h1 className="text-2xl font-black tracking-tight">Reclamos</h1>
           </div>
           <div className="ml-auto">
-            <ComplaintQrDownload publicUrl={window.location.origin} />
+            <ComplaintQrDownload
+              publicUrl={resolveComplaintQrOrigin(
+                import.meta.env.VITE_APP_PUBLIC_URL as string | undefined,
+                window.location.origin,
+              )}
+            />
           </div>
         </div>
       </header>
