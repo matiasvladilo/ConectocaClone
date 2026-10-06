@@ -632,6 +632,41 @@ export const productsAPI = {
     }, token);
     return response?.data || response;
   },
+
+  // Precio real que va a cobrar un pedido por `quantity` unidades de un
+  // producto con costeo por lotes FIFO. Es una simulación de solo lectura
+  // (función `previsualizar_precio_lotes` en Postgres, mismo recorrido que
+  // create_order_with_stock) — no reserva ni toca ningún lote. Se usa para
+  // que el carrito muestre el cobro real antes de confirmar, en vez de
+  // price × quantity, que puede quedar lejos del total si la cantidad pedida
+  // cruza dos lotes de costo distinto. Devuelve null ante cualquier error
+  // (producto fuera de alcance, sin sesión, etc.): el llamador debe tratarlo
+  // como "no hay previsualización disponible" y no bloquear el flujo normal.
+  previewLotPrice: async (
+    token: string,
+    productId: string,
+    quantity: number
+  ): Promise<{ precioUnitario: number; total: number } | null> => {
+    const supabase = createClient(
+      `https://${projectId}.supabase.co`,
+      publicAnonKey,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+
+    const { data, error } = await supabase.rpc('previsualizar_precio_lotes', {
+      p_product_id: productId,
+      p_cantidad: quantity,
+    });
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    return {
+      precioUnitario: Number(data[0].precio_unitario),
+      total: Number(data[0].total),
+    };
+  },
 };
 
 // Ingredients API (Materias Primas)
