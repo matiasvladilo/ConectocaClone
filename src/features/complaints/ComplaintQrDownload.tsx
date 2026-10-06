@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import { QrCode } from 'lucide-react';
 
 import { Button } from '../../components/ui/button';
 import {
@@ -53,10 +54,12 @@ export function ComplaintQrDownload({ publicUrl }: ComplaintQrDownloadProps) {
         aria-describedby={error ? 'complaint-qr-download-error' : undefined}
         onClick={() => void handleDownload()}
       >
-        {isDownloading ? 'Generando QR…' : 'Descargar QR'}
+        <QrCode aria-hidden="true" />
+        <span className="hidden sm:inline">{isDownloading ? 'Generando QR…' : 'Descargar QR'}</span>
+        <span className="sr-only sm:hidden">{isDownloading ? 'Generando QR…' : 'Descargar QR'}</span>
       </Button>
       {error && (
-        <p id="complaint-qr-download-error" role="alert" className="max-w-56 text-right text-xs text-red-200">
+        <p id="complaint-qr-download-error" role="alert" className="text-right text-xs text-red-600">
           {error}
         </p>
       )}

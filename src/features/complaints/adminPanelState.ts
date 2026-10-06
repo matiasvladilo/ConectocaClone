@@ -59,6 +59,27 @@ export function applyComplaintFilter(
   return { ...value, ...patch, page: 1 };
 }
 
+// Origen y sucursal se muestran en un único selector: "branch:<id>" elige una
+// sucursal concreta; "production" y "other" son los orígenes sin sucursal.
+export function complaintOriginFilterValue(filters: ComplaintFilters): string {
+  if (filters.originType === 'branch') return filters.branchId ? `branch:${filters.branchId}` : 'branch';
+  return filters.originType;
+}
+
+export function applyComplaintOriginFilter(filters: ComplaintFilters, value: string): ComplaintFilters {
+  if (value.startsWith('branch:')) {
+    return applyComplaintFilter(filters, { originType: 'branch', branchId: value.slice('branch:'.length) });
+  }
+  if (value === 'branch' || value === 'production' || value === 'other') {
+    return applyComplaintFilter(filters, { originType: value, branchId: '' });
+  }
+  return applyComplaintFilter(filters, { originType: '', branchId: '' });
+}
+
+export function complaintStatusCountFilters(status: ComplaintFilters['status']): ComplaintFilters {
+  return { ...DEFAULT_COMPLAINT_FILTERS, status, page: 1, limit: 1 };
+}
+
 export function hasActiveComplaintFilters(filters: ComplaintFilters): boolean {
   return Boolean(
     filters.search

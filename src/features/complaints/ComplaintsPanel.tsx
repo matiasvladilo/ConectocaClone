@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
+  CheckCircle2,
   ChevronRight,
+  Clock,
   Inbox,
   Loader2,
   MailWarning,
-  MapPin,
   RefreshCw,
-  UserRound,
 } from 'lucide-react';
 
 import { PaginationControls } from '../../components/PaginationControls';
@@ -16,6 +16,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import {
   ComplaintDetailRequestGuard,
+  complaintStatusCountFilters,
   DEFAULT_COMPLAINT_FILTERS,
   getComplaintEmptyMessage,
   isCompactPaginationWidth,
@@ -60,6 +61,8 @@ type BranchState =
   | { kind: 'loading' }
   | { kind: 'error' }
   | { kind: 'ready'; branches: Array<{ id: string; name: string }> };
+
+type StatusCounts = { pending: number; attended: number } | null | 'error';
 
 type PanelNotice = { tone: 'success' | 'warning'; message: string; action?: 'list' } | null;
 
@@ -107,6 +110,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'closed' });
   const [branchState, setBranchState] = useState<BranchState>({ kind: 'loading' });
   const [notice, setNotice] = useState<PanelNotice>(null);
+  const [counts, setCounts] = useState<StatusCounts>(null);
+  const countsRequestRef = useRef(0);
   const [compactPagination, setCompactPagination] = useState(() => (
     typeof window !== 'undefined' && isCompactPaginationWidth(window.innerWidth)
   ));
@@ -169,6 +174,22 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
     }
   }, [accessToken, setCurrentFilters]);
 
+  // Los totales ignoran la búsqueda y los filtros activos: describen la bandeja completa.
+  const loadCounts = useCallback(async () => {
+    const requestId = ++countsRequestRef.current;
+    try {
+      const [pending, attended] = await Promise.all([
+        complaintsAPI.list(accessToken, complaintStatusCountFilters('pending')),
+        complaintsAPI.list(accessToken, complaintStatusCountFilters('attended')),
+      ]);
+      if (requestId !== countsRequestRef.current || !mountedRef.current) return;
+      setCounts({ pending: pending.pagination.total, attended: attended.pagination.total });
+    } catch {
+      if (requestId !== countsRequestRef.current || !mountedRef.current) return;
+      setCounts('error');
+    }
+  }, [accessToken]);
+
   const loadBranches = useCallback(async () => {
     setBranchState({ kind: 'loading' });
     try {
@@ -212,6 +233,10 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   useEffect(() => {
     void loadBranches();
   }, [loadBranches]);
+
+  useEffect(() => {
+    void loadCounts();
+  }, [loadCounts]);
 
   useEffect(() => {
     if (initialComplaintId) void openDetail(initialComplaintId);
@@ -277,6 +302,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         tone: 'success',
         message: status === 'attended' ? 'Reclamo marcado como atendido.' : 'Reclamo reabierto como pendiente.',
       });
+      void loadCounts();
       await loadList(filtersRef.current, false);
     } catch (error) {
       if (!detailOperationIsCurrent(token)) return;
@@ -416,17 +442,22 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   }
 
   const branches = branchState.kind === 'ready' ? branchState.branches : [];
+  const countLabel = (value: number | undefined) => (counts === 'error' ? '—' : value ?? '…');
+  const refreshAll = () => {
+    void loadList(filtersRef.current);
+    void loadCounts();
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900">
-      <header className="border-b border-gray-800 bg-gray-950 text-white">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-5 sm:px-6 lg:px-8">
-          <Button type="button" variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/10 hover:text-white" aria-label="Volver">
-            <ArrowLeft aria-hidden="true" />
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <Button type="button" variant="outline" onClick={onBack} aria-label="Volver">
+            <ArrowLeft className="w-4 h-4" aria-hidden="true" />
           </Button>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-blue-300">Administración</p>
-            <h1 className="text-2xl font-black tracking-tight">Reclamos</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold text-gray-900">Reclamos</h1>
+            <p className="text-sm text-gray-600">Casos recibidos desde el QR</p>
           </div>
           <div className="ml-auto">
             <ComplaintQrDownload
@@ -437,14 +468,36 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
             />
           </div>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-red-500 bg-white p-3 shadow-md sm:p-4">
+            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
+              <Clock className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
+              Pendientes
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-red-600">{countLabel(counts && counts !== 'error' ? counts.pending : undefined)}</p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-green-500 bg-white p-3 shadow-md sm:p-4">
+            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
+              <CheckCircle2 className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
+              Atendidos
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-green-600">{countLabel(counts && counts !== 'error' ? counts.attended : undefined)}</p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-blue-500 bg-white p-3 shadow-md sm:p-4">
+            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
+              <Inbox className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
+              Total
+            </p>
+            <p className="mt-1 text-2xl font-semibold text-gray-900">{countLabel(counts && counts !== 'error' ? counts.pending + counts.attended : undefined)}</p>
+          </div>
+        </div>
+
         {notice && (
           <div
             role="status"
             aria-live="polite"
-            className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm ${notice.tone === 'success' ? 'border-green-200 bg-green-50 text-green-900' : 'border-amber-200 bg-amber-50 text-amber-950'}`}
+            className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm ${notice.tone === 'success' ? 'border-green-200 bg-green-50 text-green-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
           >
             <p>{notice.message}</p>
             <div className="flex gap-2">
@@ -462,7 +515,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         />
 
         {branchState.kind === 'error' && (
-          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             <p>No pudimos cargar las sucursales. Los demás filtros siguen disponibles.</p>
             <Button type="button" variant="outline" size="sm" onClick={() => void loadBranches()}>
               <RefreshCw aria-hidden="true" />
@@ -472,7 +525,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         )}
 
         {listState.kind === 'loading' && (
-          <section aria-label="Cargando reclamos" aria-busy="true" className="grid min-h-72 place-items-center rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <section aria-label="Cargando reclamos" aria-busy="true" className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-16 shadow-sm">
             <div className="text-center text-gray-600">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" aria-hidden="true" />
               <p className="mt-3 text-sm">Cargando reclamos…</p>
@@ -481,12 +534,12 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         )}
 
         {listState.kind === 'error' && (
-          <section role="alert" className="grid min-h-72 place-items-center rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+          <section role="alert" className="flex items-center justify-center rounded-xl border border-red-200 bg-white p-6 py-12 text-center shadow-sm">
             <div className="max-w-md">
-              <AlertCircle className="mx-auto h-10 w-10 text-red-700" aria-hidden="true" />
+              <AlertCircle className="mx-auto h-10 w-10 text-red-600" aria-hidden="true" />
               <h2 className="mt-4 text-lg font-bold">No pudimos cargar la bandeja</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">{listState.message}</p>
-              <Button type="button" className="mt-5" onClick={() => void loadList(filtersRef.current)}>
+              <p className="mt-2 text-sm text-gray-600">{listState.message}</p>
+              <Button type="button" variant="outline" className="mt-5" onClick={refreshAll}>
                 <RefreshCw aria-hidden="true" />
                 Reintentar
               </Button>
@@ -495,69 +548,55 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         )}
 
         {listState.kind === 'ready' && (
-          <section aria-labelledby="complaints-list-title" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-4 sm:px-5">
-              <div>
-                <h2 id="complaints-list-title" className="font-bold">Bandeja de reclamos</h2>
-                <p className="mt-1 text-sm text-gray-500">{listState.page.pagination.total} {listState.page.pagination.total === 1 ? 'caso' : 'casos'}</p>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filtersRef.current)}>
+          <section aria-labelledby="complaints-list-title" className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+              <h2 id="complaints-list-title" className="text-sm font-semibold text-gray-900">
+                {listState.page.pagination.total} {listState.page.pagination.total === 1 ? 'caso' : 'casos'}
+              </h2>
+              <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
                 <RefreshCw aria-hidden="true" />
                 Actualizar
               </Button>
             </div>
 
             {listState.page.data.length === 0 ? (
-              <div className="grid min-h-64 place-items-center px-6 py-12 text-center">
+              <div className="flex items-center justify-center px-6 py-12 text-center">
                 <div>
                   <Inbox className="mx-auto h-11 w-11 text-gray-300" aria-hidden="true" />
                   <p className="mt-4 font-medium text-gray-700">{getComplaintEmptyMessage(filters)}</p>
                 </div>
               </div>
             ) : (
-              <ul className="divide-y divide-gray-200">
-                {listState.page.data.map(complaint => (
-                  <li key={complaint.id}>
+              <ul>
+                {listState.page.data.map((complaint, index) => (
+                  <li key={complaint.id} className={index > 0 ? 'border-t border-gray-200' : undefined}>
                     <button
                       type="button"
                       onClick={() => void openDetail(complaint.id)}
-                      className="group grid w-full min-w-0 gap-3 px-4 py-4 text-left transition hover:bg-blue-50 focus-visible:bg-blue-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-200 sm:px-5 lg:grid-cols-[minmax(9rem,0.8fr)_minmax(10rem,1fr)_minmax(13rem,1.4fr)_minmax(9rem,0.8fr)_auto] lg:items-center"
+                      className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
                       aria-label={`Abrir ${complaint.caseNumber}, ${complaint.status === 'pending' ? 'pendiente' : 'atendido'}`}
                     >
-                      <div className="min-w-0">
-                        <p className="break-words font-bold text-blue-800">{complaint.caseNumber}</p>
-                        <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                          <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                          <span className="truncate">{originLabel(complaint.originType, complaint.branchName)}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate font-semibold text-gray-900">{complaint.caseNumber}</p>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {complaint.hasEmailFailure && (
+                              <span title="Hay un correo automático fallido" className="inline-flex items-center text-red-600">
+                                <MailWarning className="h-4 w-4" aria-hidden="true" />
+                                <span className="sr-only">Correo automático fallido</span>
+                              </span>
+                            )}
+                            <Badge className={complaint.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
+                              {complaint.status === 'pending' ? 'Pendiente' : 'Atendido'}
+                            </Badge>
+                          </div>
                         </div>
+                        <p className="mt-0.5 truncate text-xs text-gray-500">
+                          {originLabel(complaint.originType, complaint.branchName)} · {formatDate(complaint.createdAt)}
+                        </p>
+                        <p className="mt-1 truncate text-sm text-gray-600">{complaint.descriptionPreview}</p>
                       </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 text-sm font-medium">
-                          <UserRound className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
-                          <span className="truncate">{complaint.customerName || 'Sin nombre'}</span>
-                        </div>
-                        <p className="mt-1 truncate text-xs text-gray-500">{complaint.customerEmail}</p>
-                      </div>
-
-                      <p className="min-w-0 break-words text-sm leading-5 text-gray-600 lg:line-clamp-2">{complaint.descriptionPreview}</p>
-
-                      <p className="text-xs text-gray-500">{formatDate(complaint.createdAt)}</p>
-
-                      <div className="flex items-center justify-between gap-3 lg:justify-end">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {complaint.hasEmailFailure && (
-                            <span title="Hay un correo automático fallido" className="inline-flex items-center text-red-700">
-                              <MailWarning className="h-5 w-5" aria-hidden="true" />
-                              <span className="sr-only">Correo automático fallido</span>
-                            </span>
-                          )}
-                          <Badge className={complaint.status === 'pending' ? 'bg-amber-100 text-amber-900' : 'bg-green-100 text-green-800'}>
-                            {complaint.status === 'pending' ? 'Pendiente' : 'Atendido'}
-                          </Badge>
-                        </div>
-                        <ChevronRight className="h-5 w-5 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-blue-700" aria-hidden="true" />
-                      </div>
+                      <ChevronRight className="h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
                     </button>
                   </li>
                 ))}
@@ -576,7 +615,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
       </main>
 
       {detailState.kind !== 'closed' && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-2 sm:p-6" role="presentation">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2" role="presentation">
           <section
             ref={detailDialogRef}
             role="dialog"
@@ -585,24 +624,24 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
             aria-describedby="complaint-detail-dialog-description"
             tabIndex={-1}
             onKeyDown={trapDetailFocus}
-            className="max-h-[calc(100vh-1rem)] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-200 bg-white p-4 shadow-2xl outline-none focus-visible:ring-4 focus-visible:ring-blue-200 sm:max-h-[calc(100vh-3rem)] sm:p-6"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-4 shadow-2xl outline-none"
           >
           <h2 id="complaint-detail-dialog-title" className="sr-only">Detalle del reclamo</h2>
           <p id="complaint-detail-dialog-description" className="sr-only">Antecedentes, evidencias y acciones del reclamo seleccionado.</p>
 
           {detailState.kind === 'loading' && (
-            <div aria-busy="true" className="grid min-h-80 place-items-center text-center text-gray-600">
+            <div aria-busy="true" className="flex items-center justify-center py-16 text-center text-gray-600">
               <div><Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" aria-hidden="true" /><p className="mt-3 text-sm">Cargando detalle…</p></div>
             </div>
           )}
 
           {detailState.kind === 'error' && (
-            <div role="alert" className="grid min-h-80 place-items-center p-4 text-center">
-              <div className="max-w-sm">
-                <AlertCircle className="mx-auto h-10 w-10 text-red-700" aria-hidden="true" />
+            <div role="alert" className="flex items-center justify-center p-4 py-12 text-center">
+              <div className="max-w-md">
+                <AlertCircle className="mx-auto h-10 w-10 text-red-600" aria-hidden="true" />
                 <h2 className="mt-4 text-lg font-bold">No pudimos cargar el detalle</h2>
-                <p className="mt-2 text-sm leading-6 text-gray-600">{detailState.message}</p>
-                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                <p className="mt-2 text-sm text-gray-600">{detailState.message}</p>
+                <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
                   <Button type="button" onClick={() => void openDetail(detailState.id)}><RefreshCw aria-hidden="true" />Reintentar</Button>
                   <Button type="button" variant="outline" onClick={closeDetail}>Cerrar</Button>
                 </div>

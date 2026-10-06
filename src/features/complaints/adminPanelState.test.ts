@@ -4,6 +4,9 @@ import { test } from 'node:test';
 import type { ComplaintDetail, ComplaintFilters, ComplaintPage } from './types.ts';
 import {
   applyComplaintFilter,
+  applyComplaintOriginFilter,
+  complaintOriginFilterValue,
+  complaintStatusCountFilters,
   ComplaintDetailRequestGuard,
   getComplaintEmptyMessage,
   isCompactPaginationWidth,
@@ -138,4 +141,37 @@ test('al reintentar limpia el error anterior aunque la respuesta no traiga uno n
 test('la paginación compacta cambia reactivamente bajo 640 px', () => {
   assert.equal(isCompactPaginationWidth(639), true);
   assert.equal(isCompactPaginationWidth(640), false);
+});
+
+test('origin selector value reflects branch, production, other and all', () => {
+  assert.equal(complaintOriginFilterValue(filters), '');
+  assert.equal(complaintOriginFilterValue({ ...filters, originType: 'production' }), 'production');
+  assert.equal(complaintOriginFilterValue({ ...filters, originType: 'other' }), 'other');
+  assert.equal(complaintOriginFilterValue({ ...filters, originType: 'branch', branchId: 'b-1' }), 'branch:b-1');
+  assert.equal(complaintOriginFilterValue({ ...filters, originType: 'branch' }), 'branch');
+});
+
+test('applying the origin selector sets origin and branch together and resets the page', () => {
+  assert.deepEqual(
+    applyComplaintOriginFilter(filters, 'branch:b-1'),
+    { ...filters, originType: 'branch', branchId: 'b-1', page: 1 },
+  );
+  assert.deepEqual(
+    applyComplaintOriginFilter({ ...filters, originType: 'branch', branchId: 'b-1' }, 'production'),
+    { ...filters, originType: 'production', branchId: '', page: 1 },
+  );
+  assert.deepEqual(
+    applyComplaintOriginFilter({ ...filters, originType: 'other' }, ''),
+    { ...filters, originType: '', branchId: '', page: 1 },
+  );
+  assert.deepEqual(
+    applyComplaintOriginFilter(filters, 'unknown'),
+    { ...filters, originType: '', branchId: '', page: 1 },
+  );
+});
+
+test('status count filters ignore the current search and request a single row', () => {
+  assert.deepEqual(complaintStatusCountFilters('pending'), {
+    search: '', status: 'pending', originType: '', branchId: '', dateFrom: '', dateTo: '', page: 1, limit: 1,
+  });
 });

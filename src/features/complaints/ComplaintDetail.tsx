@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   CalendarClock,
   CheckCircle2,
-  Download,
   FileText,
+  Image as ImageIcon,
   Loader2,
   Mail,
-  MapPin,
   Phone,
   RefreshCw,
   RotateCcw,
-  UserRound,
-  X,
 } from 'lucide-react';
 
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { Separator } from '../../components/ui/separator';
 import { buildComplaintMailto } from './mailto';
 import type {
   ComplaintDetail as ComplaintDetailData,
@@ -150,139 +147,144 @@ export function ComplaintDetail({
     if (confirmed) void runStatusChange(nextStatus);
   }
 
+  const cardClassName = 'rounded-xl border border-gray-200 bg-white p-4';
+
   return (
     <article className="min-w-0 text-gray-900">
-      <header className="flex items-start justify-between gap-4 pr-8">
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-widest text-blue-700">Detalle del reclamo</p>
-          <h2 className="mt-1 break-words text-2xl font-black tracking-tight">{complaint.caseNumber}</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge className={complaint.status === 'pending' ? 'bg-amber-100 text-amber-900' : 'bg-green-100 text-green-800'}>
-              {complaint.status === 'pending' ? 'Pendiente' : 'Atendido'}
-            </Badge>
-            <span className="text-sm text-gray-500">Recibido {formatDate(complaint.createdAt)}</span>
-          </div>
-        </div>
-        <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar detalle">
-          <X aria-hidden="true" />
+      <header className="flex items-center gap-3">
+        <Button type="button" variant="outline" onClick={onClose} aria-label="Volver a la bandeja">
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
         </Button>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-xl font-semibold">{complaint.caseNumber}</h2>
+          <p className="text-sm text-gray-600">{originLabel(complaint)}</p>
+          <p className="text-xs text-gray-500">{formatDate(complaint.createdAt)}</p>
+        </div>
+        <Badge className={complaint.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
+          {complaint.status === 'pending' ? 'Pendiente' : 'Atendido'}
+        </Badge>
       </header>
 
       {actionError && (
-        <div role="alert" aria-live="assertive" className="mt-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <div role="alert" aria-live="assertive" className="mt-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
           <p>{actionError}</p>
         </div>
       )}
 
-      <section aria-labelledby="complaint-contact-title" className="mt-6 rounded-2xl bg-gray-50 p-4 sm:p-5">
-        <h3 id="complaint-contact-title" className="font-bold">Cliente y origen</h3>
-        <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
-          <div className="flex min-w-0 gap-3">
-            <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
-            <div className="min-w-0"><dt className="text-gray-500">Nombre</dt><dd className="break-words font-medium">{complaint.customerName || 'No informado'}</dd></div>
+      <div className="mt-5 space-y-3">
+        <section aria-labelledby="complaint-contact-title" className={cardClassName}>
+          <h3 id="complaint-contact-title" className="text-xs font-medium text-gray-500">Cliente</h3>
+          <p className="mt-1 font-semibold" style={{ overflowWrap: 'anywhere' }}>{complaint.customerName || 'Sin nombre'}</p>
+          <div className="mt-2 space-y-1 text-sm text-gray-600">
+            <p className="flex min-w-0 items-center gap-2">
+              <Mail className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+              <span className="min-w-0" style={{ overflowWrap: 'anywhere' }}>{complaint.customerEmail}</span>
+            </p>
+            {complaint.customerPhone && (
+              <p className="flex min-w-0 items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+                <span className="min-w-0" style={{ overflowWrap: 'anywhere' }}>{complaint.customerPhone}</span>
+              </p>
+            )}
           </div>
-          <div className="flex min-w-0 gap-3">
-            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
-            <div className="min-w-0"><dt className="text-gray-500">Correo</dt><dd className="break-all font-medium">{complaint.customerEmail}</dd></div>
-          </div>
-          <div className="flex min-w-0 gap-3">
-            <Phone className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
-            <div className="min-w-0"><dt className="text-gray-500">Teléfono</dt><dd className="break-words font-medium">{complaint.customerPhone || 'No informado'}</dd></div>
-          </div>
-          <div className="flex min-w-0 gap-3">
-            <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
-            <div className="min-w-0"><dt className="text-gray-500">Origen</dt><dd className="break-words font-medium">{originLabel(complaint)}</dd></div>
-          </div>
-        </dl>
-      </section>
+        </section>
 
-      <section aria-labelledby="complaint-description-title" className="mt-6">
-        <h3 id="complaint-description-title" className="font-bold">Descripción</h3>
-        <p className="mt-3 whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-700">{complaint.description}</p>
-      </section>
+        <section aria-labelledby="complaint-description-title" className={cardClassName}>
+          <h3 id="complaint-description-title" className="text-xs font-medium text-gray-500">Reclamo</h3>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800" style={{ overflowWrap: 'anywhere', lineHeight: 1.6 }}>{complaint.description}</p>
+        </section>
 
-      <section aria-labelledby="complaint-attachments-title" className="mt-6">
-        <h3 id="complaint-attachments-title" className="font-bold">Evidencias ({complaint.attachments.length})</h3>
-        {complaint.attachments.length === 0 ? (
-          <p className="mt-3 text-sm text-gray-500">Este reclamo no incluye evidencias.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {complaint.attachments.map(attachment => {
-              const isOpening = action === `attachment:${attachment.id}`;
-              return (
-                <li key={attachment.id} className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-gray-200 p-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <FileText className="h-5 w-5 shrink-0 text-blue-700" aria-hidden="true" />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium" title={attachment.originalName}>{attachment.originalName}</p>
-                      <p className="text-xs text-gray-500">{formatFileSize(attachment.sizeBytes)}</p>
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => void openAttachment(attachment.id)} disabled={action !== null}>
-                    {isOpening ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Download aria-hidden="true" />}
-                    <span className="hidden sm:inline">Abrir</span>
-                    <span className="sr-only sm:hidden">Abrir {attachment.originalName}</span>
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+        <section aria-labelledby="complaint-attachments-title" className={cardClassName}>
+          <h3 id="complaint-attachments-title" className="text-xs font-medium text-gray-500">Evidencias ({complaint.attachments.length})</h3>
+          {complaint.attachments.length === 0 ? (
+            <p className="mt-1 text-sm text-gray-500">Sin evidencias adjuntas.</p>
+          ) : (
+            <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {complaint.attachments.map(attachment => {
+                const isOpening = action === `attachment:${attachment.id}`;
+                const isImage = attachment.mimeType.startsWith('image/');
+                return (
+                  <li key={attachment.id} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => void openAttachment(attachment.id)}
+                      disabled={action !== null}
+                      title={attachment.originalName}
+                      aria-label={`Abrir ${attachment.originalName}`}
+                      className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2 text-left transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-blue-700">
+                        {isOpening
+                          ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          : isImage
+                            ? <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                            : <FileText className="h-4 w-4" aria-hidden="true" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-medium text-gray-800">{attachment.originalName}</span>
+                        <span className="block text-xs text-gray-500">{formatFileSize(attachment.sizeBytes)}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
-      <Separator className="my-6" />
-
-      <section aria-labelledby="complaint-email-title">
-        <h3 id="complaint-email-title" className="font-bold">Correos automáticos</h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-gray-200 p-4">
+        <section aria-labelledby="complaint-email-title" className={cardClassName}>
+          <h3 id="complaint-email-title" className="text-xs font-medium text-gray-500">Correos automáticos</h3>
+          <div className="mt-2 space-y-2 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Confirmación al cliente</p>
+              <span>Confirmación al cliente</span>
               <EmailStatusBadge status={complaint.confirmationEmailStatus} />
             </div>
-            {complaint.confirmationEmailStatus === 'failed' && complaint.confirmationEmailError && <p className="mt-2 break-words text-xs text-red-700">{complaint.confirmationEmailError}</p>}
+            {complaint.confirmationEmailStatus === 'failed' && complaint.confirmationEmailError && <p className="text-xs text-red-600" style={{ overflowWrap: 'anywhere' }}>{complaint.confirmationEmailError}</p>}
             {complaint.confirmationEmailStatus === 'failed' && (
-              <Button type="button" variant="outline" size="sm" className="mt-3 w-full" onClick={() => void retryEmail('confirmation')} disabled={action !== null}>
+              <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => void retryEmail('confirmation')} disabled={action !== null}>
                 {action === 'confirmation' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
                 {action === 'confirmation' ? 'Reintentando…' : 'Reintentar confirmación'}
               </Button>
             )}
-          </div>
-          <div className="rounded-xl border border-gray-200 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">Aviso a central</p>
+              <span>Aviso a central</span>
               <EmailStatusBadge status={complaint.notificationEmailStatus} />
             </div>
-            {complaint.notificationEmailStatus === 'failed' && complaint.notificationEmailError && <p className="mt-2 break-words text-xs text-red-700">{complaint.notificationEmailError}</p>}
+            {complaint.notificationEmailStatus === 'failed' && complaint.notificationEmailError && <p className="text-xs text-red-600" style={{ overflowWrap: 'anywhere' }}>{complaint.notificationEmailError}</p>}
             {complaint.notificationEmailStatus === 'failed' && (
-              <Button type="button" variant="outline" size="sm" className="mt-3 w-full" onClick={() => void retryEmail('notification')} disabled={action !== null}>
+              <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => void retryEmail('notification')} disabled={action !== null}>
                 {action === 'notification' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
                 {action === 'notification' ? 'Reintentando…' : 'Reintentar aviso central'}
               </Button>
             )}
+            {hasSendingEmail && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => void refreshDetail()} disabled={action !== null}>
+                {action === 'refresh' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+                {action === 'refresh' ? 'Actualizando…' : 'Actualizar estado de correos'}
+              </Button>
+            )}
           </div>
-        </div>
-        {hasSendingEmail && (
-          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refreshDetail()} disabled={action !== null}>
-            {action === 'refresh' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
-            {action === 'refresh' ? 'Actualizando…' : 'Actualizar estado de correos'}
-          </Button>
+        </section>
+
+        {complaint.status === 'attended' && (
+          <div className="flex gap-3 rounded-xl bg-green-50 p-4 text-sm text-green-900">
+            <CalendarClock className="h-5 w-5 shrink-0" aria-hidden="true" />
+            <p>Atendido {formatDate(complaint.attendedAt)}</p>
+          </div>
         )}
-      </section>
+      </div>
 
-      {complaint.status === 'attended' && (
-        <div className="mt-5 flex gap-3 rounded-xl bg-green-50 p-4 text-sm text-green-900">
-          <CalendarClock className="h-5 w-5 shrink-0" aria-hidden="true" />
-          <p>Atendido {formatDate(complaint.attendedAt)}</p>
-        </div>
-      )}
-
-      <footer className="mt-6 grid gap-3 border-t border-gray-200 pt-5 sm:grid-cols-2">
+      <footer className="mt-5 grid gap-2 sm:grid-cols-2">
         <Button
           type="button"
-          variant="outline"
-          className="h-11"
+          className="h-12 text-white"
+          style={{
+            background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
+            borderRadius: '12px',
+            fontSize: '15px',
+            fontWeight: 600,
+          }}
           onClick={() => { window.location.href = buildComplaintMailto({
             email: complaint.customerEmail,
             caseNumber: complaint.caseNumber,
@@ -294,7 +296,14 @@ export function ComplaintDetail({
           Responder por correo
         </Button>
 
-        <Button type="button" className="h-11" disabled={action !== null} onClick={confirmStatusChange}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 bg-white"
+          style={{ borderRadius: '12px', fontSize: '15px', fontWeight: 600 }}
+          disabled={action !== null}
+          onClick={confirmStatusChange}
+        >
           {action === 'status'
             ? <Loader2 className="animate-spin" aria-hidden="true" />
             : nextStatus === 'attended'

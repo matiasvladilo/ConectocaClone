@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, Search } from 'lucide-react';
+import { CalendarDays, RotateCcw, Search } from 'lucide-react';
 
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { applyComplaintFilter, hasActiveComplaintFilters } from './adminPanelState';
+import {
+  applyComplaintFilter,
+  applyComplaintOriginFilter,
+  complaintOriginFilterValue,
+  hasActiveComplaintFilters,
+} from './adminPanelState';
 import type { ComplaintFilters as ComplaintFiltersValue } from './types';
 
 export interface ComplaintFiltersProps {
@@ -14,10 +19,11 @@ export interface ComplaintFiltersProps {
   disabled?: boolean;
 }
 
-const selectClassName = 'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500';
+const selectClassName = 'h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function ComplaintFilters({ value, branches, onChange, disabled = false }: ComplaintFiltersProps) {
   const [search, setSearch] = useState(value.search);
+  const [datesOpen, setDatesOpen] = useState(false);
   const latestValueRef = useRef(value);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -48,6 +54,7 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = null;
     setSearch('');
+    setDatesOpen(false);
     onChange(applyComplaintFilter(value, {
       search: '',
       status: '',
@@ -58,10 +65,74 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
     }));
   }
 
+  const originValue = complaintOriginFilterValue(value);
+  const hasDates = Boolean(value.dateFrom || value.dateTo);
+  const showDates = datesOpen || hasDates;
+
   return (
-    <fieldset disabled={disabled} aria-labelledby="complaint-filters-title" className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
-      <legend id="complaint-filters-title" className="text-base font-bold text-gray-900">Buscar y filtrar</legend>
-      <div className="flex justify-end">
+    <fieldset disabled={disabled} aria-label="Buscar y filtrar reclamos" className="space-y-3">
+      <div className="relative">
+        <Label htmlFor="complaints-search" className="sr-only">Número, cliente o descripción</Label>
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+        <Input
+          id="complaints-search"
+          type="search"
+          value={search}
+          onChange={event => handleSearchChange(event.target.value)}
+          placeholder="Buscar por número, correo o palabras clave"
+          autoComplete="off"
+          className="h-10 bg-white pl-9"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="complaints-status" className="sr-only">Estado</Label>
+          <select
+            id="complaints-status"
+            value={value.status}
+            onChange={event => updateFilter({ status: event.target.value as ComplaintFiltersValue['status'] })}
+            className={selectClassName}
+          >
+            <option value="">Estado: todos</option>
+            <option value="pending">Pendientes</option>
+            <option value="attended">Atendidos</option>
+          </select>
+        </div>
+
+        <div>
+          <Label htmlFor="complaints-origin" className="sr-only">Origen o sucursal</Label>
+          <select
+            id="complaints-origin"
+            value={originValue}
+            onChange={event => onChange(applyComplaintOriginFilter(value, event.target.value))}
+            className={selectClassName}
+          >
+            <option value="">Origen: todos</option>
+            {branches.length > 0 && (
+              <optgroup label="Sucursales">
+                {branches.map(branch => <option key={branch.id} value={`branch:${branch.id}`}>{branch.name.trim()}</option>)}
+              </optgroup>
+            )}
+            {originValue === 'branch' && <option value="branch">Cualquier sucursal</option>}
+            <option value="production">Producción / producto</option>
+            <option value="other">Otro / no sabe</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setDatesOpen(open => !open)}
+          aria-expanded={showDates}
+          aria-controls="complaints-dates"
+        >
+          <CalendarDays aria-hidden="true" />
+          Fechas
+        </Button>
         {hasActiveComplaintFilters({ ...value, search }) && (
           <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
             <RotateCcw aria-hidden="true" />
@@ -70,66 +141,8 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="md:col-span-2 xl:col-span-4">
-          <Label htmlFor="complaints-search">Número, cliente o descripción</Label>
-          <div className="relative mt-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
-            <Input
-              id="complaints-search"
-              type="search"
-              value={search}
-              onChange={event => handleSearchChange(event.target.value)}
-              placeholder="Ej.: REC-2026, correo o palabras clave"
-              autoComplete="off"
-              className="h-10 pl-9"
-            />
-          </div>
-        </div>
-
-        <div>
-          <Label htmlFor="complaints-status">Estado</Label>
-          <select
-            id="complaints-status"
-            value={value.status}
-            onChange={event => updateFilter({ status: event.target.value as ComplaintFiltersValue['status'] })}
-            className={`${selectClassName} mt-2`}
-          >
-            <option value="">Todos</option>
-            <option value="pending">Pendiente</option>
-            <option value="attended">Atendido</option>
-          </select>
-        </div>
-
-        <div>
-          <Label htmlFor="complaints-origin">Origen</Label>
-          <select
-            id="complaints-origin"
-            value={value.originType}
-            onChange={event => updateFilter({ originType: event.target.value as ComplaintFiltersValue['originType'] })}
-            className={`${selectClassName} mt-2`}
-          >
-            <option value="">Todos</option>
-            <option value="branch">Sucursal</option>
-            <option value="production">Producción / producto</option>
-            <option value="other">Otro / no sabe</option>
-          </select>
-        </div>
-
-        <div>
-          <Label htmlFor="complaints-branch">Sucursal</Label>
-          <select
-            id="complaints-branch"
-            value={value.branchId}
-            onChange={event => updateFilter({ branchId: event.target.value })}
-            className={`${selectClassName} mt-2`}
-          >
-            <option value="">Todas</option>
-            {branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
+      {showDates && (
+        <div id="complaints-dates" className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="complaints-date-from">Desde</Label>
             <Input
@@ -137,7 +150,7 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
               type="date"
               value={value.dateFrom}
               onChange={event => updateFilter({ dateFrom: event.target.value })}
-              className="mt-2 h-10"
+              className="mt-2 h-10 bg-white"
             />
           </div>
           <div>
@@ -147,11 +160,11 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
               type="date"
               value={value.dateTo}
               onChange={event => updateFilter({ dateTo: event.target.value })}
-              className="mt-2 h-10"
+              className="mt-2 h-10 bg-white"
             />
           </div>
         </div>
-      </div>
+      )}
     </fieldset>
   );
 }
