@@ -41,6 +41,14 @@ import { Bell } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { motion, AnimatePresence } from "motion/react";
 import { notifyNewOrder, notifyOrderUpdate, playNotificationSound } from "./utils/notificationSound";
+import { ComplaintsPanel } from "./features/complaints/ComplaintsPanel";
+import { complaintsAPI } from "./features/complaints/api";
+import {
+  COMPLAINT_DEEP_LINK_KEY,
+  complaintDeepLinkDecision,
+  complaintIdFromLocation,
+} from "./features/complaints/deepLink";
+import { ProfileRestoreCoordinator } from "./features/complaints/profileRestoreGuard";
 
 // CONECTOCA - Sistema de gestión de pedidos y producción
 
@@ -159,6 +167,7 @@ type Pantalla =
   | "productionAreas"
   | "ingredients"
   | "productIngredients"
+  | "complaints"
   | "bakeryKds";
 
 export default function App() {
@@ -189,6 +198,9 @@ export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(
     null,
   );
+  const [pendingComplaintId, setPendingComplaintId] = useState<string | null>(null);
+  const [pendingComplaintsCount, setPendingComplaintsCount] = useState<number | undefined>();
+  const [isProfileVerified, setIsProfileVerified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isInitialOrdersLoading, setIsInitialOrdersLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -205,11 +217,18 @@ export default function App() {
   const hasLoadedInitialOrders = useRef(false);
   const initialOrderIds = useRef<Set<string>>(new Set());
   const previousNotificationIds = useRef<Set<string>>(new Set());
+  const profileRestoreCoordinatorRef = useRef(new ProfileRestoreCoordinator());
+  const pendingSignOutGenerationRef = useRef<number | null>(null);
 
   const supabase = createClient();
 
   // Check for existing session on mount
   useEffect(() => {
+    const linkedComplaintId = complaintIdFromLocation(window.location.search);
+    if (linkedComplaintId) {
+      sessionStorage.setItem(COMPLAINT_DEEP_LINK_KEY, linkedComplaintId);
+    }
+
     // Configure viewport for mobile - CRITICAL for sharp rendering
     let viewport = document.querySelector(
       'meta[name="viewport"]',
@@ -255,16 +274,38 @@ export default function App() {
       console.log(`🔑 Evento de sesión Supabase: ${event}`, session ? "Sesión activa" : "Sin sesión");
 
       if (session?.access_token) {
+        const sessionUpdate = profileRestoreCoordinatorRef.current.updateSession(
+          session.user.id,
+          session.access_token,
+        );
+        if (sessionUpdate === 'identity-changed') {
+          setIsProfileVerified(false);
+          setCurrentUser(null);
+          setCurrentScreen("login");
+          setLoading(false);
+        }
         // Restaurar silenciosamente o en background si recibimos un nuevo token refescado
         if (accessToken !== session.access_token) {
           console.log("✅ Token actualizado por evento automático");
           setAccessToken(session.access_token);
         }
       } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        const pendingSignOutGeneration = pendingSignOutGenerationRef.current;
+        if (
+          pendingSignOutGeneration !== null
+          && !profileRestoreCoordinatorRef.current.isGenerationCurrent(pendingSignOutGeneration)
+        ) {
+          pendingSignOutGenerationRef.current = null;
+          console.log("⚠️ Evento de cierre obsoleto ignorado");
+          return;
+        }
         console.log("⚠️ Sesión cerrada detectada");
+        pendingSignOutGenerationRef.current = null;
+        profileRestoreCoordinatorRef.current.invalidate();
         localStorage.removeItem('conectoca_cached_user');
         setAccessToken(null);
         setCurrentUser(null);
+        setIsProfileVerified(false);
         setCurrentScreen("login");
         setLoading(false);
       }
@@ -275,6 +316,35 @@ export default function App() {
     };
     // initializeDemoUsers(); // Disabled to prevent blocking login requests on load
   }, []);
+
+  useEffect(() => {
+    if (!isProfileVerified || currentScreen !== "profile" || currentUser?.role !== "admin" || !accessToken) {
+      setPendingComplaintsCount(undefined);
+      return;
+    }
+
+    let active = true;
+    setPendingComplaintsCount(undefined);
+    void complaintsAPI.list(accessToken, {
+      search: "",
+      status: "pending",
+      originType: "",
+      branchId: "",
+      dateFrom: "",
+      dateTo: "",
+      page: 1,
+      limit: 1,
+    }).then(page => {
+      if (active) setPendingComplaintsCount(page.pagination.total);
+    }).catch(error => {
+      console.warn("No se pudo cargar el contador de reclamos pendientes", error);
+      if (active) setPendingComplaintsCount(undefined);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken, currentScreen, currentUser?.role, isProfileVerified]);
 
   // Initialize audio on first user interaction
   useEffect(() => {
@@ -556,15 +626,17 @@ export default function App() {
 
       if (session?.access_token) {
         console.log("✅ Valid session found, restoring...");
-        await handleSessionRestore(session.access_token);
+        await handleSessionRestore(session.access_token, session.user.id);
       } else {
         console.log("⚠️ No valid session found");
+        profileRestoreCoordinatorRef.current.invalidate();
         setAccessToken(null); // Explicitly set to null when no session
         setCurrentUser(null);
         setLoading(false);
       }
     } catch (error) {
       console.error("Error in checkSession:", error);
+      profileRestoreCoordinatorRef.current.invalidate();
       setAccessToken(null); // Explicitly set to null on exception
       setCurrentUser(null);
       setLoading(false);
@@ -573,13 +645,56 @@ export default function App() {
 
   const CACHED_USER_KEY = 'conectoca_cached_user';
 
-  const handleSessionRestore = async (token: string) => {
+  const restoredScreenForUser = (user: User, profileSource: 'cache' | 'remote'): Pantalla => {
+    const storedComplaintId = sessionStorage.getItem(COMPLAINT_DEEP_LINK_KEY);
+    const decision = complaintDeepLinkDecision(profileSource, user.role, storedComplaintId);
+    if (decision.kind === 'none') {
+      return user.role === 'pastry' ? "bakeryKds" : "home";
+    }
+    if (decision.kind === 'defer') return "home";
+
+    if (decision.consume) {
+      sessionStorage.removeItem(COMPLAINT_DEEP_LINK_KEY);
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.hash}`,
+      );
+    }
+
+    if (decision.kind === 'deny') {
+      setPendingComplaintId(null);
+      toast.error('No tienes permiso para acceder al panel de reclamos.');
+      return "home";
+    }
+
+    if (decision.kind !== 'open') {
+      return user.role === 'pastry' ? "bakeryKds" : "home";
+    }
+
+    setPendingComplaintId(decision.complaintId);
+    return "complaints";
+  };
+
+  const handleSessionRestore = async (
+    token: string,
+    sessionIdentity: string,
+    expectedGeneration?: number,
+  ): Promise<boolean> => {
+    const attempt = expectedGeneration === undefined
+      ? profileRestoreCoordinatorRef.current.begin(sessionIdentity, token)
+      : profileRestoreCoordinatorRef.current.begin(sessionIdentity, token, expectedGeneration);
+    if (!attempt) return false;
+
     try {
       console.log("🔄 Restoring session...");
       setAccessToken(token);
+      setIsProfileVerified(false);
+      setPendingComplaintId(null);
 
       console.log("📋 Fetching user profile...");
       const profile = await profileAPI.get(token);
+      if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
       console.log(
         `✓ Profile loaded: ${profile.name} (${profile.role})`,
       );
@@ -596,18 +711,15 @@ export default function App() {
       localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
 
       setCurrentUser(user);
-
-      if (user.role === 'pastry') {
-        setCurrentScreen("bakeryKds");
-      } else {
-        setCurrentScreen("home");
-      }
+      setIsProfileVerified(true);
+      setCurrentScreen(restoredScreenForUser(user, 'remote'));
 
       console.log(" Loading orders...");
       setIsInitialOrdersLoading(true);
 
       // Load orders in background to not block UI login transition
-      loadOrders(token).then(() => {
+      const currentToken = profileRestoreCoordinatorRef.current.currentToken(attempt) ?? token;
+      loadOrders(currentToken).then(() => {
         setIsInitialOrdersLoading(false);
       }).catch(err => {
         console.error("Failed to load initial orders", err);
@@ -615,8 +727,9 @@ export default function App() {
       });
 
       console.log("✓ Session restored successfully");
-      setLoading(false); // CRITICAL: Set loading to false after successful restore
+      return true;
     } catch (error: any) {
+      if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
       console.error("❌ Error restoring session:", error);
 
       const errorMessage = error.message || "";
@@ -629,10 +742,15 @@ export default function App() {
 
       if (isAuthError) {
         // Solo borrar la sesión si es un error estrictamente de autenticación (Expirada / Inválida)
+        pendingSignOutGenerationRef.current = attempt.generation;
         await supabase.auth.signOut();
+        if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
+        pendingSignOutGenerationRef.current = null;
+        profileRestoreCoordinatorRef.current.invalidate();
         localStorage.removeItem(CACHED_USER_KEY);
         setAccessToken(null);
         setCurrentUser(null);
+        setIsProfileVerified(false);
         setCurrentScreen("login");
         toast.error("Sesión inválida o expirada. Por favor inicia sesión nuevamente.");
       } else {
@@ -641,23 +759,25 @@ export default function App() {
         if (cachedUserStr) {
           try {
             const cachedUser: User = JSON.parse(cachedUserStr);
+            if (!profileRestoreCoordinatorRef.current.canUseCachedUser(attempt, cachedUser.id)) {
+              localStorage.removeItem(CACHED_USER_KEY);
+              throw new Error('El perfil cacheado pertenece a otra sesión');
+            }
             console.log("⚡ Usando perfil cacheado:", cachedUser.name);
             setCurrentUser(cachedUser);
-            if (cachedUser.role === 'pastry') {
-              setCurrentScreen("bakeryKds");
-            } else {
-              setCurrentScreen("home");
-            }
+            setIsProfileVerified(false);
+            setCurrentScreen(restoredScreenForUser(cachedUser, 'cache'));
             setIsInitialOrdersLoading(true);
-            loadOrders(token).then(() => {
+            const currentToken = profileRestoreCoordinatorRef.current.currentToken(attempt) ?? token;
+            loadOrders(currentToken).then(() => {
               setIsInitialOrdersLoading(false);
             }).catch(err => {
               console.error("Failed to load initial orders with cached user", err);
               setIsInitialOrdersLoading(false);
             });
-            setLoading(false);
             // Refrescar perfil en segundo plano
-            profileAPI.get(token).then((profile) => {
+            profileAPI.get(currentToken).then((profile) => {
+              if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return;
               const updatedUser: User = {
                 id: profile.id,
                 name: profile.name,
@@ -667,19 +787,28 @@ export default function App() {
               };
               localStorage.setItem(CACHED_USER_KEY, JSON.stringify(updatedUser));
               setCurrentUser(updatedUser);
-            }).catch(() => {});
-            return;
+              setIsProfileVerified(true);
+              setCurrentScreen(restoredScreenForUser(updatedUser, 'remote'));
+            }).catch((profileError) => {
+              if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return;
+              console.warn("No se pudo verificar el perfil remoto; el enlace de reclamos sigue pendiente", profileError);
+            });
+            return true;
           } catch {
             // Si el caché está corrupto, ignorar y mostrar login
           }
         }
         // Sin caché: mostrar advertencia y redirigir al login
         toast.warning("Hubo un problema de conexión al cargar la app. Por favor inicia sesión nuevamente.");
-        setLoading(false);
+        setIsProfileVerified(false);
         setCurrentScreen("login");
       }
 
-      setLoading(false); // Liberar carga
+      return false;
+    } finally {
+      if (profileRestoreCoordinatorRef.current.isCurrent(attempt)) {
+        setLoading(false);
+      }
     }
   };
 
@@ -1161,6 +1290,10 @@ export default function App() {
     password: string,
     rememberMe: boolean = true,
   ) => {
+    const loginGeneration = profileRestoreCoordinatorRef.current.invalidate();
+    setIsProfileVerified(false);
+    setCurrentUser(null);
+    setCurrentScreen("login");
     try {
       console.log(`🔐 Attempting login for: ${email}`);
       // Aplicar la preferencia ANTES de iniciar sesión para que el token se persista
@@ -1187,7 +1320,12 @@ export default function App() {
       }
 
       console.log("✓ Login successful, restoring session...");
-      await handleSessionRestore(session.access_token);
+      const restored = await handleSessionRestore(
+        session.access_token,
+        session.user.id,
+        loginGeneration,
+      );
+      if (!restored) return;
 
       // Initialize audio context on successful login
       const { initializeAudio } = await import('./utils/notificationSound');
@@ -1204,14 +1342,23 @@ export default function App() {
 
 
   const handleLogout = async (silent: boolean = false) => {
+    const logoutGeneration = profileRestoreCoordinatorRef.current.invalidate();
+    pendingSignOutGenerationRef.current = logoutGeneration;
+    setIsProfileVerified(false);
     try {
       await supabase.auth.signOut();
+      if (!profileRestoreCoordinatorRef.current.isGenerationCurrent(logoutGeneration)) return;
+      pendingSignOutGenerationRef.current = null;
+      profileRestoreCoordinatorRef.current.invalidate();
       localStorage.removeItem('conectoca_cached_user');
       setCurrentUser(null);
       setAccessToken(null);
       setOrders([]);
       setIsInitialOrdersLoading(false);
       setNotifications([]);
+      setPendingComplaintId(null);
+      setPendingComplaintsCount(undefined);
+      setIsProfileVerified(false);
       hasLoadedInitialOrders.current = false; // Reset notification flag
       initialOrderIds.current.clear(); // Clear initial order IDs
       setCurrentScreen("login");
@@ -1219,12 +1366,18 @@ export default function App() {
         toast.success("Sesión cerrada");
       }
     } catch (error) {
+      if (!profileRestoreCoordinatorRef.current.isGenerationCurrent(logoutGeneration)) return;
+      pendingSignOutGenerationRef.current = null;
+      profileRestoreCoordinatorRef.current.invalidate();
       console.error("Logout error:", error);
       // Always clear state even if signOut fails
       setCurrentUser(null);
       setAccessToken(null);
       setOrders([]);
       setNotifications([]);
+      setPendingComplaintId(null);
+      setPendingComplaintsCount(undefined);
+      setIsProfileVerified(false);
       setCurrentScreen("login");
       if (!silent) {
         toast.error("Error al cerrar sesión");
@@ -1724,6 +1877,14 @@ export default function App() {
               ? () => setCurrentScreen("distribucion")
               : undefined
           }
+          onViewComplaints={
+            isProfileVerified && currentUser.role === "admin"
+              ? () => setCurrentScreen("complaints")
+              : undefined
+          }
+          pendingComplaintsCount={
+            isProfileVerified && currentUser.role === "admin" ? pendingComplaintsCount : undefined
+          }
           onManageProducts={() => setCurrentScreen("products")}
           onManageProductionAreas={
             currentUser.role === "admin"
@@ -1757,6 +1918,18 @@ export default function App() {
         <DistributionPanel
           onBack={() => setCurrentScreen("profile")}
           accessToken={accessToken}
+        />
+      )}
+
+      {currentScreen === "complaints" && isProfileVerified && currentUser?.role === "admin" && accessToken && (
+        <ComplaintsPanel
+          accessToken={accessToken}
+          initialComplaintId={pendingComplaintId}
+          onComplaintClose={() => setPendingComplaintId(null)}
+          onBack={() => {
+            setPendingComplaintId(null);
+            setCurrentScreen("profile");
+          }}
         />
       )}
 
