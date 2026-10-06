@@ -77,13 +77,33 @@ interface ComplaintRow {
   customer_name: string | null;
   customer_phone: string | null;
   description: string;
+  attachment_count: number;
 }
 
-function throwIfError(error: { message: string } | null): void {
-  if (error) throw new Error(error.message);
+interface SupabaseError {
+  message: string;
+  code?: string;
+  details?: string;
+  hint?: string;
 }
 
-function toStoredComplaint(row: ComplaintRow, attachmentCount: number): StoredComplaint {
+export class ComplaintRepositoryError extends Error {
+  readonly operation: string;
+  readonly supabaseCode: string | null;
+
+  constructor(operation: string, error: SupabaseError) {
+    super(`Supabase ${operation} failed: ${error.message}`);
+    this.name = 'ComplaintRepositoryError';
+    this.operation = operation;
+    this.supabaseCode = error.code ?? null;
+  }
+}
+
+function throwIfError(operation: string, error: SupabaseError | null): void {
+  if (error) throw new ComplaintRepositoryError(operation, error);
+}
+
+function toStoredComplaint(row: ComplaintRow): StoredComplaint {
   return {
     id: row.id,
     caseNumber: row.case_number,
@@ -94,7 +114,7 @@ function toStoredComplaint(row: ComplaintRow, attachmentCount: number): StoredCo
     customerName: row.customer_name,
     customerPhone: row.customer_phone,
     description: row.description,
-    attachmentCount,
+    attachmentCount: row.attachment_count,
   };
 }
 
@@ -109,7 +129,7 @@ export function createSupabaseComplaintRepository(
         .eq('business_id', businessId)
         .eq('role', 'local')
         .order('name', { ascending: true });
-      throwIfError(error);
+      throwIfError('list branches', error);
       return (data ?? []).map((row: { id: string; name: string }) => ({
         id: row.id,
         name: row.name,
@@ -124,7 +144,7 @@ export function createSupabaseComplaintRepository(
         .eq('role', 'local')
         .eq('id', id)
         .maybeSingle();
-      throwIfError(error);
+      throwIfError('find branch', error);
       return data ? { id: data.id, name: data.name } : null;
     },
 
@@ -133,7 +153,7 @@ export function createSupabaseComplaintRepository(
         p_key_hash: keyHash,
         p_limit: 5,
       });
-      throwIfError(error);
+      throwIfError('consume rate limit', error);
       return data === true;
     },
 
@@ -142,63 +162,40 @@ export function createSupabaseComplaintRepository(
         contentType: file.type,
         upsert: false,
       });
-      throwIfError(error);
+      throwIfError('upload evidence', error);
     },
 
     async removeEvidence(paths) {
       if (paths.length === 0) return;
       const { error } = await client.storage.from(EVIDENCE_BUCKET).remove(paths);
-      throwIfError(error);
+      throwIfError('remove evidence', error);
     },
 
     async insertComplaint(input, attachments) {
-      const { data, error } = await client
-        .from('complaints')
-        .insert({
-          id: input.id,
-          business_id: input.businessId,
-          origin_type: input.originType,
-          branch_profile_id: input.branchProfileId,
-          branch_name_snapshot: input.branchNameSnapshot,
-          customer_email: input.customerEmail,
-          customer_name: input.customerName,
-          customer_phone: input.customerPhone,
-          description: input.description,
-        })
-        .select([
-          'id',
-          'case_number',
-          'created_at',
-          'origin_type',
-          'branch_name_snapshot',
-          'customer_email',
-          'customer_name',
-          'customer_phone',
-          'description',
-        ].join(', '))
-        .single();
-      throwIfError(error);
-
-      try {
-        if (attachments.length > 0) {
-          const attachmentResult = await client.from('complaint_attachments').insert(
-            attachments.map(attachment => ({
-              id: attachment.id,
-              complaint_id: attachment.complaintId,
-              storage_path: attachment.storagePath,
-              original_name: attachment.originalName,
-              mime_type: attachment.mimeType,
-              size_bytes: attachment.sizeBytes,
-            })),
-          );
-          throwIfError(attachmentResult.error);
-        }
-      } catch (attachmentError) {
-        await client.from('complaints').delete().eq('id', input.id);
-        throw attachmentError;
+      const { data, error } = await client.rpc('insert_complaint_with_attachments', {
+        p_id: input.id,
+        p_business_id: input.businessId,
+        p_origin_type: input.originType,
+        p_branch_profile_id: input.branchProfileId,
+        p_branch_name_snapshot: input.branchNameSnapshot,
+        p_customer_email: input.customerEmail,
+        p_customer_name: input.customerName,
+        p_customer_phone: input.customerPhone,
+        p_description: input.description,
+        p_attachments: attachments.map(attachment => ({
+          id: attachment.id,
+          storage_path: attachment.storagePath,
+          original_name: attachment.originalName,
+          mime_type: attachment.mimeType,
+          size_bytes: attachment.sizeBytes,
+        })),
+      });
+      throwIfError('insert complaint with attachments', error);
+      if (!data) {
+        throw new Error('Supabase insert complaint with attachments returned no data');
       }
 
-      return toStoredComplaint(data as ComplaintRow, attachments.length);
+      return toStoredComplaint(data as ComplaintRow);
     },
 
     async updateEmailResult(id, kind, result) {
@@ -210,7 +207,7 @@ export function createSupabaseComplaintRepository(
           [`${kind}_email_error`]: result.error,
         })
         .eq('id', id);
-      throwIfError(error);
+      throwIfError('update email result', error);
     },
   };
 }

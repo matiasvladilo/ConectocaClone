@@ -45,8 +45,8 @@ const allowedOrigins = new Set([
 
 app.use('/complaints/*', cors({
   origin: origin => allowedOrigins.has(origin) ? origin : undefined,
-  allowHeaders: ['Content-Type'],
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   maxAge: 600,
 }));
 

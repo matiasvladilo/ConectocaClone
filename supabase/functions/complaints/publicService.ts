@@ -9,11 +9,16 @@ import {
 import { buildCentralNotification, buildCustomerConfirmation } from './emailTemplates.ts';
 import type { ComplaintMailer } from './mailer.ts';
 import type {
+  ComplaintRepositoryError,
   ComplaintRepository,
   EmailResult,
   NewAttachmentRecord,
   StoredComplaint,
 } from './repository.ts';
+
+export interface ComplaintTelemetry {
+  error(event: string, context: Record<string, unknown>): void;
+}
 
 export interface PublicComplaintSubmission {
   fields: RawComplaintFields;
@@ -62,6 +67,7 @@ interface PublicComplaintServiceOptions {
   fromEmail: string;
   repository: ComplaintRepository;
   mailer: ComplaintMailer;
+  logger?: ComplaintTelemetry;
   now?: () => Date;
   uuid?: () => string;
 }
@@ -84,21 +90,35 @@ function reducedError(error: unknown): string {
   return message.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Unknown email error';
 }
 
+function telemetryError(error: unknown): string {
+  const repositoryError = error as Partial<ComplaintRepositoryError>;
+  if (repositoryError.name === 'ComplaintRepositoryError' && repositoryError.operation) {
+    const code = repositoryError.supabaseCode ? ` (${repositoryError.supabaseCode})` : '';
+    return `Supabase ${repositoryError.operation} failed${code}`;
+  }
+  return reducedError(error);
+}
+
 async function ignoreCleanupFailure(
   repository: ComplaintRepository,
   paths: string[],
+  logger: ComplaintTelemetry,
 ): Promise<void> {
   if (paths.length === 0) return;
   try {
     await repository.removeEvidence(paths);
-  } catch {
-    // The original persistence failure remains the useful error for this request.
+  } catch (error) {
+    logger.error('complaint_evidence_cleanup_failed', {
+      pathCount: paths.length,
+      error: telemetryError(error),
+    });
   }
 }
 
 export function createPublicComplaintService(options: PublicComplaintServiceOptions) {
   const now = options.now ?? (() => new Date());
   const uuid = options.uuid ?? (() => crypto.randomUUID());
+  const logger = options.logger ?? console;
 
   async function recordEmail(
     complaint: StoredComplaint,
@@ -116,8 +136,13 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
 
     try {
       await options.repository.updateEmailResult(complaint.id, kind, result);
-    } catch {
-      // The complaint already exists. A bookkeeping failure must not hide its case number.
+    } catch (error) {
+      logger.error('complaint_email_result_update_failed', {
+        complaintId: complaint.id,
+        kind,
+        status: result.status,
+        error: telemetryError(error),
+      });
     }
     return result.status;
   }
@@ -131,7 +156,10 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
           branchesUnavailable: false,
           formToken,
         };
-      } catch {
+      } catch (error) {
+        logger.error('complaint_branch_list_failed', {
+          error: telemetryError(error),
+        });
         return { branches: [], branchesUnavailable: true, formToken };
       }
     },
@@ -211,7 +239,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
           uploadedPaths.push(attachments[index].storagePath);
         }
       } catch (error) {
-        await ignoreCleanupFailure(options.repository, uploadedPaths);
+        await ignoreCleanupFailure(options.repository, uploadedPaths, logger);
         throw error;
       }
 
@@ -229,7 +257,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
           description: fields.description,
         }, attachments);
       } catch (error) {
-        await ignoreCleanupFailure(options.repository, uploadedPaths);
+        await ignoreCleanupFailure(options.repository, uploadedPaths, logger);
         throw error;
       }
 
@@ -248,18 +276,20 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
         ).toString(),
       };
 
-      const confirmationEmailStatus = await recordEmail(
-        complaint,
-        'confirmation',
-        buildCustomerConfirmation(data),
-        complaint.customerEmail,
-      );
-      const notificationEmailStatus = await recordEmail(
-        complaint,
-        'notification',
-        buildCentralNotification(data),
-        options.recipientEmail,
-      );
+      const [confirmationEmailStatus, notificationEmailStatus] = await Promise.all([
+        recordEmail(
+          complaint,
+          'confirmation',
+          buildCustomerConfirmation(data),
+          complaint.customerEmail,
+        ),
+        recordEmail(
+          complaint,
+          'notification',
+          buildCentralNotification(data),
+          options.recipientEmail,
+        ),
+      ]);
 
       return {
         caseNumber: complaint.caseNumber,

@@ -71,9 +71,11 @@ function submissionForTest(
 function publicServiceForTest({
   repository,
   mailer = { send: async () => undefined },
+  logger,
 }: {
   repository: ComplaintRepository;
   mailer?: { send(input: { from: string; to: string; subject: string; html: string; text: string }): Promise<void> };
+  logger?: { error(event: string, context: Record<string, unknown>): void };
 }) {
   return createPublicComplaintService({
     businessId: 'biz-1',
@@ -83,6 +85,7 @@ function publicServiceForTest({
     fromEmail: 'reclamos@empresa.cl',
     repository,
     mailer,
+    logger,
     now: () => new Date('2026-10-05T12:00:05.000Z'),
   });
 }
@@ -191,12 +194,14 @@ test('limpia archivos previos si una carga posterior falla', async () => {
 });
 
 test('si falla el listado entrega token sin inventar sucursales', async () => {
+  const telemetry: Array<{ event: string; context: Record<string, unknown> }> = [];
   const service = publicServiceForTest({
     repository: baseRepository({
       listBranches: async () => {
         throw new Error('database unavailable');
       },
     }),
+    logger: { error: (event, context) => telemetry.push({ event, context }) },
   });
 
   const result = await service.getBranches();
@@ -204,6 +209,10 @@ test('si falla el listado entrega token sin inventar sucursales', async () => {
   assert.deepEqual(result.branches, []);
   assert.equal(result.branchesUnavailable, true);
   assert.match(result.formToken, /^\d+\.[A-Za-z0-9_-]+$/);
+  assert.deepEqual(telemetry, [{
+    event: 'complaint_branch_list_failed',
+    context: { error: 'database unavailable' },
+  }]);
 });
 
 test('el repositorio sube evidencias solo al bucket privado dedicado', async () => {
@@ -252,4 +261,183 @@ test('mailer usa Resend con bearer y reduce errores no exitosos', async () => {
   );
   assert.equal(calls[0]?.url, 'https://api.resend.com/emails');
   assert.equal(new Headers(calls[0]?.init?.headers).get('Authorization'), 'Bearer resend-secret');
+});
+
+test('repositorio persiste caso y adjuntos con una sola RPC transaccional', async () => {
+  const calls: Array<{ name: string; parameters: Record<string, unknown> }> = [];
+  const client = {
+    rpc: async (name: string, parameters: Record<string, unknown>) => {
+      calls.push({ name, parameters });
+      return {
+        data: {
+          id: 'case-1',
+          case_number: 'REC-2026-000001',
+          created_at: '2026-10-05T12:00:00.000Z',
+          origin_type: 'other',
+          branch_name_snapshot: null,
+          customer_email: 'cliente@mail.cl',
+          customer_name: null,
+          customer_phone: null,
+          description: 'Descripción suficientemente larga',
+          attachment_count: 1,
+        },
+        error: null,
+      };
+    },
+  };
+  const repository = createSupabaseComplaintRepository(client as any);
+
+  const result = await repository.insertComplaint({
+    id: 'case-1',
+    businessId: 'biz-1',
+    originType: 'other',
+    branchProfileId: null,
+    branchNameSnapshot: null,
+    customerEmail: 'cliente@mail.cl',
+    customerName: null,
+    customerPhone: null,
+    description: 'Descripción suficientemente larga',
+  }, [{
+    id: 'attachment-1',
+    complaintId: 'case-1',
+    storagePath: 'biz-1/case-1/attachment-1-a.jpg',
+    originalName: 'a.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1,
+  }]);
+
+  assert.equal(result.attachmentCount, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.name, 'insert_complaint_with_attachments');
+  assert.deepEqual(calls[0]?.parameters.p_attachments, [{
+    id: 'attachment-1',
+    storage_path: 'biz-1/case-1/attachment-1-a.jpg',
+    original_name: 'a.jpg',
+    mime_type: 'image/jpeg',
+    size_bytes: 1,
+  }]);
+});
+
+test('repositorio propaga inequívocamente el error de la RPC atómica', async () => {
+  const repository = createSupabaseComplaintRepository({
+    rpc: async () => ({ data: null, error: { message: 'atomic insert failed' } }),
+  } as any);
+
+  await assert.rejects(
+    () => repository.insertComplaint({
+      id: 'case-1',
+      businessId: 'biz-1',
+      originType: 'other',
+      branchProfileId: null,
+      branchNameSnapshot: null,
+      customerEmail: 'cliente@mail.cl',
+      customerName: null,
+      customerPhone: null,
+      description: 'Descripción suficientemente larga',
+    }, []),
+    /atomic insert failed/,
+  );
+});
+
+test('mailer aborta Resend al vencer el timeout configurado', async () => {
+  const mailer = createResendMailer({
+    apiKey: 'resend-secret',
+    timeoutMs: 5,
+    fetch: async () => await new Promise<Response>(resolve => {
+      setTimeout(() => resolve(new Response(null, { status: 200 })), 40);
+    }),
+  });
+
+  await assert.rejects(
+    () => mailer.send({
+      from: 'reclamos@empresa.cl',
+      to: 'central@empresa.cl',
+      subject: 'Nuevo reclamo',
+      html: '<p>Reclamo</p>',
+      text: 'Reclamo',
+    }),
+    (error: Error) => error.message === 'Email provider timed out',
+  );
+});
+
+test('inicia ambos correos sin esperar que termine el primero', async () => {
+  let started = 0;
+  let releaseFirst!: () => void;
+  let markSecondStarted!: () => void;
+  const firstMail = new Promise<void>(resolve => {
+    releaseFirst = resolve;
+  });
+  const secondStarted = new Promise<void>(resolve => {
+    markSecondStarted = resolve;
+  });
+  const service = publicServiceForTest({
+    repository: baseRepository(),
+    mailer: {
+      send: async () => {
+        started += 1;
+        if (started === 2) markSecondStarted();
+        if (started === 1) await firstMail;
+      },
+    },
+  });
+
+  const submission = service.submit(submissionForTest());
+  const startedBeforeFirstFinished = await Promise.race([
+    secondStarted.then(() => true),
+    new Promise<false>(resolve => setTimeout(() => resolve(false), 100)),
+  ]);
+  releaseFirst();
+  await submission;
+
+  assert.equal(startedBeforeFirstFinished, true);
+});
+
+test('reporta fallos de limpieza y registro sin exponer datos del cliente', async () => {
+  const telemetry: Array<{ event: string; context: Record<string, unknown> }> = [];
+  let uploads = 0;
+  const service = publicServiceForTest({
+    repository: baseRepository({
+      uploadEvidence: async () => {
+        uploads += 1;
+        if (uploads === 2) throw new Error('storage upload failed');
+      },
+      removeEvidence: async () => {
+        throw new Error('storage cleanup failed');
+      },
+    }),
+    logger: { error: (event, context) => telemetry.push({ event, context }) },
+  });
+
+  await assert.rejects(
+    () => service.submit(submissionForTest({ files: [jpeg('a.jpg'), jpeg('b.jpg')] })),
+    /storage upload failed/,
+  );
+
+  assert.deepEqual(telemetry, [{
+    event: 'complaint_evidence_cleanup_failed',
+    context: { pathCount: 1, error: 'storage cleanup failed' },
+  }]);
+  assert.equal(JSON.stringify(telemetry).includes('cliente@mail.cl'), false);
+});
+
+test('reporta fallos al registrar correo pero conserva el caso', async () => {
+  const telemetry: Array<{ event: string; context: Record<string, unknown> }> = [];
+  const service = publicServiceForTest({
+    repository: baseRepository({
+      updateEmailResult: async () => {
+        throw new Error('database update failed');
+      },
+    }),
+    logger: { error: (event, context) => telemetry.push({ event, context }) },
+  });
+
+  const result = await service.submit(submissionForTest());
+
+  assert.equal(result.caseNumber, 'REC-2026-000001');
+  assert.equal(telemetry.length, 2);
+  assert.deepEqual(telemetry.map(item => item.event), [
+    'complaint_email_result_update_failed',
+    'complaint_email_result_update_failed',
+  ]);
+  assert.equal(JSON.stringify(telemetry).includes('cliente@mail.cl'), false);
 });
