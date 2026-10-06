@@ -48,7 +48,7 @@ import {
   complaintDeepLinkDecision,
   complaintIdFromLocation,
 } from "./features/complaints/deepLink";
-import { ProfileRestoreGuard } from "./features/complaints/profileRestoreGuard";
+import { ProfileRestoreCoordinator } from "./features/complaints/profileRestoreGuard";
 
 // CONECTOCA - Sistema de gestión de pedidos y producción
 
@@ -217,8 +217,8 @@ export default function App() {
   const hasLoadedInitialOrders = useRef(false);
   const initialOrderIds = useRef<Set<string>>(new Set());
   const previousNotificationIds = useRef<Set<string>>(new Set());
-  const profileRestoreGuardRef = useRef(new ProfileRestoreGuard());
-  const activeSessionRef = useRef<{ sessionIdentity: string; token: string } | null>(null);
+  const profileRestoreCoordinatorRef = useRef(new ProfileRestoreCoordinator());
+  const pendingSignOutGenerationRef = useRef<number | null>(null);
 
   const supabase = createClient();
 
@@ -274,29 +274,34 @@ export default function App() {
       console.log(`🔑 Evento de sesión Supabase: ${event}`, session ? "Sesión activa" : "Sin sesión");
 
       if (session?.access_token) {
-        const nextSession = { sessionIdentity: session.user.id, token: session.access_token };
-        const previousSession = activeSessionRef.current;
-        if (
-          profileRestoreGuardRef.current.hasActiveAttempt()
-          && !profileRestoreGuardRef.current.matchesActiveSession(nextSession.sessionIdentity, nextSession.token)
-        ) {
-          profileRestoreGuardRef.current.invalidate();
-        }
-        if (previousSession && previousSession.sessionIdentity !== nextSession.sessionIdentity) {
+        const sessionUpdate = profileRestoreCoordinatorRef.current.updateSession(
+          session.user.id,
+          session.access_token,
+        );
+        if (sessionUpdate === 'identity-changed') {
           setIsProfileVerified(false);
           setCurrentUser(null);
           setCurrentScreen("login");
+          setLoading(false);
         }
-        activeSessionRef.current = nextSession;
         // Restaurar silenciosamente o en background si recibimos un nuevo token refescado
         if (accessToken !== session.access_token) {
           console.log("✅ Token actualizado por evento automático");
           setAccessToken(session.access_token);
         }
       } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        const pendingSignOutGeneration = pendingSignOutGenerationRef.current;
+        if (
+          pendingSignOutGeneration !== null
+          && !profileRestoreCoordinatorRef.current.isGenerationCurrent(pendingSignOutGeneration)
+        ) {
+          pendingSignOutGenerationRef.current = null;
+          console.log("⚠️ Evento de cierre obsoleto ignorado");
+          return;
+        }
         console.log("⚠️ Sesión cerrada detectada");
-        profileRestoreGuardRef.current.invalidate();
-        activeSessionRef.current = null;
+        pendingSignOutGenerationRef.current = null;
+        profileRestoreCoordinatorRef.current.invalidate();
         localStorage.removeItem('conectoca_cached_user');
         setAccessToken(null);
         setCurrentUser(null);
@@ -624,16 +629,14 @@ export default function App() {
         await handleSessionRestore(session.access_token, session.user.id);
       } else {
         console.log("⚠️ No valid session found");
-        profileRestoreGuardRef.current.invalidate();
-        activeSessionRef.current = null;
+        profileRestoreCoordinatorRef.current.invalidate();
         setAccessToken(null); // Explicitly set to null when no session
         setCurrentUser(null);
         setLoading(false);
       }
     } catch (error) {
       console.error("Error in checkSession:", error);
-      profileRestoreGuardRef.current.invalidate();
-      activeSessionRef.current = null;
+      profileRestoreCoordinatorRef.current.invalidate();
       setAccessToken(null); // Explicitly set to null on exception
       setCurrentUser(null);
       setLoading(false);
@@ -679,11 +682,10 @@ export default function App() {
     expectedGeneration?: number,
   ): Promise<boolean> => {
     const attempt = expectedGeneration === undefined
-      ? profileRestoreGuardRef.current.begin(sessionIdentity, token)
-      : profileRestoreGuardRef.current.begin(sessionIdentity, token, expectedGeneration);
+      ? profileRestoreCoordinatorRef.current.begin(sessionIdentity, token)
+      : profileRestoreCoordinatorRef.current.begin(sessionIdentity, token, expectedGeneration);
     if (!attempt) return false;
 
-    activeSessionRef.current = { sessionIdentity, token };
     try {
       console.log("🔄 Restoring session...");
       setAccessToken(token);
@@ -692,7 +694,7 @@ export default function App() {
 
       console.log("📋 Fetching user profile...");
       const profile = await profileAPI.get(token);
-      if (!profileRestoreGuardRef.current.isCurrent(attempt)) return false;
+      if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
       console.log(
         `✓ Profile loaded: ${profile.name} (${profile.role})`,
       );
@@ -716,7 +718,8 @@ export default function App() {
       setIsInitialOrdersLoading(true);
 
       // Load orders in background to not block UI login transition
-      loadOrders(token).then(() => {
+      const currentToken = profileRestoreCoordinatorRef.current.currentToken(attempt) ?? token;
+      loadOrders(currentToken).then(() => {
         setIsInitialOrdersLoading(false);
       }).catch(err => {
         console.error("Failed to load initial orders", err);
@@ -724,10 +727,9 @@ export default function App() {
       });
 
       console.log("✓ Session restored successfully");
-      setLoading(false); // CRITICAL: Set loading to false after successful restore
       return true;
     } catch (error: any) {
-      if (!profileRestoreGuardRef.current.isCurrent(attempt)) return false;
+      if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
       console.error("❌ Error restoring session:", error);
 
       const errorMessage = error.message || "";
@@ -740,7 +742,11 @@ export default function App() {
 
       if (isAuthError) {
         // Solo borrar la sesión si es un error estrictamente de autenticación (Expirada / Inválida)
+        pendingSignOutGenerationRef.current = attempt.generation;
         await supabase.auth.signOut();
+        if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return false;
+        pendingSignOutGenerationRef.current = null;
+        profileRestoreCoordinatorRef.current.invalidate();
         localStorage.removeItem(CACHED_USER_KEY);
         setAccessToken(null);
         setCurrentUser(null);
@@ -753,21 +759,25 @@ export default function App() {
         if (cachedUserStr) {
           try {
             const cachedUser: User = JSON.parse(cachedUserStr);
+            if (!profileRestoreCoordinatorRef.current.canUseCachedUser(attempt, cachedUser.id)) {
+              localStorage.removeItem(CACHED_USER_KEY);
+              throw new Error('El perfil cacheado pertenece a otra sesión');
+            }
             console.log("⚡ Usando perfil cacheado:", cachedUser.name);
             setCurrentUser(cachedUser);
             setIsProfileVerified(false);
             setCurrentScreen(restoredScreenForUser(cachedUser, 'cache'));
             setIsInitialOrdersLoading(true);
-            loadOrders(token).then(() => {
+            const currentToken = profileRestoreCoordinatorRef.current.currentToken(attempt) ?? token;
+            loadOrders(currentToken).then(() => {
               setIsInitialOrdersLoading(false);
             }).catch(err => {
               console.error("Failed to load initial orders with cached user", err);
               setIsInitialOrdersLoading(false);
             });
-            setLoading(false);
             // Refrescar perfil en segundo plano
-            profileAPI.get(token).then((profile) => {
-              if (!profileRestoreGuardRef.current.isCurrent(attempt)) return;
+            profileAPI.get(currentToken).then((profile) => {
+              if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return;
               const updatedUser: User = {
                 id: profile.id,
                 name: profile.name,
@@ -780,7 +790,7 @@ export default function App() {
               setIsProfileVerified(true);
               setCurrentScreen(restoredScreenForUser(updatedUser, 'remote'));
             }).catch((profileError) => {
-              if (!profileRestoreGuardRef.current.isCurrent(attempt)) return;
+              if (!profileRestoreCoordinatorRef.current.isCurrent(attempt)) return;
               console.warn("No se pudo verificar el perfil remoto; el enlace de reclamos sigue pendiente", profileError);
             });
             return true;
@@ -791,12 +801,14 @@ export default function App() {
         // Sin caché: mostrar advertencia y redirigir al login
         toast.warning("Hubo un problema de conexión al cargar la app. Por favor inicia sesión nuevamente.");
         setIsProfileVerified(false);
-        setLoading(false);
         setCurrentScreen("login");
       }
 
-      setLoading(false); // Liberar carga
       return false;
+    } finally {
+      if (profileRestoreCoordinatorRef.current.isCurrent(attempt)) {
+        setLoading(false);
+      }
     }
   };
 
@@ -1278,8 +1290,7 @@ export default function App() {
     password: string,
     rememberMe: boolean = true,
   ) => {
-    const loginGeneration = profileRestoreGuardRef.current.invalidate();
-    activeSessionRef.current = null;
+    const loginGeneration = profileRestoreCoordinatorRef.current.invalidate();
     setIsProfileVerified(false);
     setCurrentUser(null);
     setCurrentScreen("login");
@@ -1331,11 +1342,14 @@ export default function App() {
 
 
   const handleLogout = async (silent: boolean = false) => {
-    profileRestoreGuardRef.current.invalidate();
-    activeSessionRef.current = null;
+    const logoutGeneration = profileRestoreCoordinatorRef.current.invalidate();
+    pendingSignOutGenerationRef.current = logoutGeneration;
     setIsProfileVerified(false);
     try {
       await supabase.auth.signOut();
+      if (!profileRestoreCoordinatorRef.current.isGenerationCurrent(logoutGeneration)) return;
+      pendingSignOutGenerationRef.current = null;
+      profileRestoreCoordinatorRef.current.invalidate();
       localStorage.removeItem('conectoca_cached_user');
       setCurrentUser(null);
       setAccessToken(null);
@@ -1352,6 +1366,9 @@ export default function App() {
         toast.success("Sesión cerrada");
       }
     } catch (error) {
+      if (!profileRestoreCoordinatorRef.current.isGenerationCurrent(logoutGeneration)) return;
+      pendingSignOutGenerationRef.current = null;
+      profileRestoreCoordinatorRef.current.invalidate();
       console.error("Logout error:", error);
       // Always clear state even if signOut fails
       setCurrentUser(null);
