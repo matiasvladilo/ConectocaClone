@@ -18,7 +18,14 @@ import { Toaster, toast } from 'sonner';
 import { complaintsAPI } from './api';
 import { ComplaintAttachmentsInput } from './ComplaintAttachmentsInput';
 import { firstInvalidComplaintField } from './formAccessibility';
-import { getPublicComplaintRecovery } from './submissionRecovery';
+import {
+  getInvalidBranchMessage,
+  getPublicComplaintRecovery,
+  getServerRecoveryFocusTargets,
+  prepareDraftForConfigRefresh,
+  type PublicConfigRefreshMode,
+  type PublicComplaintRecovery,
+} from './submissionRecovery';
 import type {
   ComplaintDraft,
   ComplaintOrigin,
@@ -114,20 +121,16 @@ export function PublicComplaintForm() {
   const [result, setResult] = useState<{ caseNumber: string; receivedAt: string } | null>(null);
   const [submissionMessage, setSubmissionMessage] = useState<string | null>(null);
   const submissionLocked = useRef(false);
-  const formRef = useRef<HTMLFormElement>(null);
   const errorSummaryRef = useRef<HTMLElement>(null);
+  const recoveryAlertRef = useRef<HTMLParagraphElement>(null);
 
-  const refreshConfig = useCallback(async ({ clearBranch = false }: { clearBranch?: boolean } = {}) => {
+  const refreshConfig = useCallback(async (mode: PublicConfigRefreshMode) => {
+    if (mode === 'invalid-branch') {
+      setDraft(current => prepareDraftForConfigRefresh(current, mode));
+    }
     try {
       const nextConfig = await complaintsAPI.getPublicConfig();
       setConfig(nextConfig);
-      setDraft(current => {
-        if (clearBranch) return { ...current, branchId: '' };
-        if (!current.branchId || nextConfig.branches.some(branch => branch.id === current.branchId)) {
-          return current;
-        }
-        return { ...current, branchId: '' };
-      });
       return true;
     } catch {
       return false;
@@ -136,7 +139,7 @@ export function PublicComplaintForm() {
 
   const loadConfig = useCallback(async () => {
     setState('loading');
-    setState(await refreshConfig() ? 'ready' : 'error');
+    setState(await refreshConfig('initial') ? 'ready' : 'error');
   }, [refreshConfig]);
 
   useEffect(() => {
@@ -162,6 +165,22 @@ export function PublicComplaintForm() {
     });
   }
 
+  function focusServerRecovery(recovery: PublicComplaintRecovery) {
+    const [alertId, nextFieldId] = getServerRecoveryFocusTargets(recovery);
+    window.requestAnimationFrame(() => {
+      const alert = document.getElementById(alertId) ?? recoveryAlertRef.current ?? errorSummaryRef.current;
+      alert?.focus();
+      alert?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (!nextFieldId) return;
+
+      window.requestAnimationFrame(() => {
+        const field = document.getElementById(nextFieldId) ?? alert;
+        field?.focus();
+        field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    });
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (submissionLocked.current || state === 'submitting') return;
@@ -183,19 +202,17 @@ export function PublicComplaintForm() {
     } catch (error) {
       const recovery = getPublicComplaintRecovery(error);
       if (recovery === 'refresh-token') {
-        const refreshed = await refreshConfig();
+        const refreshed = await refreshConfig('form-token');
         setSubmissionMessage(refreshed
           ? 'Actualizamos el formulario porque expiró. Tus datos y archivos se conservaron; puedes enviarlo nuevamente.'
           : 'El formulario expiró y no pudimos actualizarlo. Tus datos y archivos se conservaron; revisa tu conexión e inténtalo nuevamente.');
       } else if (recovery === 'refresh-branches') {
-        const refreshed = await refreshConfig({ clearBranch: true });
-        setErrors(current => ({
-          ...current,
-          branchId: refreshed
-            ? 'La sucursal seleccionada ya no está disponible. Selecciona otra sucursal.'
-            : 'La sucursal seleccionada ya no está disponible. Revisa tu conexión y selecciona otra sucursal.',
-        }));
-        setSubmissionMessage('Actualizamos las sucursales y limpiamos la selección que ya no está disponible. Tus datos y archivos se conservaron.');
+        const refreshed = await refreshConfig('invalid-branch');
+        const branchMessage = getInvalidBranchMessage(refreshed);
+        setErrors(current => ({ ...current, branchId: branchMessage }));
+        setSubmissionMessage(refreshed
+          ? 'Actualizamos las sucursales y limpiamos la selección que ya no está disponible. Tus datos y archivos se conservaron.'
+          : branchMessage);
       } else if (recovery === 'rate-limited') {
         setSubmissionMessage('No podemos recibir más reclamos desde esta conexión por ahora. Espera una hora e inténtalo nuevamente.');
       } else {
@@ -204,6 +221,7 @@ export function PublicComplaintForm() {
       }
       setState('ready');
       submissionLocked.current = false;
+      focusServerRecovery(recovery);
     }
   }
 
@@ -227,7 +245,7 @@ export function PublicComplaintForm() {
       </header>
 
       <main className="mx-auto -mt-8 max-w-2xl px-4 pb-12 sm:px-6">
-        <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
           {Object.keys(errors).length > 0 && (
             <section ref={errorSummaryRef} tabIndex={-1} role="alert" aria-labelledby="complaint-error-summary-title" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900">
               <h2 id="complaint-error-summary-title" className="font-bold">Revisa los campos marcados antes de enviar</h2>
@@ -237,7 +255,7 @@ export function PublicComplaintForm() {
             </section>
           )}
           {submissionMessage && (
-            <p role="alert" aria-live="assertive" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+            <p id="complaint-recovery-alert" ref={recoveryAlertRef} tabIndex={-1} role="alert" aria-live="assertive" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
               {submissionMessage}
             </p>
           )}
