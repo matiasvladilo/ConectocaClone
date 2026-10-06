@@ -667,6 +667,44 @@ export const productsAPI = {
       total: Number(data[0].total),
     };
   },
+
+  // Igual que previewLotPrice, pero para EDITAR un pedido existente en vez de
+  // crear uno nuevo. No se puede reusar previewLotPrice acá: ese RPC simula
+  // un consumo fresco contra product_lots.cantidad_restante, que YA tiene
+  // descontadas las unidades que este mismo pedido reservó la primera vez —
+  // daría un precio más caro del real (reproducido en vivo: pedido de 4
+  // unidades con 3 ya tomadas de un lote agotado en la base mostraba el
+  // costo del lote siguiente para esas mismas 4 unidades). Esta versión usa
+  // `previsualizar_precio_lotes_edicion`, que parte del desglose real que el
+  // pedido ya tiene (order_item_lots) y solo simula el delta — consumo
+  // fresco si sube, devolución si baja — igual que update_order_with_stock.
+  previewLotPriceEdicion: async (
+    token: string,
+    orderId: string,
+    productId: string,
+    quantity: number
+  ): Promise<{ precioUnitario: number; total: number } | null> => {
+    const supabase = createClient(
+      `https://${projectId}.supabase.co`,
+      publicAnonKey,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+
+    const { data, error } = await supabase.rpc('previsualizar_precio_lotes_edicion', {
+      p_order_id: orderId,
+      p_product_id: productId,
+      p_cantidad_nueva: quantity,
+    });
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    return {
+      precioUnitario: Number(data[0].precio_unitario),
+      total: Number(data[0].total),
+    };
+  },
 };
 
 // Ingredients API (Materias Primas)

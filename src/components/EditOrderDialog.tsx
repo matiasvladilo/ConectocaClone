@@ -39,11 +39,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Order } from '../App';
-import { productsAPI, ordersAPI, type Product as APIProduct } from '../utils/api';
+import { productsAPI, ordersAPI, categoriesAPI, type Product as APIProduct, type Category } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { canEditOrder } from '../utils/orderPermissions';
+import { productoUsaLotes } from '../utils/productLots';
 
 
 interface EditOrderDialogProps {
@@ -74,20 +75,59 @@ export function EditOrderDialog({
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [products, setProducts] = useState<APIProduct[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
     const [notes, setNotes] = useState('');
     const [deadline, setDeadline] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
     const [decimalInputs, setDecimalInputs] = useState<Record<string, string>>({});
+    // Precio real (promedio ponderado de lotes FIFO) por producto, igual que en
+    // NewOrderForm: price × quantity es una estimación con el precio de
+    // catálogo, y puede quedar lejos del cobro real si la cantidad editada
+    // cruza dos lotes de costo distinto.
+    const [lotPreviews, setLotPreviews] = useState<Record<string, { quantity: number; precioUnitario: number; total: number }>>({});
 
     // Initialize form when order changes or dialog opens
     useEffect(() => {
         if (isOpen && order) {
             initializeForm();
             loadProducts();
+            loadCategories();
+            setLotPreviews({});
         }
     }, [isOpen, order]);
+
+    // Previsualización del precio real de lotes FIFO para las líneas en
+    // alcance de costeo por lotes. Usa previewLotPriceEdicion (no
+    // previewLotPrice, el de NewOrderForm): simula contra el desglose que
+    // este pedido YA tiene reservado, no contra los lotes "vivos" desde cero
+    // — si no, un producto cuyo lote más viejo este mismo pedido ya agotó
+    // mostraría el costo del lote siguiente para esas mismas unidades.
+    // Debounce de 300ms para no disparar una consulta por cada click de +/-.
+    useEffect(() => {
+        if (categories.length === 0 || orderItems.length === 0) return;
+
+        const itemsEnLotes = orderItems.filter(item => {
+            const productDef = products.find(p => p.id === item.productId);
+            return productDef ? productoUsaLotes(productDef, categories) : false;
+        });
+        if (itemsEnLotes.length === 0) return;
+
+        const timeoutId = setTimeout(() => {
+            itemsEnLotes.forEach(item => {
+                const cantidad = item.quantity;
+                productsAPI.previewLotPriceEdicion(accessToken, order.id, item.productId, cantidad)
+                    .then(preview => {
+                        if (!preview) return;
+                        setLotPreviews(prev => ({ ...prev, [item.productId]: { quantity: cantidad, ...preview } }));
+                    })
+                    .catch(() => {}); // Fallo silencioso: se sigue mostrando price × quantity.
+            });
+        }, 300);
+
+        return () => clearTimeout(timeoutId);
+    }, [orderItems, categories, products, accessToken, order.id]);
 
     const loadProducts = async () => {
         try {
@@ -99,6 +139,15 @@ export function EditOrderDialog({
             toast.error('Error al cargar productos');
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const loadCategories = async () => {
+        try {
+            const data = await categoriesAPI.getAll(accessToken);
+            setCategories(data);
+        } catch (error) {
+            console.error('Error loading categories:', error);
         }
     };
 
@@ -160,8 +209,26 @@ export function EditOrderDialog({
         toast.success('Producto agregado');
     };
 
+    // Si hay una previsualización vigente para la cantidad actual del item, usa
+    // el precio real de lotes FIFO; si no (todavía no llegó, o el producto no
+    // está en alcance), cae a price × quantity como antes.
+    const getItemUnitPrice = (item: OrderItem): number => {
+        const preview = lotPreviews[item.productId];
+        return preview && preview.quantity === item.quantity ? preview.precioUnitario : item.price;
+    };
+
+    const getItemTotal = (item: OrderItem): number => {
+        const preview = lotPreviews[item.productId];
+        return preview && preview.quantity === item.quantity ? preview.total : item.price * item.quantity;
+    };
+
+    const isPrecioMixto = (item: OrderItem): boolean => {
+        const preview = lotPreviews[item.productId];
+        return !!preview && preview.quantity === item.quantity && preview.precioUnitario !== item.price;
+    };
+
     const calculateTotal = () => {
-        return orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        return orderItems.reduce((sum, item) => sum + getItemTotal(item), 0);
     };
 
     const handleSave = async () => {
@@ -304,8 +371,13 @@ export function EditOrderDialog({
                                                     Nuevo
                                                 </Badge>
                                             )}
+                                            {isPrecioMixto(item) && (
+                                                <div className="text-[10px] text-blue-600 font-normal mt-0.5">
+                                                    Cruza stock de distinto costo: precio promedio
+                                                </div>
+                                            )}
                                         </TableCell>
-                                        <TableCell className="text-right">{formatCLP(item.price)}</TableCell>
+                                        <TableCell className="text-right">{formatCLP(getItemUnitPrice(item))}</TableCell>
                                         <TableCell>
                                             {(() => {
                                                 const productDef = products.find(p => p.id === item.productId);
@@ -362,7 +434,7 @@ export function EditOrderDialog({
                                             })()}
                                         </TableCell>
                                         <TableCell className="text-right font-medium">
-                                            {formatCLP(item.price * item.quantity)}
+                                            {formatCLP(getItemTotal(item))}
                                         </TableCell>
                                         <TableCell>
                                             <Button
