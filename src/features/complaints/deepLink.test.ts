@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  complaintDeepLinkDecision,
   complaintIdForRole,
   complaintIdFromLocation,
 } from './deepLink.ts';
@@ -27,4 +28,33 @@ test('allows a pending complaint case only for the admin role', () => {
 
 test('does not create an admin destination when no pending case exists', () => {
   assert.equal(complaintIdForRole('admin', null), null);
+});
+
+test('defers a cached admin and denies only after the remote profile proves it is non-admin', () => {
+  assert.deepEqual(
+    complaintDeepLinkDecision('cache', 'admin', complaintId),
+    { kind: 'defer', complaintId: null, consume: false, shouldLoadComplaint: false },
+  );
+  assert.deepEqual(
+    complaintDeepLinkDecision('remote', 'local', complaintId),
+    { kind: 'deny', complaintId: null, consume: true, shouldLoadComplaint: false },
+  );
+});
+
+test('defers a cached non-admin and opens only after the remote profile proves it is admin', () => {
+  assert.deepEqual(
+    complaintDeepLinkDecision('cache', 'local', complaintId),
+    { kind: 'defer', complaintId: null, consume: false, shouldLoadComplaint: false },
+  );
+  assert.deepEqual(
+    complaintDeepLinkDecision('remote', 'admin', complaintId),
+    { kind: 'open', complaintId, consume: true, shouldLoadComplaint: true },
+  );
+});
+
+test('a remote profile without a pending case performs no lookup or consumption', () => {
+  assert.deepEqual(
+    complaintDeepLinkDecision('remote', 'admin', null),
+    { kind: 'none', complaintId: null, consume: false, shouldLoadComplaint: false },
+  );
 });

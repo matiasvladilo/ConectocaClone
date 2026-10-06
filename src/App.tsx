@@ -45,7 +45,7 @@ import { ComplaintsPanel } from "./features/complaints/ComplaintsPanel";
 import { complaintsAPI } from "./features/complaints/api";
 import {
   COMPLAINT_DEEP_LINK_KEY,
-  complaintIdForRole,
+  complaintDeepLinkDecision,
   complaintIdFromLocation,
 } from "./features/complaints/deepLink";
 
@@ -199,6 +199,7 @@ export default function App() {
   );
   const [pendingComplaintId, setPendingComplaintId] = useState<string | null>(null);
   const [pendingComplaintsCount, setPendingComplaintsCount] = useState<number | undefined>();
+  const [isProfileVerified, setIsProfileVerified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isInitialOrdersLoading, setIsInitialOrdersLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -280,6 +281,7 @@ export default function App() {
         localStorage.removeItem('conectoca_cached_user');
         setAccessToken(null);
         setCurrentUser(null);
+        setIsProfileVerified(false);
         setCurrentScreen("login");
         setLoading(false);
       }
@@ -292,7 +294,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (currentScreen !== "profile" || currentUser?.role !== "admin" || !accessToken) {
+    if (!isProfileVerified || currentScreen !== "profile" || currentUser?.role !== "admin" || !accessToken) {
       setPendingComplaintsCount(undefined);
       return;
     }
@@ -318,7 +320,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [accessToken, currentScreen, currentUser?.role]);
+  }, [accessToken, currentScreen, currentUser?.role, isProfileVerified]);
 
   // Initialize audio on first user interaction
   useEffect(() => {
@@ -617,27 +619,34 @@ export default function App() {
 
   const CACHED_USER_KEY = 'conectoca_cached_user';
 
-  const restoredScreenForUser = (user: User): Pantalla => {
+  const restoredScreenForUser = (user: User, profileSource: 'cache' | 'remote'): Pantalla => {
     const storedComplaintId = sessionStorage.getItem(COMPLAINT_DEEP_LINK_KEY);
-    if (!storedComplaintId) {
+    const decision = complaintDeepLinkDecision(profileSource, user.role, storedComplaintId);
+    if (decision.kind === 'none') {
       return user.role === 'pastry' ? "bakeryKds" : "home";
     }
+    if (decision.kind === 'defer') return "home";
 
-    const allowedComplaintId = complaintIdForRole(user.role, storedComplaintId);
-    sessionStorage.removeItem(COMPLAINT_DEEP_LINK_KEY);
-    window.history.replaceState(
-      window.history.state,
-      '',
-      `${window.location.pathname}${window.location.hash}`,
-    );
+    if (decision.consume) {
+      sessionStorage.removeItem(COMPLAINT_DEEP_LINK_KEY);
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.hash}`,
+      );
+    }
 
-    if (!allowedComplaintId) {
+    if (decision.kind === 'deny') {
       setPendingComplaintId(null);
       toast.error('No tienes permiso para acceder al panel de reclamos.');
+      return "home";
+    }
+
+    if (decision.kind !== 'open') {
       return user.role === 'pastry' ? "bakeryKds" : "home";
     }
 
-    setPendingComplaintId(allowedComplaintId);
+    setPendingComplaintId(decision.complaintId);
     return "complaints";
   };
 
@@ -645,6 +654,8 @@ export default function App() {
     try {
       console.log("🔄 Restoring session...");
       setAccessToken(token);
+      setIsProfileVerified(false);
+      setPendingComplaintId(null);
 
       console.log("📋 Fetching user profile...");
       const profile = await profileAPI.get(token);
@@ -664,8 +675,8 @@ export default function App() {
       localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
 
       setCurrentUser(user);
-
-      setCurrentScreen(restoredScreenForUser(user));
+      setIsProfileVerified(true);
+      setCurrentScreen(restoredScreenForUser(user, 'remote'));
 
       console.log(" Loading orders...");
       setIsInitialOrdersLoading(true);
@@ -697,6 +708,7 @@ export default function App() {
         localStorage.removeItem(CACHED_USER_KEY);
         setAccessToken(null);
         setCurrentUser(null);
+        setIsProfileVerified(false);
         setCurrentScreen("login");
         toast.error("Sesión inválida o expirada. Por favor inicia sesión nuevamente.");
       } else {
@@ -707,7 +719,8 @@ export default function App() {
             const cachedUser: User = JSON.parse(cachedUserStr);
             console.log("⚡ Usando perfil cacheado:", cachedUser.name);
             setCurrentUser(cachedUser);
-            setCurrentScreen(restoredScreenForUser(cachedUser));
+            setIsProfileVerified(false);
+            setCurrentScreen(restoredScreenForUser(cachedUser, 'cache'));
             setIsInitialOrdersLoading(true);
             loadOrders(token).then(() => {
               setIsInitialOrdersLoading(false);
@@ -727,7 +740,11 @@ export default function App() {
               };
               localStorage.setItem(CACHED_USER_KEY, JSON.stringify(updatedUser));
               setCurrentUser(updatedUser);
-            }).catch(() => {});
+              setIsProfileVerified(true);
+              setCurrentScreen(restoredScreenForUser(updatedUser, 'remote'));
+            }).catch((profileError) => {
+              console.warn("No se pudo verificar el perfil remoto; el enlace de reclamos sigue pendiente", profileError);
+            });
             return;
           } catch {
             // Si el caché está corrupto, ignorar y mostrar login
@@ -735,6 +752,7 @@ export default function App() {
         }
         // Sin caché: mostrar advertencia y redirigir al login
         toast.warning("Hubo un problema de conexión al cargar la app. Por favor inicia sesión nuevamente.");
+        setIsProfileVerified(false);
         setLoading(false);
         setCurrentScreen("login");
       }
@@ -1274,6 +1292,7 @@ export default function App() {
       setNotifications([]);
       setPendingComplaintId(null);
       setPendingComplaintsCount(undefined);
+      setIsProfileVerified(false);
       hasLoadedInitialOrders.current = false; // Reset notification flag
       initialOrderIds.current.clear(); // Clear initial order IDs
       setCurrentScreen("login");
@@ -1289,6 +1308,7 @@ export default function App() {
       setNotifications([]);
       setPendingComplaintId(null);
       setPendingComplaintsCount(undefined);
+      setIsProfileVerified(false);
       setCurrentScreen("login");
       if (!silent) {
         toast.error("Error al cerrar sesión");
@@ -1789,12 +1809,12 @@ export default function App() {
               : undefined
           }
           onViewComplaints={
-            currentUser.role === "admin"
+            isProfileVerified && currentUser.role === "admin"
               ? () => setCurrentScreen("complaints")
               : undefined
           }
           pendingComplaintsCount={
-            currentUser.role === "admin" ? pendingComplaintsCount : undefined
+            isProfileVerified && currentUser.role === "admin" ? pendingComplaintsCount : undefined
           }
           onManageProducts={() => setCurrentScreen("products")}
           onManageProductionAreas={
@@ -1832,7 +1852,7 @@ export default function App() {
         />
       )}
 
-      {currentScreen === "complaints" && currentUser?.role === "admin" && accessToken && (
+      {currentScreen === "complaints" && isProfileVerified && currentUser?.role === "admin" && accessToken && (
         <ComplaintsPanel
           accessToken={accessToken}
           initialComplaintId={pendingComplaintId}
