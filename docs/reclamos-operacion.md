@@ -35,7 +35,7 @@ Los tres de correo (`COMPLAINTS_RECIPIENT_EMAIL`, `COMPLAINTS_FROM_EMAIL`, `RESE
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase.
 
-`APP_PUBLIC_URL` define dos cosas: el enlace al caso dentro del correo central y el único origen web aceptado por CORS (además de `localhost`/`127.0.0.1` en los puertos 3000, 3010 y 5173).
+`APP_PUBLIC_URL` define dos cosas: el enlace al caso dentro del correo central y el único origen web aceptado por CORS (además de `localhost`/`127.0.0.1` en cualquier puerto, para desarrollo).
 
 ### Variable del frontend
 

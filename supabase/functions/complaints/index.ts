@@ -11,6 +11,7 @@ import {
   type AdminContext,
 } from './adminService.ts';
 import { createResendMailer, type ComplaintMailer } from './mailer.ts';
+import { isAllowedComplaintOrigin } from './domain.ts';
 import { createPublicComplaintService, PublicComplaintError } from './publicService.ts';
 import {
   ComplaintNotFoundError,
@@ -74,18 +75,9 @@ type ComplaintsEnv = { Variables: { admin: AdminContext } };
 
 export const app = new Hono<ComplaintsEnv>();
 
-const allowedOrigins = new Set([
-  new URL(appPublicUrl).origin,
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:3010',
-  'http://127.0.0.1:3010',
-]);
 
 app.use('/complaints/*', cors({
-  origin: origin => allowedOrigins.has(origin) ? origin : undefined,
+  origin: origin => isAllowedComplaintOrigin(origin, appPublicUrl) ? origin : undefined,
   allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   maxAge: 600,
