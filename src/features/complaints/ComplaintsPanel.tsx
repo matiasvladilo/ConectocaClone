@@ -29,6 +29,7 @@ import {
 import { ComplaintApiError, complaintsAPI } from './api';
 import { ComplaintDetail } from './ComplaintDetail';
 import { ComplaintFilters } from './ComplaintFilters';
+import { ComplaintQrDownload } from './ComplaintQrDownload';
 import type {
   ComplaintDetail as ComplaintDetailData,
   ComplaintFilters as ComplaintFiltersValue,
@@ -39,6 +40,7 @@ import type {
 export interface ComplaintsPanelProps {
   accessToken: string;
   initialComplaintId?: string | null;
+  onComplaintClose?: () => void;
   onBack: () => void;
 }
 
@@ -98,7 +100,7 @@ function waitForReconciliation(signal: AbortSignal): Promise<boolean> {
   });
 }
 
-export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack }: ComplaintsPanelProps) {
+export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComplaintClose, onBack }: ComplaintsPanelProps) {
   const [filters, setFilters] = useState<ComplaintFiltersValue>({ ...DEFAULT_COMPLAINT_FILTERS });
   const [listState, setListState] = useState<ListState>({ kind: 'loading' });
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'closed' });
@@ -253,6 +255,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
     detailRequestRef.current += 1;
     detailOperationGuardRef.current.invalidate();
     commitDetailState({ kind: 'closed' });
+    onComplaintClose?.();
     window.requestAnimationFrame(() => {
       if (trigger?.isConnected && !trigger.closest('[role="dialog"]')) trigger.focus();
     });
@@ -423,6 +426,9 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onBack
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-blue-300">Administración</p>
             <h1 className="text-2xl font-black tracking-tight">Reclamos</h1>
+          </div>
+          <div className="ml-auto">
+            <ComplaintQrDownload publicUrl={window.location.origin} />
           </div>
         </div>
       </header>

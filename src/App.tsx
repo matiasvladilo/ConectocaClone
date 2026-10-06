@@ -41,6 +41,13 @@ import { Bell } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { motion, AnimatePresence } from "motion/react";
 import { notifyNewOrder, notifyOrderUpdate, playNotificationSound } from "./utils/notificationSound";
+import { ComplaintsPanel } from "./features/complaints/ComplaintsPanel";
+import { complaintsAPI } from "./features/complaints/api";
+import {
+  COMPLAINT_DEEP_LINK_KEY,
+  complaintIdForRole,
+  complaintIdFromLocation,
+} from "./features/complaints/deepLink";
 
 // CONECTOCA - Sistema de gestión de pedidos y producción
 
@@ -159,6 +166,7 @@ type Pantalla =
   | "productionAreas"
   | "ingredients"
   | "productIngredients"
+  | "complaints"
   | "bakeryKds";
 
 export default function App() {
@@ -189,6 +197,8 @@ export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(
     null,
   );
+  const [pendingComplaintId, setPendingComplaintId] = useState<string | null>(null);
+  const [pendingComplaintsCount, setPendingComplaintsCount] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [isInitialOrdersLoading, setIsInitialOrdersLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -210,6 +220,11 @@ export default function App() {
 
   // Check for existing session on mount
   useEffect(() => {
+    const linkedComplaintId = complaintIdFromLocation(window.location.search);
+    if (linkedComplaintId) {
+      sessionStorage.setItem(COMPLAINT_DEEP_LINK_KEY, linkedComplaintId);
+    }
+
     // Configure viewport for mobile - CRITICAL for sharp rendering
     let viewport = document.querySelector(
       'meta[name="viewport"]',
@@ -275,6 +290,35 @@ export default function App() {
     };
     // initializeDemoUsers(); // Disabled to prevent blocking login requests on load
   }, []);
+
+  useEffect(() => {
+    if (currentScreen !== "profile" || currentUser?.role !== "admin" || !accessToken) {
+      setPendingComplaintsCount(undefined);
+      return;
+    }
+
+    let active = true;
+    setPendingComplaintsCount(undefined);
+    void complaintsAPI.list(accessToken, {
+      search: "",
+      status: "pending",
+      originType: "",
+      branchId: "",
+      dateFrom: "",
+      dateTo: "",
+      page: 1,
+      limit: 1,
+    }).then(page => {
+      if (active) setPendingComplaintsCount(page.pagination.total);
+    }).catch(error => {
+      console.warn("No se pudo cargar el contador de reclamos pendientes", error);
+      if (active) setPendingComplaintsCount(undefined);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken, currentScreen, currentUser?.role]);
 
   // Initialize audio on first user interaction
   useEffect(() => {
@@ -573,6 +617,30 @@ export default function App() {
 
   const CACHED_USER_KEY = 'conectoca_cached_user';
 
+  const restoredScreenForUser = (user: User): Pantalla => {
+    const storedComplaintId = sessionStorage.getItem(COMPLAINT_DEEP_LINK_KEY);
+    if (!storedComplaintId) {
+      return user.role === 'pastry' ? "bakeryKds" : "home";
+    }
+
+    const allowedComplaintId = complaintIdForRole(user.role, storedComplaintId);
+    sessionStorage.removeItem(COMPLAINT_DEEP_LINK_KEY);
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.hash}`,
+    );
+
+    if (!allowedComplaintId) {
+      setPendingComplaintId(null);
+      toast.error('No tienes permiso para acceder al panel de reclamos.');
+      return user.role === 'pastry' ? "bakeryKds" : "home";
+    }
+
+    setPendingComplaintId(allowedComplaintId);
+    return "complaints";
+  };
+
   const handleSessionRestore = async (token: string) => {
     try {
       console.log("🔄 Restoring session...");
@@ -597,11 +665,7 @@ export default function App() {
 
       setCurrentUser(user);
 
-      if (user.role === 'pastry') {
-        setCurrentScreen("bakeryKds");
-      } else {
-        setCurrentScreen("home");
-      }
+      setCurrentScreen(restoredScreenForUser(user));
 
       console.log(" Loading orders...");
       setIsInitialOrdersLoading(true);
@@ -643,11 +707,7 @@ export default function App() {
             const cachedUser: User = JSON.parse(cachedUserStr);
             console.log("⚡ Usando perfil cacheado:", cachedUser.name);
             setCurrentUser(cachedUser);
-            if (cachedUser.role === 'pastry') {
-              setCurrentScreen("bakeryKds");
-            } else {
-              setCurrentScreen("home");
-            }
+            setCurrentScreen(restoredScreenForUser(cachedUser));
             setIsInitialOrdersLoading(true);
             loadOrders(token).then(() => {
               setIsInitialOrdersLoading(false);
@@ -1212,6 +1272,8 @@ export default function App() {
       setOrders([]);
       setIsInitialOrdersLoading(false);
       setNotifications([]);
+      setPendingComplaintId(null);
+      setPendingComplaintsCount(undefined);
       hasLoadedInitialOrders.current = false; // Reset notification flag
       initialOrderIds.current.clear(); // Clear initial order IDs
       setCurrentScreen("login");
@@ -1225,6 +1287,8 @@ export default function App() {
       setAccessToken(null);
       setOrders([]);
       setNotifications([]);
+      setPendingComplaintId(null);
+      setPendingComplaintsCount(undefined);
       setCurrentScreen("login");
       if (!silent) {
         toast.error("Error al cerrar sesión");
@@ -1724,6 +1788,14 @@ export default function App() {
               ? () => setCurrentScreen("distribucion")
               : undefined
           }
+          onViewComplaints={
+            currentUser.role === "admin"
+              ? () => setCurrentScreen("complaints")
+              : undefined
+          }
+          pendingComplaintsCount={
+            currentUser.role === "admin" ? pendingComplaintsCount : undefined
+          }
           onManageProducts={() => setCurrentScreen("products")}
           onManageProductionAreas={
             currentUser.role === "admin"
@@ -1757,6 +1829,18 @@ export default function App() {
         <DistributionPanel
           onBack={() => setCurrentScreen("profile")}
           accessToken={accessToken}
+        />
+      )}
+
+      {currentScreen === "complaints" && currentUser?.role === "admin" && accessToken && (
+        <ComplaintsPanel
+          accessToken={accessToken}
+          initialComplaintId={pendingComplaintId}
+          onComplaintClose={() => setPendingComplaintId(null)}
+          onBack={() => {
+            setPendingComplaintId(null);
+            setCurrentScreen("profile");
+          }}
         />
       )}
 

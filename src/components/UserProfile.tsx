@@ -27,7 +27,8 @@ import {
   Warehouse,
   ChefHat,
   Loader2,
-  Boxes
+  Boxes,
+  MessageSquare
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -43,6 +44,8 @@ interface UserProfileProps {
   onUpdateProfile?: (updates: Partial<User>) => void;
   onViewAnalytics?: () => void;
   onViewDistribution?: () => void;
+  onViewComplaints?: () => void;
+  pendingComplaintsCount?: number;
   onManageAttendance?: () => void;
   onManageProducts?: () => void;
   onManageProductionAreas?: () => void;
@@ -51,7 +54,7 @@ interface UserProfileProps {
   accessToken?: string;
 }
 
-export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDistribution, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -768,6 +771,36 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
               <div className="flex items-center gap-2 relative z-10 text-white">
                 <Boxes className="w-5 h-5" />
                 Panel de Distribuidora
+              </div>
+            </Button>
+          </motion.div>
+        )}
+
+        {user.role === 'admin' && onViewComplaints && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.24 }}
+            whileTap={{ scale: 0.98 }}
+            className="mb-4"
+          >
+            <Button
+              onClick={onViewComplaints}
+              className="w-full h-12 relative overflow-hidden group"
+              style={{
+                background: 'linear-gradient(90deg, #EF4444 0%, #DC2626 100%)',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: 600,
+                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.3)'
+              }}
+            >
+              <div className="flex w-full items-center gap-2 relative z-10 text-white">
+                <MessageSquare className="w-5 h-5" />
+                Panel de Reclamos
+                {typeof pendingComplaintsCount === 'number' && pendingComplaintsCount > 0 && (
+                  <Badge className="ml-auto bg-white text-red-600">{pendingComplaintsCount}</Badge>
+                )}
               </div>
             </Button>
           </motion.div>
