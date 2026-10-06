@@ -5,6 +5,7 @@ import {
   validateAttachments,
   createFormToken,
   verifyFormToken,
+  isAllowedComplaintOrigin,
 } from './domain.ts';
 
 test('branch exige una sucursal y normaliza el correo', () => {
@@ -29,4 +30,17 @@ test('token solo vale entre 2 segundos y 2 horas', async () => {
   assert.equal(await verifyFormToken(token, 'secret', 1_001_999), false);
   assert.equal(await verifyFormToken(token, 'secret', 1_002_000), true);
   assert.equal(await verifyFormToken(token, 'secret', 8_200_001), false);
+});
+
+test('CORS acepta el dominio público y cualquier puerto local, nada más', () => {
+  const app = 'https://conectocadev.netlify.app';
+  assert.equal(isAllowedComplaintOrigin('https://conectocadev.netlify.app', app), true);
+  assert.equal(isAllowedComplaintOrigin('http://localhost:53535', app), true);
+  assert.equal(isAllowedComplaintOrigin('http://127.0.0.1:3000', app), true);
+  assert.equal(isAllowedComplaintOrigin('http://localhost', app), true);
+  assert.equal(isAllowedComplaintOrigin('http://conectocadev.netlify.app', app), false);
+  assert.equal(isAllowedComplaintOrigin('https://localhost.evil.com', app), false);
+  assert.equal(isAllowedComplaintOrigin('http://localhost:3000.evil.com', app), false);
+  assert.equal(isAllowedComplaintOrigin('https://evil.com', app), false);
+  assert.equal(isAllowedComplaintOrigin('', app), false);
 });

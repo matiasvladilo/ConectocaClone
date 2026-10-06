@@ -174,3 +174,13 @@ export function escapeHtml(value: string): string {
     "'": '&#39;',
   })[character] ?? character);
 }
+
+const LOCAL_DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
+
+// El panel autentica con Bearer token, no con cookies, así que CORS no es la
+// barrera de seguridad: basta con el dominio público y cualquier puerto local
+// (el dev server de Vite cambia de puerto cuando el 3000 está ocupado).
+export function isAllowedComplaintOrigin(origin: string, appPublicUrl: string): boolean {
+  if (!origin) return false;
+  return origin === new URL(appPublicUrl).origin || LOCAL_DEV_ORIGIN.test(origin);
+}
