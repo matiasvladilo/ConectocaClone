@@ -290,6 +290,34 @@ test('rechaza fechas ISO cuyo día no existe en el calendario', () => {
   );
 });
 
+test('rechaza el año ISO 0000', () => {
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams('dateFrom=0000-01-01')),
+    /fecha/i,
+  );
+});
+
+test('limita el offset UTC a catorce horas exactas', () => {
+  assert.equal(
+    parseComplaintListQuery(new URLSearchParams(
+      'dateFrom=2026-10-05T12%3A00%3A00%2B14%3A00',
+    )).dateFrom,
+    '2026-10-05T12:00:00+14:00',
+  );
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams(
+      'dateFrom=2026-10-05T12%3A00%3A00%2B14%3A01',
+    )),
+    /fecha/i,
+  );
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams(
+      'dateFrom=2026-10-05T12%3A00%3A00%2B23%3A59',
+    )),
+    /fecha/i,
+  );
+});
+
 test('compara dateTo de fecha sola usando el final de ese día', () => {
   const query = parseComplaintListQuery(new URLSearchParams(
     'dateFrom=2026-10-05T12%3A00%3A00.000Z&dateTo=2026-10-05',

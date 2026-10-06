@@ -194,7 +194,9 @@ function isIsoDate(value: string): boolean {
   const day = Number(match[3]);
   const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) return false;
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    return false;
+  }
 
   if (match[4] !== undefined) {
     const hour = Number(match[4]);
@@ -202,7 +204,8 @@ function isIsoDate(value: string): boolean {
     const second = Number(match[6]);
     const offsetHour = match[8] === undefined ? 0 : Number(match[8]);
     const offsetMinute = match[9] === undefined ? 0 : Number(match[9]);
-    if (hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) {
+    const invalidOffset = offsetHour > 14 || (offsetHour === 14 && offsetMinute !== 0);
+    if (hour > 23 || minute > 59 || second > 59 || offsetMinute > 59 || invalidOffset) {
       return false;
     }
   }
