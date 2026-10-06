@@ -58,7 +58,7 @@
 - `src/features/complaints/ComplaintQrDownload.tsx`: PNG/SVG de `window.location.origin + '/reclamos'`.
 - `src/main.tsx`: selección de la vista pública antes de montar la aplicación autenticada.
 - `src/App.tsx`: pantalla interna, autorización y enlace profundo.
-- `src/components/HomeScreen.tsx`: acceso administrativo y contador pendiente.
+- `src/components/UserProfile.tsx`: acceso administrativo y contador pendiente dentro del bloque de acciones importantes del perfil.
 - `package.json` / `package-lock.json`: `qrcode`, sus tipos y globs de tests de backend puro.
 - `netlify.toml`: fallback SPA explícito para `/reclamos` y enlaces profundos.
 
@@ -1336,14 +1336,14 @@ git commit -m "feat: add admin complaints panel"
 
 **Files:**
 - Create: `src/features/complaints/ComplaintQrDownload.tsx`
-- Modify: `src/App.tsx:145-162,576-618,1638-1675`
-- Modify: `src/components/HomeScreen.tsx:1-28,420-555`
+- Modify: `src/App.tsx:145-162,576-618,1638-1675,1708-1744`
+- Modify: `src/components/UserProfile.tsx:6-31,39-54,719-835`
 - Modify: `package.json:5-68`
 - Modify: `package-lock.json`
 
 **Interfaces:**
 - Consumes: `ComplaintsPanel`, `qrcode`, rol de usuario y query params.
-- Produces: acceso admin, contador, deep link y descarga del QR universal.
+- Produces: acceso en el perfil del admin, contador, deep link y descarga del QR universal.
 
 - [ ] **Step 1: Instalar QR y crear la descarga**
 
@@ -1377,23 +1377,47 @@ export function ComplaintQrDownload({ publicUrl }: ComplaintQrDownloadProps) {
 
 El componente usa `window.location.origin` en producción; la URL del QR siempre termina en `/reclamos` y nunca contiene `businessId`.
 
-- [ ] **Step 2: Añadir pantalla y acceso solo admin**
+- [ ] **Step 2: Añadir pantalla y acceso solo admin dentro del perfil**
 
-Agregar `'complaints'` a `Pantalla`. Extender `HomeScreenProps`:
+Agregar `'complaints'` a `Pantalla`. Extender `UserProfileProps`:
 
 ```ts
 onViewComplaints?: () => void;
 pendingComplaintsCount?: number;
 ```
 
-Renderizar el botón únicamente cuando `user.role === 'admin' && onViewComplaints`, con badge de pendientes. En `App`, pasar el callback solo a admin y renderizar:
+Desestructurar ambos props en `UserProfile`. Importar `MessageSquare` y renderizar el botón únicamente cuando `user.role === 'admin' && onViewComplaints`. Ubicarlo inmediatamente después de `Panel de Distribuidora` y antes del bloque `Admin actions`, para que aparezca antes de `Áreas de Producción`, tal como el grupo de acciones importantes de la captura:
+
+```tsx
+{user.role === 'admin' && onViewComplaints && (
+  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.4, delay: 0.24 }} whileTap={{ scale: 0.98 }} className="mb-4">
+    <Button onClick={onViewComplaints} className="w-full h-12 relative overflow-hidden group"
+      style={{
+        background: 'linear-gradient(90deg, #EF4444 0%, #DC2626 100%)',
+        borderRadius: '12px', fontSize: '15px', fontWeight: 600,
+        boxShadow: '0 4px 14px rgba(239, 68, 68, 0.3)',
+      }}>
+      <div className="flex items-center gap-2 relative z-10 text-white">
+        <MessageSquare className="w-5 h-5" />
+        Panel de Reclamos
+        {typeof pendingComplaintsCount === 'number' && pendingComplaintsCount > 0 && (
+          <Badge className="ml-auto bg-white text-red-600">{pendingComplaintsCount}</Badge>
+        )}
+      </div>
+    </Button>
+  </motion.div>
+)}
+```
+
+En `App`, pasar `onViewComplaints={() => setCurrentScreen('complaints')}` y `pendingComplaintsCount` solamente cuando `currentUser.role === 'admin'`. Renderizar:
 
 ```tsx
 {currentScreen === 'complaints' && currentUser?.role === 'admin' && accessToken && (
   <ComplaintsPanel
     accessToken={accessToken}
     initialComplaintId={pendingComplaintId}
-    onBack={() => setCurrentScreen('home')}
+    onBack={() => setCurrentScreen('profile')}
   />
 )}
 ```
@@ -1417,7 +1441,7 @@ Antes de login, guardar el UUID en `sessionStorage`. Después de restaurar perfi
 
 - [ ] **Step 4: Cargar el contador sin acoplarlo a pedidos**
 
-Agregar un request administrativo con `status=pending&limit=1` y usar `pagination.total`. Cargarlo solo para admin al entrar a home; un error deja el badge oculto y no bloquea pedidos ni navegación.
+Agregar un request administrativo con `status=pending&limit=1` y usar `pagination.total`. Cargarlo solo para admin al entrar al perfil; un error deja el badge oculto y no bloquea el perfil ni la navegación.
 
 - [ ] **Step 5: Verificar roles, deep link y QR**
 
@@ -1425,8 +1449,8 @@ Run: `npm test && npm run build`
 
 Comprobar:
 
-- Admin ve Reclamos y el contador correcto.
-- `local`, `production`, `dispatch`, `worker`, `user` y `pastry` no ven el botón.
+- Admin ve `Panel de Reclamos` en su perfil, entre Distribuidora y Áreas de Producción, con el contador correcto.
+- `local`, `production`, `dispatch`, `worker`, `user` y `pastry` no ven el botón en sus perfiles.
 - Un deep link sin sesión abre login y después el caso para admin.
 - El mismo enlace con rol no admin no consulta el caso.
 - El PNG escaneado abre exactamente `/reclamos`.
@@ -1434,7 +1458,7 @@ Comprobar:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add package.json package-lock.json src/App.tsx src/components/HomeScreen.tsx src/features/complaints/ComplaintQrDownload.tsx src/features/complaints/deepLink.ts src/features/complaints/deepLink.test.ts
+git add package.json package-lock.json src/App.tsx src/components/UserProfile.tsx src/features/complaints/ComplaintQrDownload.tsx src/features/complaints/deepLink.ts src/features/complaints/deepLink.test.ts
 git commit -m "feat: integrate complaints navigation and QR"
 ```
 
@@ -1532,6 +1556,7 @@ git commit -m "docs: add complaints operations runbook"
 - El caso y las evidencias sobreviven a fallos de correo.
 - El correo central y la confirmación se registran por separado y pueden reintentarse.
 - Solo administradores de la organización configurada pueden acceder al panel.
+- El acceso `Panel de Reclamos` aparece únicamente en el perfil del administrador, entre Distribuidora y Áreas de Producción.
 - El botón de respuesta abre el correo y el estado solo cambia por acción explícita.
 - La bandeja busca, filtra, pagina, atiende, reabre y abre evidencias privadas.
 - Los tests, build, probes de seguridad y recorrido móvil final pasan antes de producción.

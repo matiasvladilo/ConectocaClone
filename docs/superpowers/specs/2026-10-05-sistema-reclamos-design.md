@@ -261,8 +261,8 @@ La primera versión no incorpora una cola ni cron automático; el reintento es m
 ### Acceso y navegación
 
 - `complaints` se añade como pantalla interna de `App.tsx`.
-- Solo `admin` recibe el acceso `Reclamos` en la pantalla principal.
-- El contador muestra casos pendientes del negocio.
+- Solo `admin` recibe el acceso `Reclamos` dentro de su pantalla de perfil, junto a los botones importantes de Analíticas, Distribuidora, Áreas de Producción, Productos, Materia Prima y Recetas.
+- El botón se ubica después de `Panel de Distribuidora` y antes de `Áreas de Producción`, con un contador de casos pendientes del negocio.
 - Si un enlace profundo llega sin sesión, se conserva en `sessionStorage`; después del login se abre la bandeja y el caso solicitado.
 - Si el usuario autenticado no es administrador, se muestra una respuesta de acceso denegado y no se solicita información del caso.
 
@@ -321,7 +321,7 @@ El panel ofrece `Descargar QR`, que genera un PNG o SVG apuntando exactamente a 
 - Tipos y cliente API específicos para reclamos.
 - `PublicComplaintForm` y su pantalla de éxito.
 - `ComplaintsPanel`, lista/filtros y detalle.
-- Integración mínima en `App.tsx` y `HomeScreen.tsx`.
+- Integración mínima en `App.tsx` y `UserProfile.tsx`.
 - Utilidades puras para validación, formato de número, búsqueda/filtros del cliente y construcción segura de `mailto:`.
 - Plantillas HTML/texto de confirmación y aviso central.
 - Generación descargable del QR.
@@ -359,7 +359,7 @@ No se agregarán rutas al archivo monolítico `make-server-6d979413/index.ts`; e
 3. Cada origen muestra los campos correctos.
 4. Un envío exitoso muestra el mismo número recibido por correo.
 5. El correo central enlaza al caso; el login conserva el destino.
-6. Solo el administrador ve y puede abrir Reclamos.
+6. Solo el administrador ve y puede abrir Reclamos desde su perfil; los demás roles no reciben ese botón.
 7. Búsqueda, filtros, paginación y estados funcionan con datos suficientes para más de una página.
 8. Las evidencias se abren con URL temporal.
 9. `Responder por correo` abre destinatario, asunto y cuerpo correctos sin cambiar el estado.
