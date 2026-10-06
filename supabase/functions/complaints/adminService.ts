@@ -178,14 +178,43 @@ function validationError(message: string): never {
 function parseInteger(value: string | null, fallback: number, label: string): number {
   if (value === null || value === '') return fallback;
   if (!/^\d+$/.test(value)) validationError(`${label} debe ser un número entero.`);
-  return Number(value);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    validationError(`${label} debe ser un número entero seguro.`);
+  }
+  return parsed;
 }
 
 function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) {
-    return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z|[+-](\d{2}):(\d{2})))?$/.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) return false;
+
+  if (match[4] !== undefined) {
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6]);
+    const offsetHour = match[8] === undefined ? 0 : Number(match[8]);
+    const offsetMinute = match[9] === undefined ? 0 : Number(match[9]);
+    if (hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) {
+      return false;
+    }
   }
   return !Number.isNaN(Date.parse(value));
+}
+
+export function complaintDateFromBoundary(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
+}
+
+export function complaintDateToBoundary(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
 }
 
 export function parseComplaintListQuery(params: URLSearchParams): ComplaintListQuery {
@@ -193,6 +222,10 @@ export function parseComplaintListQuery(params: URLSearchParams): ComplaintListQ
   const limit = parseInteger(params.get('limit'), 20, 'El límite');
   if (page < 1) validationError('La página debe ser mayor o igual a 1.');
   if (limit < 1 || limit > 100) validationError('El límite debe estar entre 1 y 100.');
+  const firstResult = (page - 1) * limit;
+  if (!Number.isSafeInteger(firstResult) || !Number.isSafeInteger(firstResult + limit - 1)) {
+    validationError('La página genera un rango fuera del límite seguro.');
+  }
 
   const query: ComplaintListQuery = { page, limit };
   const search = params.get('search')?.trim();
@@ -227,7 +260,12 @@ export function parseComplaintListQuery(params: URLSearchParams): ComplaintListQ
     query[key] = value;
   }
 
-  if (query.dateFrom && query.dateTo && Date.parse(query.dateFrom) > Date.parse(query.dateTo)) {
+  if (
+    query.dateFrom
+    && query.dateTo
+    && Date.parse(complaintDateFromBoundary(query.dateFrom))
+      > Date.parse(complaintDateToBoundary(query.dateTo))
+  ) {
     validationError('La fecha desde no puede ser posterior a la fecha hasta.');
   }
   return query;

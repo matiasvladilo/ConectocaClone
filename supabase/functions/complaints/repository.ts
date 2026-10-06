@@ -1,10 +1,13 @@
 import type { ComplaintOrigin } from './domain.ts';
-import type {
-  AdminComplaintRepository,
-  ComplaintDetail,
-  ComplaintListQuery,
-  ComplaintPage,
-  ComplaintSummary,
+// Shared bounds keep handler validation and PostgREST filtering identical.
+import {
+  complaintDateFromBoundary,
+  complaintDateToBoundary,
+  type AdminComplaintRepository,
+  type ComplaintDetail,
+  type ComplaintListQuery,
+  type ComplaintPage,
+  type ComplaintSummary,
 } from './adminService.ts';
 import type { ComplaintEmailData } from './emailTemplates.ts';
 
@@ -232,14 +235,6 @@ function safeSearchValue(value: string): string {
   return value.replace(/[\\(),*]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function startOfDate(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
-}
-
-function endOfDate(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
-}
-
 export function createSupabaseComplaintRepository(
   client: SupabaseClientLike,
 ): ComplaintRepository & AdminComplaintRepository {
@@ -342,8 +337,8 @@ export function createSupabaseComplaintRepository(
       if (query.status) request = request.eq('status', query.status);
       if (query.originType) request = request.eq('origin_type', query.originType);
       if (query.branchId) request = request.eq('branch_profile_id', query.branchId);
-      if (query.dateFrom) request = request.gte('created_at', startOfDate(query.dateFrom));
-      if (query.dateTo) request = request.lte('created_at', endOfDate(query.dateTo));
+      if (query.dateFrom) request = request.gte('created_at', complaintDateFromBoundary(query.dateFrom));
+      if (query.dateTo) request = request.lte('created_at', complaintDateToBoundary(query.dateTo));
       if (query.search) {
         const search = safeSearchValue(query.search);
         if (search) {

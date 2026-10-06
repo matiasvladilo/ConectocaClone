@@ -275,6 +275,51 @@ test('valida paginación, enums, fechas, estado y tipos de reintento antes del r
   assert.throws(() => parseRetryKinds({ kinds: ['all'] }), /correo/i);
 });
 
+test('rechaza fechas ISO cuyo día no existe en el calendario', () => {
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams('dateFrom=2026-02-30')),
+    /fecha/i,
+  );
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams('dateTo=2026-02-29T12%3A00%3A00.000Z')),
+    /fecha/i,
+  );
+  assert.equal(
+    parseComplaintListQuery(new URLSearchParams('dateFrom=2024-02-29')).dateFrom,
+    '2024-02-29',
+  );
+});
+
+test('compara dateTo de fecha sola usando el final de ese día', () => {
+  const query = parseComplaintListQuery(new URLSearchParams(
+    'dateFrom=2026-10-05T12%3A00%3A00.000Z&dateTo=2026-10-05',
+  ));
+
+  assert.equal(query.dateFrom, '2026-10-05T12:00:00.000Z');
+  assert.equal(query.dateTo, '2026-10-05');
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams(
+      'dateFrom=2026-10-06T00%3A00%3A00.000Z&dateTo=2026-10-05',
+    )),
+    /posterior/i,
+  );
+});
+
+test('rechaza paginación infinita, insegura o cuyo rango no es seguro', () => {
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams(`page=${'9'.repeat(400)}`)),
+    /página/i,
+  );
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams('page=9007199254740992')),
+    /página/i,
+  );
+  assert.throws(
+    () => parseComplaintListQuery(new URLSearchParams('page=9007199254740991&limit=100')),
+    /página/i,
+  );
+});
+
 test('repositorio acota detalle y claim de correo por business_id', async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const detailRow = {
