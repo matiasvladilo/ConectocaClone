@@ -46,3 +46,54 @@ test('el aviso central nombra el tipo', () => {
   assert.match(buildCentralNotification({ ...emailData, kind: 'compliment' }).subject, /^Nueva felicitación /);
   assert.match(buildCentralNotification(emailData).subject, /^Nuevo reclamo /);
 });
+
+test('saluda por el nombre cuando existe y firma con cariño', () => {
+  const withName = buildCustomerConfirmation({ ...emailData, customerName: 'Camila' });
+  assert.ok(withName.html.includes('Hola Camila,'));
+  assert.ok(withName.text.startsWith('Hola Camila,'));
+  const withoutName = buildCustomerConfirmation({ ...emailData, customerName: null });
+  assert.ok(withoutName.text.startsWith('Hola,'));
+  for (const email of [withName, withoutName]) {
+    assert.ok(email.html.includes('Con cariño, equipo de La Oca'));
+    assert.ok(email.text.includes('Con cariño, equipo de La Oca'));
+  }
+});
+
+test('incluye el logo publicado en el mismo sitio que el enlace al caso', () => {
+  const email = buildCustomerConfirmation(emailData);
+  assert.ok(email.html.includes('src="https://conectoca.cl/logo-email.png"'));
+});
+
+test('todos llevan la franja azul del logo; sugerencia y felicitación, cuerpo cálido', () => {
+  for (const kind of ['complaint', 'suggestion', 'compliment'] as const) {
+    assert.ok(buildCustomerConfirmation({ ...emailData, kind }).html.includes('background-color:#063c84'));
+  }
+  assert.ok(buildCustomerConfirmation({ ...emailData, kind: 'compliment' }).html.includes('background-color:#f0fdf4'));
+  assert.ok(buildCustomerConfirmation({ ...emailData, kind: 'suggestion' }).html.includes('background-color:#eff6ff'));
+});
+
+test('el logo es la oca transparente, sin recuadro', () => {
+  const html = buildCustomerConfirmation(emailData).html;
+  assert.match(html, /<img src="https:\/\/conectoca\.cl\/logo-email\.png" width="\d+" height="\d+"/);
+  assert.doesNotMatch(html, /alt="La Oca" style="[^"]*border-radius/);
+});
+
+test('muestra lo que contó el cliente, escapado y recortado', () => {
+  const long = 'a'.repeat(400);
+  const email = buildCustomerConfirmation({ ...emailData, description: long });
+  assert.ok(email.html.includes('a'.repeat(280) + '…'));
+  assert.ok(!email.html.includes('a'.repeat(281)));
+});
+
+test('formatea la fecha en hora de Chile', () => {
+  const email = buildCustomerConfirmation({ ...emailData, createdAt: '2026-10-07T15:30:00.000Z' });
+  assert.match(email.text, /7 (de )?oct/i);
+  assert.match(email.text, /12:30/);
+});
+
+test('el aviso central lleva etiqueta del tipo y botón al caso', () => {
+  const email = buildCentralNotification({ ...emailData, kind: 'compliment' });
+  assert.ok(email.html.includes('Felicitación'));
+  assert.ok(email.html.includes('href="https://conectoca.cl/?screen=complaints&amp;case=case-1"'));
+  assert.ok(email.html.includes('Abrir en Conectoca'));
+});
