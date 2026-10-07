@@ -265,6 +265,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
       }
 
       const data = {
+        kind: fields.kind,
         caseNumber: complaint.caseNumber,
         createdAt: complaint.createdAt,
         originLabel: originLabel(complaint),

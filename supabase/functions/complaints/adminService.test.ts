@@ -38,6 +38,7 @@ const complaintDetail: ComplaintDetail = {
 };
 
 const complaintEmailFixture: ComplaintEmailData = {
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   createdAt: '2026-10-05T12:00:00.000Z',
   originLabel: 'Otro / no sabe',

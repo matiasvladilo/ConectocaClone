@@ -1,5 +1,9 @@
 export type ComplaintOrigin = 'branch' | 'production' | 'other';
 
+export type ComplaintKind = 'complaint' | 'suggestion' | 'compliment';
+
+export const COMPLAINT_KINDS: readonly ComplaintKind[] = ['complaint', 'suggestion', 'compliment'];
+
 export interface RawComplaintFields {
   originType: string;
   branchId: string;
@@ -8,9 +12,11 @@ export interface RawComplaintFields {
   phone: string;
   description: string;
   honeypot: string;
+  kind?: string;
 }
 
 export interface ValidComplaintFields {
+  kind: ComplaintKind;
   originType: ComplaintOrigin;
   branchId: string | null;
   email: string;
@@ -47,6 +53,13 @@ export function validateComplaintFields(raw: RawComplaintFields): ValidComplaint
     throw new Error('Solicitud inválida');
   }
 
+  // TRANSICIÓN: el frontend publicado antes de este cambio no envía `kind`.
+  // Se elimina en la Task 8, una vez que Netlify publique el formulario nuevo.
+  const kind = (String(raw.kind ?? '').trim() || 'complaint') as ComplaintKind;
+  if (!COMPLAINT_KINDS.includes(kind)) {
+    throw new Error('Tipo de mensaje inválido');
+  }
+
   const originType = requireText(raw.originType, 'El origen') as ComplaintOrigin;
   if (!['branch', 'production', 'other'].includes(originType)) {
     throw new Error('Origen inválido');
@@ -72,11 +85,12 @@ export function validateComplaintFields(raw: RawComplaintFields): ValidComplaint
   if (phone.length > 40) throw new Error('El teléfono no puede superar 40 caracteres');
 
   const description = requireText(raw.description, 'La descripción');
-  if (description.length < 20 || description.length > 5_000) {
-    throw new Error('La descripción debe tener entre 20 y 5.000 caracteres');
+  if (description.length < 10 || description.length > 5_000) {
+    throw new Error('La descripción debe tener entre 10 y 5.000 caracteres');
   }
 
   return {
+    kind,
     originType,
     branchId: originType === 'branch' ? branchId : null,
     email: email.toLowerCase(),

@@ -445,6 +445,7 @@ export function createSupabaseComplaintRepository(
       if (!data) throw new ComplaintNotFoundError('complaint');
       const row = data as AdminComplaintRow;
       return {
+        kind: 'complaint',
         caseNumber: row.case_number,
         createdAt: row.created_at,
         originLabel: originLabel(row),

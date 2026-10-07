@@ -44,3 +44,30 @@ test('CORS acepta el dominio público y cualquier puerto local, nada más', () =
   assert.equal(isAllowedComplaintOrigin('https://evil.com', app), false);
   assert.equal(isAllowedComplaintOrigin('', app), false);
 });
+
+const baseFields = {
+  originType: 'other', branchId: '', email: 'cliente@mail.cl',
+  name: '', phone: '', description: 'Muy buena atención', honeypot: '',
+};
+
+test('acepta los tres tipos de mensaje', () => {
+  for (const kind of ['complaint', 'suggestion', 'compliment']) {
+    assert.equal(validateComplaintFields({ ...baseFields, kind }).kind, kind);
+  }
+});
+
+test('rechaza un tipo desconocido', () => {
+  assert.throws(() => validateComplaintFields({ ...baseFields, kind: 'queja' }), /tipo/i);
+});
+
+test('TRANSICIÓN: sin tipo se trata como reclamo', () => {
+  assert.equal(validateComplaintFields({ ...baseFields }).kind, 'complaint');
+});
+
+test('la descripción admite desde 10 caracteres', () => {
+  assert.equal(validateComplaintFields({ ...baseFields, kind: 'compliment', description: 'Excelente!' }).description, 'Excelente!');
+  assert.throws(
+    () => validateComplaintFields({ ...baseFields, kind: 'compliment', description: 'Muy bien' }),
+    /entre 10 y 5\.000/,
+  );
+});
