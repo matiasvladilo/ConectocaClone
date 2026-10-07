@@ -64,11 +64,18 @@ test('incluye el logo publicado en el mismo sitio que el enlace al caso', () => 
   assert.ok(email.html.includes('src="https://conectoca.cl/logo-email.png"'));
 });
 
-test('el reclamo usa el encabezado azul y sugerencia/felicitación el estilo cálido', () => {
-  assert.ok(buildCustomerConfirmation({ ...emailData, kind: 'complaint' }).html.includes('background-color:#0059FF'));
+test('todos llevan la franja azul del logo; sugerencia y felicitación, cuerpo cálido', () => {
+  for (const kind of ['complaint', 'suggestion', 'compliment'] as const) {
+    assert.ok(buildCustomerConfirmation({ ...emailData, kind }).html.includes('background-color:#063c84'));
+  }
   assert.ok(buildCustomerConfirmation({ ...emailData, kind: 'compliment' }).html.includes('background-color:#f0fdf4'));
   assert.ok(buildCustomerConfirmation({ ...emailData, kind: 'suggestion' }).html.includes('background-color:#eff6ff'));
-  assert.ok(!buildCustomerConfirmation({ ...emailData, kind: 'compliment' }).html.includes('background-color:#0059FF'));
+});
+
+test('el logo es la oca transparente, sin recuadro', () => {
+  const html = buildCustomerConfirmation(emailData).html;
+  assert.match(html, /<img src="https:\/\/conectoca\.cl\/logo-email\.png" width="\d+" height="\d+"/);
+  assert.doesNotMatch(html, /alt="La Oca" style="[^"]*border-radius/);
 });
 
 test('muestra lo que contó el cliente, escapado y recortado', () => {

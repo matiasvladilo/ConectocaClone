@@ -62,7 +62,9 @@ const BADGE_COLORS: Record<ComplaintKind, { background: string; text: string }> 
   compliment: { background: '#dcfce7', text: '#166534' },
 };
 
-const BRAND_BLUE = '#0059FF';
+// Azul marino del logo: la oca transparente se funde con esta franja.
+const BRAND_NAVY = '#063c84';
+const LOGO_RATIO = 388 / 402;
 const SIGNATURE = 'Con cariño, equipo de La Oca';
 const EXCERPT_LENGTH = 280;
 const FONT = "font-family:Helvetica,Arial,sans-serif";
@@ -105,10 +107,20 @@ function logoUrl(adminUrl: string): string | null {
   }
 }
 
-function logoImg(adminUrl: string, size: number): string {
+function logoImg(adminUrl: string, height: number): string {
   const src = logoUrl(adminUrl);
   if (!src) return '';
-  return `<img src="${escapeHtml(src)}" width="${size}" height="${size}" alt="La Oca" style="display:block;border:0;border-radius:${Math.round(size * 0.18)}px">`;
+  const width = Math.round(height * LOGO_RATIO);
+  return `<img src="${escapeHtml(src)}" width="${width}" height="${height}" alt="La Oca" style="display:block;border:0">`;
+}
+
+// Franja azul con la oca; opcionalmente con el título debajo en la misma celda
+// (dos filas separadas dejan una línea visible en algunos clientes de correo).
+function logoBand(adminUrl: string, title?: string): string {
+  const titleHtml = title
+    ? `<div style="color:#ffffff;font-size:21px;font-weight:bold;margin-top:10px">${escapeHtml(title)}</div>`
+    : '';
+  return `<tr><td align="center" style="background-color:${BRAND_NAVY};padding:20px 24px ${title ? 22 : 16}px;${FONT}">${logoImg(adminUrl, 96)}${titleHtml}</td></tr>`;
 }
 
 function emailShell(background: string, inner: string): string {
@@ -126,15 +138,7 @@ ${inner}
 function complaintHtml(data: ComplaintEmailData): string {
   const copy = KIND_COPY.complaint;
   return emailShell('#ffffff', `
-<tr><td style="background-color:${BRAND_BLUE};padding:20px 24px">
-  <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-    <td style="padding-right:14px">${logoImg(data.adminUrl, 48)}</td>
-    <td style="color:#ffffff;${FONT}">
-      <div style="font-size:12px;letter-spacing:2px;opacity:0.85">LA OCA</div>
-      <div style="font-size:21px;font-weight:bold">${escapeHtml(copy.title)}</div>
-    </td>
-  </tr></table>
-</td></tr>
+${logoBand(data.adminUrl, copy.title)}
 <tr><td style="padding:24px">
   <p style="margin:0 0 14px">${escapeHtml(greeting(data.customerName))}</p>
   <p style="margin:0 0 18px">${escapeHtml(copy.message)}</p>
@@ -154,9 +158,9 @@ function warmHtml(data: ComplaintEmailData, kind: 'suggestion' | 'compliment'): 
   const copy = KIND_COPY[kind];
   const theme = WARM_THEME[kind];
   return emailShell(theme.background, `
-<tr><td align="center" style="padding:28px 24px 8px">
-  <table role="presentation" cellpadding="0" cellspacing="0"><tr><td>${logoImg(data.adminUrl, 72)}</td></tr></table>
-  <div style="font-size:23px;font-weight:bold;color:${theme.title};margin-top:14px">${escapeHtml(copy.title)}</div>
+${logoBand(data.adminUrl)}
+<tr><td align="center" style="padding:24px 24px 8px">
+  <div style="font-size:23px;font-weight:bold;color:${theme.title}">${escapeHtml(copy.title)}</div>
   <p style="margin:10px 0 0;color:${theme.text}">${escapeHtml(greeting(data.customerName))}</p>
   <p style="margin:4px 0 0;color:${theme.text}">${escapeHtml(copy.message)}</p>
 </td></tr>
@@ -210,7 +214,7 @@ export function buildCentralNotification(data: ComplaintEmailData): EmailMessage
     ${row('Evidencias', String(data.attachmentCount))}
   </table>
   <div style="background-color:#f9fafb;border-radius:8px;padding:12px 14px;color:#374151;margin-bottom:18px">${escapeHtml(data.description).replaceAll('\n', '<br>')}</div>
-  <a href="${escapeHtml(data.adminUrl)}" style="display:block;background-color:${BRAND_BLUE};color:#ffffff;text-align:center;text-decoration:none;font-weight:bold;border-radius:8px;padding:12px">Abrir en Conectoca</a>
+  <a href="${escapeHtml(data.adminUrl)}" style="display:block;background-color:${BRAND_NAVY};color:#ffffff;text-align:center;text-decoration:none;font-weight:bold;border-radius:8px;padding:12px">Abrir en Conectoca</a>
 </td></tr>`);
   return {
     subject: `${copy.centralPrefix} ${data.caseNumber} — ${data.originLabel}`,
