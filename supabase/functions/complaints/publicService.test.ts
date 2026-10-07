@@ -83,7 +83,7 @@ function publicServiceForTest({
     businessId: 'biz-1',
     appPublicUrl: 'https://conectoca.cl',
     rateLimitSecret: 'secret',
-    recipientEmail: 'central@empresa.cl',
+    recipientEmails: ['central@empresa.cl', 'contacto@empresa.cl'],
     fromEmail: 'reclamos@empresa.cl',
     repository,
     mailer,
@@ -112,7 +112,7 @@ test('guarda primero y conserva el caso si falla el correo central', async () =>
     mailer: {
       send: async ({ to }) => {
         events.push(`mail:${to}`);
-        if (to === 'central@empresa.cl') throw new Error('provider down');
+        if (Array.isArray(to)) throw new Error('provider down');
       },
     },
   });
@@ -123,7 +123,7 @@ test('guarda primero y conserva el caso si falla el correo central', async () =>
   assert.deepEqual(events.slice(0, 2), ['rate-limit', 'insert']);
   assert.deepEqual(events.filter(event => event.startsWith('mail:')), [
     'mail:cliente@mail.cl',
-    'mail:central@empresa.cl',
+    'mail:central@empresa.cl,contacto@empresa.cl',
   ]);
   assert.equal(result.confirmationEmailStatus, 'sent');
   assert.equal(result.notificationEmailStatus, 'failed');
@@ -489,4 +489,21 @@ test('guarda el tipo validado y lo pasa a los correos', async () => {
   assert.equal(insertedKind, 'compliment');
   assert.ok(subjects.some(subject => subject.startsWith('¡Gracias por felicitarnos!')));
   assert.ok(subjects.some(subject => subject.startsWith('Nueva felicitación')));
+});
+
+test('el aviso central llega a todos los destinatarios configurados', async () => {
+  const sent: Array<{ to: string | string[]; subject: string }> = [];
+  const service = publicServiceForTest({
+    repository: baseRepository({
+      insertComplaint: async input => ({ ...storedComplaint, kind: input.kind }),
+    }),
+    mailer: { send: async input => { sent.push({ to: input.to, subject: input.subject }); } },
+  });
+
+  await service.submit(submissionForTest({ kind: 'suggestion' }));
+
+  const central = sent.find(email => email.subject.startsWith('Nueva sugerencia'));
+  assert.deepEqual(central?.to, ['central@empresa.cl', 'contacto@empresa.cl']);
+  const customer = sent.find(email => email.subject.startsWith('Gracias por tu sugerencia'));
+  assert.equal(customer?.to, 'cliente@mail.cl');
 });

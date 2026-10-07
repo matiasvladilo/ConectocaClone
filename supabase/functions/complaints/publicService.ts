@@ -63,7 +63,7 @@ interface PublicComplaintServiceOptions {
   businessId: string;
   appPublicUrl: string;
   rateLimitSecret: string;
-  recipientEmail: string;
+  recipientEmails: string[];
   fromEmail: string;
   repository: ComplaintRepository;
   // null mientras el correo no está configurado: el caso se guarda y los
@@ -126,7 +126,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
     complaint: StoredComplaint,
     kind: 'confirmation' | 'notification',
     message: { subject: string; html: string; text: string },
-    to: string,
+    to: string | string[],
   ): Promise<'pending' | 'sent' | 'failed'> {
     if (!options.mailer) return 'pending';
     let result: EmailResult;
@@ -292,7 +292,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
           complaint,
           'notification',
           buildCentralNotification(data),
-          options.recipientEmail,
+          options.recipientEmails,
         ),
       ]);
 

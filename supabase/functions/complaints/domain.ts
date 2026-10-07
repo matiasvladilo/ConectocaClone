@@ -198,3 +198,20 @@ export function isAllowedComplaintOrigin(origin: string, appPublicUrl: string): 
   if (!origin) return false;
   return origin === new URL(appPublicUrl).origin || LOCAL_DEV_ORIGIN.test(origin);
 }
+
+const RECIPIENT_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// COMPLAINTS_RECIPIENT_EMAIL admite varios correos separados por coma. Un
+// correo mal escrito hace fallar el arranque en vez de perder avisos en silencio.
+export function parseRecipientEmails(raw: string | null): string[] {
+  const emails = (raw ?? '')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+  for (const email of emails) {
+    if (!RECIPIENT_PATTERN.test(email)) {
+      throw new Error(`Destinatario de reclamos inválido: ${email}`);
+    }
+  }
+  return [...new Set(emails)];
+}
