@@ -10,6 +10,7 @@ import {
   complaintOriginFilterValue,
   hasActiveComplaintFilters,
 } from './adminPanelState';
+import { COMPLAINT_KIND_OPTIONS } from './complaintKinds';
 import type { ComplaintFilters as ComplaintFiltersValue } from './types';
 
 export interface ComplaintFiltersProps {
@@ -57,6 +58,7 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
     setDatesOpen(false);
     onChange(applyComplaintFilter(value, {
       search: '',
+      kind: '',
       status: '',
       originType: '',
       branchId: '',
@@ -70,7 +72,7 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
   const showDates = datesOpen || hasDates;
 
   return (
-    <fieldset disabled={disabled} aria-label="Buscar y filtrar reclamos" className="space-y-3">
+    <fieldset disabled={disabled} aria-label="Buscar y filtrar mensajes" className="space-y-3">
       <div className="relative">
         <Label htmlFor="complaints-search" className="sr-only">Número, cliente o descripción</Label>
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
@@ -87,6 +89,21 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
 
       <div className="grid grid-cols-2 gap-3">
         <div>
+          <Label htmlFor="complaints-kind" className="sr-only">Tipo</Label>
+          <select
+            id="complaints-kind"
+            value={value.kind}
+            onChange={event => updateFilter({ kind: event.target.value as ComplaintFiltersValue['kind'] })}
+            className={selectClassName}
+          >
+            <option value="">Tipo: todos</option>
+            {COMPLAINT_KIND_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <Label htmlFor="complaints-status" className="sr-only">Estado</Label>
           <select
             id="complaints-status"
@@ -99,26 +116,26 @@ export function ComplaintFilters({ value, branches, onChange, disabled = false }
             <option value="attended">Atendidos</option>
           </select>
         </div>
+      </div>
 
-        <div>
-          <Label htmlFor="complaints-origin" className="sr-only">Origen o sucursal</Label>
-          <select
-            id="complaints-origin"
-            value={originValue}
-            onChange={event => onChange(applyComplaintOriginFilter(value, event.target.value))}
-            className={selectClassName}
-          >
-            <option value="">Origen: todos</option>
-            {branches.length > 0 && (
-              <optgroup label="Sucursales">
-                {branches.map(branch => <option key={branch.id} value={`branch:${branch.id}`}>{branch.name.trim()}</option>)}
-              </optgroup>
-            )}
-            {originValue === 'branch' && <option value="branch">Cualquier sucursal</option>}
-            <option value="production">Producción / producto</option>
-            <option value="other">Otro / no sabe</option>
-          </select>
-        </div>
+      <div>
+        <Label htmlFor="complaints-origin" className="sr-only">Origen o sucursal</Label>
+        <select
+          id="complaints-origin"
+          value={originValue}
+          onChange={event => onChange(applyComplaintOriginFilter(value, event.target.value))}
+          className={selectClassName}
+        >
+          <option value="">Origen: todos</option>
+          {branches.length > 0 && (
+            <optgroup label="Sucursales">
+              {branches.map(branch => <option key={branch.id} value={`branch:${branch.id}`}>{branch.name.trim()}</option>)}
+            </optgroup>
+          )}
+          {originValue === 'branch' && <option value="branch">Cualquier sucursal</option>}
+          <option value="production">Producción / producto</option>
+          <option value="other">Otro / no sabe</option>
+        </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

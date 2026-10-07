@@ -15,6 +15,8 @@ import {
 
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { ComplaintKindBadge } from './ComplaintKindBadge';
+import { complaintKindNoun } from './complaintKinds';
 import { buildComplaintMailto } from './mailto';
 import type {
   ComplaintDetail as ComplaintDetailData,
@@ -144,8 +146,8 @@ export function ComplaintDetail({
 
   function confirmStatusChange() {
     const confirmed = window.confirm(nextStatus === 'attended'
-      ? '¿Marcar este reclamo como atendido? Este cambio no envía ningún correo al cliente.'
-      : '¿Reabrir este reclamo? Volverá a aparecer como pendiente.');
+      ? `¿Marcar este ${complaintKindNoun(complaint.kind)} como atendido? Este cambio no envía ningún correo al cliente.`
+      : `¿Reabrir este ${complaintKindNoun(complaint.kind)}? Volverá a aparecer como pendiente.`);
     if (confirmed) void runStatusChange(nextStatus);
   }
 
@@ -159,7 +161,10 @@ export function ComplaintDetail({
         </Button>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-xl font-semibold">{complaint.caseNumber}</h2>
-          <p className="text-sm text-gray-600">{originLabel(complaint)}</p>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2">
+            <ComplaintKindBadge kind={complaint.kind} />
+            <span className="text-sm text-gray-600">{originLabel(complaint)}</span>
+          </div>
           <p className="text-xs text-gray-500">{formatDate(complaint.createdAt)}</p>
         </div>
         <Badge className={complaint.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
@@ -193,7 +198,7 @@ export function ComplaintDetail({
         </section>
 
         <section aria-labelledby="complaint-description-title" className={cardClassName}>
-          <h3 id="complaint-description-title" className="text-xs font-medium text-gray-500">Reclamo</h3>
+          <h3 id="complaint-description-title" className="text-xs font-medium text-gray-500">Mensaje</h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800" style={{ overflowWrap: 'anywhere', lineHeight: 1.6 }}>{complaint.description}</p>
         </section>
 
@@ -288,6 +293,7 @@ export function ComplaintDetail({
             fontWeight: 600,
           }}
           onClick={() => { window.location.href = buildComplaintMailto({
+            kind: complaint.kind,
             email: complaint.customerEmail,
             caseNumber: complaint.caseNumber,
             customerName: complaint.customerName,

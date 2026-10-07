@@ -30,6 +30,7 @@ import {
 import { ComplaintApiError, complaintsAPI } from './api';
 import { ComplaintDetail } from './ComplaintDetail';
 import { ComplaintFilters } from './ComplaintFilters';
+import { ComplaintKindBadge } from './ComplaintKindBadge';
 import { ComplaintQrDownload } from './ComplaintQrDownload';
 import { resolveComplaintQrOrigin } from './complaintQr';
 import type {
@@ -162,7 +163,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
       if (showLoading) {
         setListState({
           kind: 'error',
-          message: safeErrorMessage(error, 'No pudimos cargar los reclamos. Revisa tu conexión e inténtalo nuevamente.'),
+          message: safeErrorMessage(error, 'No pudimos cargar los mensajes. Revisa tu conexión e inténtalo nuevamente.'),
         });
       } else {
         setNotice({
@@ -220,7 +221,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         commitDetailState({
           kind: 'error',
           id,
-          message: safeErrorMessage(error, 'No pudimos cargar este reclamo. Inténtalo nuevamente.'),
+          message: safeErrorMessage(error, 'No pudimos cargar este mensaje. Inténtalo nuevamente.'),
         });
       }
     }
@@ -300,7 +301,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         : current);
       setNotice({
         tone: 'success',
-        message: status === 'attended' ? 'Reclamo marcado como atendido.' : 'Reclamo reabierto como pendiente.',
+        message: status === 'attended' ? 'Marcado como atendido.' : 'Reabierto como pendiente.',
       });
       void loadCounts();
       await loadList(filtersRef.current, false);
@@ -456,8 +457,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
           </Button>
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-gray-900">Reclamos</h1>
-            <p className="text-sm text-gray-600">Casos recibidos desde el QR</p>
+            <h1 className="text-2xl font-semibold text-gray-900">Reclamos y sugerencias</h1>
+            <p className="text-sm text-gray-600">Mensajes recibidos desde el QR</p>
           </div>
           <div className="ml-auto">
             <ComplaintQrDownload
@@ -525,10 +526,10 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
         )}
 
         {listState.kind === 'loading' && (
-          <section aria-label="Cargando reclamos" aria-busy="true" className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-16 shadow-sm">
+          <section aria-label="Cargando mensajes" aria-busy="true" className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-16 shadow-sm">
             <div className="text-center text-gray-600">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" aria-hidden="true" />
-              <p className="mt-3 text-sm">Cargando reclamos…</p>
+              <p className="mt-3 text-sm">Cargando mensajes…</p>
             </div>
           </section>
         )}
@@ -591,9 +592,12 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
                             </Badge>
                           </div>
                         </div>
-                        <p className="mt-0.5 truncate text-xs text-gray-500">
-                          {originLabel(complaint.originType, complaint.branchName)} · {formatDate(complaint.createdAt)}
-                        </p>
+                        <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                          <ComplaintKindBadge kind={complaint.kind} />
+                          <p className="truncate text-xs text-gray-500">
+                            {originLabel(complaint.originType, complaint.branchName)} · {formatDate(complaint.createdAt)}
+                          </p>
+                        </div>
                         <p className="mt-1 truncate text-sm text-gray-600">{complaint.descriptionPreview}</p>
                       </div>
                       <ChevronRight className="h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
@@ -626,8 +630,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
             onKeyDown={trapDetailFocus}
             className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-4 shadow-2xl outline-none"
           >
-          <h2 id="complaint-detail-dialog-title" className="sr-only">Detalle del reclamo</h2>
-          <p id="complaint-detail-dialog-description" className="sr-only">Antecedentes, evidencias y acciones del reclamo seleccionado.</p>
+          <h2 id="complaint-detail-dialog-title" className="sr-only">Detalle del mensaje</h2>
+          <p id="complaint-detail-dialog-description" className="sr-only">Antecedentes, evidencias y acciones del mensaje seleccionado.</p>
 
           {detailState.kind === 'loading' && (
             <div aria-busy="true" className="flex items-center justify-center py-16 text-center text-gray-600">
