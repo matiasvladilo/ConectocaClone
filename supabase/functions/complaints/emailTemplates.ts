@@ -49,12 +49,11 @@ const KIND_COPY: Record<ComplaintKind, {
 // encabezado azul de la marca para transmitir que se toma en serio.
 const WARM_THEME: Record<'suggestion' | 'compliment', {
   background: string;
-  circle: string;
   title: string;
   text: string;
 }> = {
-  suggestion: { background: '#eff6ff', circle: '#dbeafe', title: '#1e3a8a', text: '#1e40af' },
-  compliment: { background: '#f0fdf4', circle: '#dcfce7', title: '#14532d', text: '#166534' },
+  suggestion: { background: '#eff6ff', title: '#1e3a8a', text: '#1e40af' },
+  compliment: { background: '#f0fdf4', title: '#14532d', text: '#166534' },
 };
 
 const BADGE_COLORS: Record<ComplaintKind, { background: string; text: string }> = {
@@ -109,7 +108,7 @@ function logoUrl(adminUrl: string): string | null {
 function logoImg(adminUrl: string, size: number): string {
   const src = logoUrl(adminUrl);
   if (!src) return '';
-  return `<img src="${escapeHtml(src)}" width="${size}" height="${size}" alt="La Oca" style="display:block;border:0;border-radius:50%;background-color:#ffffff">`;
+  return `<img src="${escapeHtml(src)}" width="${size}" height="${size}" alt="La Oca" style="display:block;border:0;border-radius:${Math.round(size * 0.18)}px">`;
 }
 
 function emailShell(background: string, inner: string): string {
@@ -156,7 +155,7 @@ function warmHtml(data: ComplaintEmailData, kind: 'suggestion' | 'compliment'): 
   const theme = WARM_THEME[kind];
   return emailShell(theme.background, `
 <tr><td align="center" style="padding:28px 24px 8px">
-  <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background-color:${theme.circle};border-radius:50%;padding:8px">${logoImg(data.adminUrl, 64)}</td></tr></table>
+  <table role="presentation" cellpadding="0" cellspacing="0"><tr><td>${logoImg(data.adminUrl, 72)}</td></tr></table>
   <div style="font-size:23px;font-weight:bold;color:${theme.title};margin-top:14px">${escapeHtml(copy.title)}</div>
   <p style="margin:10px 0 0;color:${theme.text}">${escapeHtml(greeting(data.customerName))}</p>
   <p style="margin:4px 0 0;color:${theme.text}">${escapeHtml(copy.message)}</p>
