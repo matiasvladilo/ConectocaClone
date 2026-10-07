@@ -17,6 +17,7 @@ import {
 
 const complaintDetail: ComplaintDetail = {
   id: 'case-1',
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   originType: 'other',
   branchName: null,
@@ -38,6 +39,7 @@ const complaintDetail: ComplaintDetail = {
 };
 
 const complaintEmailFixture: ComplaintEmailData = {
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   createdAt: '2026-10-05T12:00:00.000Z',
   originLabel: 'Otro / no sabe',
@@ -385,4 +387,33 @@ test('repositorio acota detalle y claim de correo por business_id', async () => 
   assert.ok(calls.some(call => call.method === 'eq'
     && call.args[0] === 'notification_email_status'
     && call.args[1] === 'failed'));
+});
+
+test('el listado acepta filtrar por tipo y rechaza tipos desconocidos', () => {
+  assert.equal(parseComplaintListQuery(new URLSearchParams('kind=suggestion')).kind, 'suggestion');
+  assert.throws(() => parseComplaintListQuery(new URLSearchParams('kind=queja')), /tipo/i);
+});
+
+test('repository.list aplica el filtro por tipo y por negocio', async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const result = { data: [] as unknown[], error: null, count: 0 };
+  const chain: any = {
+    select: (...args: unknown[]) => { calls.push({ method: 'select', args }); return chain; },
+    eq: (...args: unknown[]) => { calls.push({ method: 'eq', args }); return chain; },
+    gte: (...args: unknown[]) => { calls.push({ method: 'gte', args }); return chain; },
+    lte: (...args: unknown[]) => { calls.push({ method: 'lte', args }); return chain; },
+    or: (...args: unknown[]) => { calls.push({ method: 'or', args }); return chain; },
+    order: (...args: unknown[]) => { calls.push({ method: 'order', args }); return chain; },
+    range: async (...args: unknown[]) => { calls.push({ method: 'range', args }); return result; },
+  };
+  const repository = createSupabaseComplaintRepository({
+    from: () => chain,
+    storage: { from: () => ({}) },
+  } as any);
+
+  const page = await repository.list({ page: 1, limit: 20, kind: 'suggestion' } as any, 'biz-1');
+
+  assert.ok(calls.some(c => c.method === 'eq' && c.args[0] === 'kind' && c.args[1] === 'suggestion'));
+  assert.ok(calls.some(c => c.method === 'eq' && c.args[0] === 'business_id' && c.args[1] === 'biz-1'));
+  assert.equal(page.pagination.total, 0);
 });

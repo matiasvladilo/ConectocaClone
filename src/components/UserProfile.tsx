@@ -797,7 +797,7 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
             >
               <div className="flex w-full items-center gap-2 relative z-10 text-white">
                 <MessageSquare className="w-5 h-5" />
-                Panel de Reclamos
+                Reclamos y sugerencias
                 {typeof pendingComplaintsCount === 'number' && pendingComplaintsCount > 0 && (
                   <Badge className="ml-auto bg-white text-red-600">{pendingComplaintsCount}</Badge>
                 )}

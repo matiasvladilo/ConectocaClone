@@ -92,6 +92,7 @@ app.post('/complaints/public/complaints', async c => {
   const form = await c.req.formData();
   const result = await publicService.submit({
     fields: {
+      kind: String(form.get('kind') || ''),
       originType: String(form.get('originType') || ''),
       branchId: String(form.get('branchId') || ''),
       email: String(form.get('email') || ''),

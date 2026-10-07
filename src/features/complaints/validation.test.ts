@@ -4,6 +4,7 @@ import type { ComplaintDraft } from './types.ts';
 import { validateComplaintDraft } from './validation.ts';
 
 const validDraft: ComplaintDraft = {
+  kind: 'complaint',
   originType: 'other',
   branchId: '',
   email: 'cliente@example.com',
@@ -28,14 +29,14 @@ test('requiere sucursal solo cuando el origen es branch', () => {
   );
 });
 
-test('rechaza descripciones fuera del límite de 20 a 5.000 caracteres', () => {
+test('rechaza descripciones fuera del límite de 10 a 5.000 caracteres', () => {
   assert.equal(
     validateComplaintDraft({ ...validDraft, description: 'Muy corta' }).description,
-    'La descripción debe tener entre 20 y 5.000 caracteres',
+    'La descripción debe tener entre 10 y 5.000 caracteres',
   );
   assert.equal(
     validateComplaintDraft({ ...validDraft, description: 'a'.repeat(5_001) }).description,
-    'La descripción debe tener entre 20 y 5.000 caracteres',
+    'La descripción debe tener entre 10 y 5.000 caracteres',
   );
 });
 
@@ -66,4 +67,14 @@ test('limita las evidencias a cinco archivos permitidos de hasta 10 MB', () => {
     validateComplaintDraft({ ...validDraft, files: [file('application/pdf', 10 * 1024 * 1024 + 1)] }).files,
     'Cada archivo debe pesar como máximo 10 MB',
   );
+});
+
+test('exige elegir el tipo de mensaje', () => {
+  assert.equal(validateComplaintDraft({ ...validDraft, kind: '' }).kind, 'Elige qué quieres contarnos');
+  assert.equal(validateComplaintDraft({ ...validDraft, kind: 'compliment' }).kind, undefined);
+});
+
+test('la descripción admite desde 10 caracteres', () => {
+  assert.equal(validateComplaintDraft({ ...validDraft, description: 'Excelente!' }).description, undefined);
+  assert.equal(validateComplaintDraft({ ...validDraft, description: 'Muy bien' }).description, 'La descripción debe tener entre 10 y 5.000 caracteres');
 });

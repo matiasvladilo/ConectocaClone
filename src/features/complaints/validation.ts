@@ -19,8 +19,12 @@ export function validateComplaintDraft(draft: ComplaintDraft): ComplaintValidati
   const phone = draft.phone.trim();
   const description = draft.description.trim();
 
+  if (draft.kind !== 'complaint' && draft.kind !== 'suggestion' && draft.kind !== 'compliment') {
+    errors.kind = 'Elige qué quieres contarnos';
+  }
+
   if (originType !== 'branch' && originType !== 'production' && originType !== 'other') {
-    errors.originType = 'Selecciona el origen del reclamo';
+    errors.originType = 'Selecciona el origen';
   }
 
   if (originType === 'branch' && !branchId) {
@@ -41,8 +45,8 @@ export function validateComplaintDraft(draft: ComplaintDraft): ComplaintValidati
     errors.phone = 'El teléfono no puede superar 40 caracteres';
   }
 
-  if (description.length < 20 || description.length > 5_000) {
-    errors.description = 'La descripción debe tener entre 20 y 5.000 caracteres';
+  if (description.length < 10 || description.length > 5_000) {
+    errors.description = 'La descripción debe tener entre 10 y 5.000 caracteres';
   }
 
   if (draft.files.length > MAX_FILES) {

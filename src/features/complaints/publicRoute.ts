@@ -1,3 +1,5 @@
+const PUBLIC_PATHS = new Set(['/opina', '/reclamos']);
+
 export function isPublicComplaintPath(pathname: string): boolean {
-  return pathname.replace(/\/+$/, '') === '/reclamos';
+  return PUBLIC_PATHS.has(pathname.replace(/\/+$/, ''));
 }

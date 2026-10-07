@@ -14,6 +14,7 @@ import { createResendMailer } from './mailer.ts';
 
 const storedComplaint: StoredComplaint = {
   id: 'case-1',
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   createdAt: '2026-10-05T12:00:00.000Z',
   originType: 'other',
@@ -53,6 +54,7 @@ function submissionForTest(
   const { files = [], ...fieldOverrides } = overrides;
   return {
     fields: {
+      kind: 'complaint',
       originType: 'other',
       branchId: '',
       email: 'cliente@mail.cl',
@@ -271,6 +273,7 @@ test('repositorio persiste caso y adjuntos con una sola RPC transaccional', asyn
       return {
         data: {
           id: 'case-1',
+          kind: 'suggestion',
           case_number: 'REC-2026-000001',
           created_at: '2026-10-05T12:00:00.000Z',
           origin_type: 'other',
@@ -290,6 +293,7 @@ test('repositorio persiste caso y adjuntos con una sola RPC transaccional', asyn
   const result = await repository.insertComplaint({
     id: 'case-1',
     businessId: 'biz-1',
+    kind: 'suggestion',
     originType: 'other',
     branchProfileId: null,
     branchNameSnapshot: null,
@@ -308,6 +312,8 @@ test('repositorio persiste caso y adjuntos con una sola RPC transaccional', asyn
 
   assert.equal(result.attachmentCount, 1);
   assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.parameters.p_kind, 'suggestion');
+  assert.equal(result.kind, 'suggestion');
   assert.equal(calls[0]?.name, 'insert_complaint_with_attachments');
   assert.deepEqual(calls[0]?.parameters.p_attachments, [{
     id: 'attachment-1',
@@ -327,6 +333,7 @@ test('repositorio propaga inequívocamente el error de la RPC atómica', async (
     () => repository.insertComplaint({
       id: 'case-1',
       businessId: 'biz-1',
+      kind: 'complaint',
       originType: 'other',
       branchProfileId: null,
       branchNameSnapshot: null,
@@ -461,4 +468,25 @@ test('sin correo configurado guarda el caso y deja ambos correos sin enviar', as
   assert.equal(result.caseNumber, storedComplaint.caseNumber);
   assert.equal(result.confirmationEmailStatus, 'pending');
   assert.equal(result.notificationEmailStatus, 'pending');
+});
+
+test('guarda el tipo validado y lo pasa a los correos', async () => {
+  let insertedKind = '';
+  const subjects: string[] = [];
+  const repository = baseRepository({
+    insertComplaint: async input => {
+      insertedKind = input.kind;
+      return { ...storedComplaint, kind: input.kind };
+    },
+  });
+  const service = publicServiceForTest({
+    repository,
+    mailer: { send: async input => { subjects.push(input.subject); } },
+  });
+
+  await service.submit(submissionForTest({ kind: 'compliment' }));
+
+  assert.equal(insertedKind, 'compliment');
+  assert.ok(subjects.some(subject => subject.startsWith('¡Gracias por felicitarnos!')));
+  assert.ok(subjects.some(subject => subject.startsWith('Nueva felicitación')));
 });
