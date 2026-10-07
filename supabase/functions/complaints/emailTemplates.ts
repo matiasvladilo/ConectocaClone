@@ -62,9 +62,9 @@ const BADGE_COLORS: Record<ComplaintKind, { background: string; text: string }> 
   compliment: { background: '#dcfce7', text: '#166534' },
 };
 
-// Azul marino del logo: la oca transparente se funde con esta franja.
+// Azul marino del logo. La franja superior es una imagen (public/email-banner.png)
+// porque Gmail en modo oscuro invierte los fondos de color pero no las imágenes.
 const BRAND_NAVY = '#063c84';
-const LOGO_RATIO = 388 / 402;
 const SIGNATURE = 'Con cariño, equipo de La Oca';
 const EXCERPT_LENGTH = 280;
 const FONT = "font-family:Helvetica,Arial,sans-serif";
@@ -98,29 +98,21 @@ function excerpt(description: string): string {
   return trimmed.length > EXCERPT_LENGTH ? `${trimmed.slice(0, EXCERPT_LENGTH)}…` : trimmed;
 }
 
-// El logo vive en el mismo sitio que el enlace al caso, que siempre es absoluto.
-function logoUrl(adminUrl: string): string | null {
+// El banner vive en el mismo sitio que el enlace al caso, que siempre es absoluto.
+function bannerUrl(adminUrl: string): string | null {
   try {
-    return new URL('/logo-email.png', adminUrl).toString();
+    return new URL('/email-banner.png', adminUrl).toString();
   } catch {
     return null;
   }
 }
 
-function logoImg(adminUrl: string, height: number): string {
-  const src = logoUrl(adminUrl);
-  if (!src) return '';
-  const width = Math.round(height * LOGO_RATIO);
-  return `<img src="${escapeHtml(src)}" width="${width}" height="${height}" alt="La Oca" style="display:block;border:0">`;
-}
-
-// Franja azul con la oca; opcionalmente con el título debajo en la misma celda
-// (dos filas separadas dejan una línea visible en algunos clientes de correo).
-function logoBand(adminUrl: string, title?: string): string {
-  const titleHtml = title
-    ? `<div style="color:#ffffff;font-size:21px;font-weight:bold;margin-top:10px">${escapeHtml(title)}</div>`
+function logoBand(adminUrl: string): string {
+  const src = bannerUrl(adminUrl);
+  const img = src
+    ? `<img src="${escapeHtml(src)}" width="560" alt="La Oca" style="display:block;width:100%;max-width:560px;height:auto;border:0">`
     : '';
-  return `<tr><td align="center" style="background-color:${BRAND_NAVY};padding:20px 24px ${title ? 22 : 16}px;${FONT}">${logoImg(adminUrl, 96)}${titleHtml}</td></tr>`;
+  return `<tr><td style="background-color:${BRAND_NAVY};padding:0;line-height:0;font-size:0">${img}</td></tr>`;
 }
 
 function emailShell(background: string, inner: string): string {
@@ -138,8 +130,9 @@ ${inner}
 function complaintHtml(data: ComplaintEmailData): string {
   const copy = KIND_COPY.complaint;
   return emailShell('#ffffff', `
-${logoBand(data.adminUrl, copy.title)}
+${logoBand(data.adminUrl)}
 <tr><td style="padding:24px">
+  <div style="font-size:22px;font-weight:bold;color:${BRAND_NAVY};margin:0 0 14px">${escapeHtml(copy.title)}</div>
   <p style="margin:0 0 14px">${escapeHtml(greeting(data.customerName))}</p>
   <p style="margin:0 0 18px">${escapeHtml(copy.message)}</p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eff6ff;border-radius:8px;margin-bottom:18px"><tr><td style="padding:12px 16px">
