@@ -3,11 +3,14 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  Heart,
+  Lightbulb,
   Loader2,
   LockKeyhole,
   Mail,
   MapPin,
   MessageSquareText,
+  MessageSquareWarning,
   PackageOpen,
   RotateCw,
   Send,
@@ -17,6 +20,11 @@ import { Toaster, toast } from 'sonner';
 
 import { complaintsAPI } from './api';
 import { ComplaintAttachmentsInput } from './ComplaintAttachmentsInput';
+import {
+  COMPLAINT_KIND_OPTIONS,
+  complaintDescriptionPlaceholder,
+  complaintKindSuccess,
+} from './complaintKinds';
 import { firstInvalidComplaintField } from './formAccessibility';
 import {
   getInvalidBranchMessage,
@@ -28,6 +36,7 @@ import {
 } from './submissionRecovery';
 import type {
   ComplaintDraft,
+  ComplaintKind,
   ComplaintOrigin,
   ComplaintValidationErrors,
   PublicComplaintConfig,
@@ -37,6 +46,7 @@ import { validateComplaintDraft } from './validation';
 type PublicFormState = 'loading' | 'ready' | 'submitting' | 'success' | 'error';
 
 const EMPTY_COMPLAINT_DRAFT: ComplaintDraft = {
+  kind: '',
   originType: 'branch',
   branchId: '',
   email: '',
@@ -88,8 +98,9 @@ function ComplaintLoadError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function ComplaintSuccess({ result }: { result: { caseNumber: string; receivedAt: string } }) {
+function ComplaintSuccess({ result }: { result: { caseNumber: string; receivedAt: string; kind: ComplaintKind } }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const copy = complaintKindSuccess(result.kind);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -101,13 +112,10 @@ function ComplaintSuccess({ result }: { result: { caseNumber: string; receivedAt
         <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-green-700">
           <CheckCircle2 className="h-11 w-11" aria-hidden="true" />
         </span>
-        <p className="mt-6 text-sm font-bold uppercase tracking-widest text-blue-700">Envío confirmado</p>
-        <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-3xl font-bold text-gray-900">Recibimos tu reclamo</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="mt-6 text-3xl font-bold text-gray-900">{copy.title}</h1>
+        <p className="mt-4 text-gray-600" style={{ lineHeight: 1.7 }}>{copy.message}</p>
         <p className="mt-6 text-sm text-gray-500">Tu número de caso es</p>
         <p className="mt-1 text-3xl font-black tracking-tight text-blue-900" style={{ overflowWrap: 'anywhere' }}>{result.caseNumber}</p>
-        <p className="mt-5 text-gray-600" style={{ lineHeight: 1.7 }}>
-          Guarda este número. Recibirás la respuesta por correo.
-        </p>
       </section>
     </main>
   );
@@ -118,7 +126,7 @@ export function PublicComplaintForm() {
   const [config, setConfig] = useState<PublicComplaintConfig | null>(null);
   const [draft, setDraft] = useState<ComplaintDraft>(EMPTY_COMPLAINT_DRAFT);
   const [errors, setErrors] = useState<ComplaintValidationErrors>({});
-  const [result, setResult] = useState<{ caseNumber: string; receivedAt: string } | null>(null);
+  const [result, setResult] = useState<{ caseNumber: string; receivedAt: string; kind: ComplaintKind } | null>(null);
   const [submissionMessage, setSubmissionMessage] = useState<string | null>(null);
   const submissionLocked = useRef(false);
   const errorSummaryRef = useRef<HTMLElement>(null);
@@ -197,7 +205,7 @@ export function PublicComplaintForm() {
     setState('submitting');
     try {
       const nextResult = await complaintsAPI.submitPublic(draft, config.formToken);
-      setResult(nextResult);
+      setResult({ ...nextResult, kind: draft.kind as ComplaintKind });
       setState('success');
     } catch (error) {
       const recovery = getPublicComplaintRecovery(error);
@@ -214,10 +222,10 @@ export function PublicComplaintForm() {
           ? 'Actualizamos las sucursales y limpiamos la selección que ya no está disponible. Tus datos y archivos se conservaron.'
           : branchMessage);
       } else if (recovery === 'rate-limited') {
-        setSubmissionMessage('No podemos recibir más reclamos desde esta conexión por ahora. Espera una hora e inténtalo nuevamente.');
+        setSubmissionMessage('No podemos recibir más mensajes desde esta conexión por ahora. Espera una hora e inténtalo nuevamente.');
       } else {
-        setSubmissionMessage('No pudimos enviar el reclamo. Tus datos y archivos se conservaron; inténtalo nuevamente.');
-        toast.error('No pudimos enviar el reclamo. Inténtalo nuevamente.');
+        setSubmissionMessage('No pudimos enviar tu mensaje. Tus datos y archivos se conservaron; inténtalo nuevamente.');
+        toast.error('No pudimos enviar tu mensaje. Inténtalo nuevamente.');
       }
       setState('ready');
       submissionLocked.current = false;
@@ -237,9 +245,9 @@ export function PublicComplaintForm() {
       <header className="px-4 pt-8 text-white sm:px-6" style={{ background: 'linear-gradient(135deg, #0059FF 0%, #0c3c84 100%)', paddingBottom: '3.5rem' }}>
         <div className="mx-auto max-w-2xl">
           <p className="text-sm font-bold uppercase tracking-widest text-blue-200">La Oca</p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight">Cuéntanos qué ocurrió</h1>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight">Cuéntanos tu experiencia</h1>
           <p className="mt-3 max-w-lg text-blue-100" style={{ lineHeight: 1.7 }}>
-            Completa este formulario y nuestro equipo revisará tu reclamo.
+            Reclamos, sugerencias o felicitaciones: todo nos ayuda a mejorar.
           </p>
         </div>
       </header>
@@ -262,10 +270,55 @@ export function PublicComplaintForm() {
           <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-xl">
             <div className="mb-5 flex items-center gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
-                <MapPin className="h-5 w-5" aria-hidden="true" />
+                <MessageSquareText className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 1</p>
+                <h2 id="complaint-kind-title" className="text-xl font-bold text-gray-900">¿Qué quieres contarnos?</h2>
+              </div>
+            </div>
+
+            <div
+              role="radiogroup"
+              aria-labelledby="complaint-kind-title"
+              aria-describedby={errors.kind ? 'complaint-kind-error' : undefined}
+              className="flex flex-col gap-2"
+            >
+              {COMPLAINT_KIND_OPTIONS.map(option => {
+                const selected = draft.kind === option.value;
+                const Icon = option.value === 'complaint'
+                  ? MessageSquareWarning
+                  : option.value === 'suggestion' ? Lightbulb : Heart;
+                return (
+                  <button
+                    key={option.value}
+                    id={`complaint-kind-${option.value}`}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={isSubmitting}
+                    onClick={() => update({ kind: option.value }, ['kind'])}
+                    className={`flex w-full items-center gap-3 rounded-xl border-2 p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'border-blue-600 bg-blue-50' : errors.kind ? 'border-red-500 bg-white' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+                  >
+                    <Icon className={`h-6 w-6 shrink-0 ${selected ? 'text-blue-700' : 'text-gray-500'}`} aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block font-semibold text-gray-900">{option.label}</span>
+                      <span className="block text-sm text-gray-500">{option.hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <FieldError id="complaint-kind-error" message={errors.kind} />
+          </section>
+
+          <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
+                <MapPin className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 2</p>
                 <h2 className="text-xl font-bold text-gray-900">¿Dónde se originó?</h2>
               </div>
             </div>
@@ -354,7 +407,7 @@ export function PublicComplaintForm() {
                 <UserRound className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 2</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 3</p>
                 <h2 className="text-xl font-bold text-gray-900">Tus datos de contacto</h2>
               </div>
             </div>
@@ -434,13 +487,13 @@ export function PublicComplaintForm() {
                 <MessageSquareText className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 3</p>
-                <h2 className="text-xl font-bold text-gray-900">Describe lo ocurrido</h2>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 4</p>
+                <h2 className="text-xl font-bold text-gray-900">Cuéntanos más</h2>
               </div>
             </div>
 
             <label htmlFor="complaint-description" className="mb-2 block text-sm font-semibold text-gray-800">
-              Detalle del reclamo <span className="text-red-600">*</span>
+              Detalle <span className="text-red-600">*</span>
             </label>
             <textarea
               id="complaint-description"
@@ -448,12 +501,12 @@ export function PublicComplaintForm() {
               disabled={isSubmitting}
               required
               aria-required="true"
-              minLength={20}
+              minLength={10}
               maxLength={5000}
               rows={7}
               aria-invalid={Boolean(errors.description)}
               aria-describedby={`complaint-description-count${errors.description ? ' complaint-description-error' : ''}`}
-              placeholder="Cuéntanos qué pasó, cuándo ocurrió y cualquier detalle que nos ayude a entenderlo."
+              placeholder={complaintDescriptionPlaceholder(draft.kind)}
               onChange={event => update({ description: event.target.value }, ['description'])}
               className={`${errors.description ? fieldErrorClassName : fieldClassName} h-40 py-3`}
               style={{ resize: 'vertical', lineHeight: 1.6 }}
@@ -472,7 +525,7 @@ export function PublicComplaintForm() {
                 <PackageOpen className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 4</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Paso 5</p>
                 <h2 className="text-xl font-bold text-gray-900">Agrega evidencias</h2>
               </div>
             </div>
