@@ -64,6 +64,7 @@ async function adminRequest<T>(path: string, token: string, options: RequestInit
 
 function publicComplaintForm(input: ComplaintDraft, formToken: string): FormData {
   const form = new FormData();
+  form.append('kind', input.kind);
   form.append('originType', input.originType);
   form.append('branchId', input.branchId);
   form.append('email', input.email);
@@ -83,6 +84,7 @@ function complaintQuery(filters: ComplaintFilters): string {
   });
   if (filters.search.trim()) params.set('search', filters.search.trim());
   if (filters.status) params.set('status', filters.status);
+  if (filters.kind) params.set('kind', filters.kind);
   if (filters.originType) params.set('originType', filters.originType);
   if (filters.branchId.trim()) params.set('branchId', filters.branchId.trim());
   if (filters.dateFrom.trim()) params.set('dateFrom', filters.dateFrom.trim());

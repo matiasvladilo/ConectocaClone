@@ -43,6 +43,7 @@ export class ComplaintDetailRequestGuard {
 
 export const DEFAULT_COMPLAINT_FILTERS: ComplaintFilters = {
   search: '',
+  kind: '',
   status: '',
   originType: '',
   branchId: '',
@@ -84,6 +85,7 @@ export function hasActiveComplaintFilters(filters: ComplaintFilters): boolean {
   return Boolean(
     filters.search
     || filters.status
+    || filters.kind
     || filters.originType
     || filters.branchId
     || filters.dateFrom
@@ -93,8 +95,8 @@ export function hasActiveComplaintFilters(filters: ComplaintFilters): boolean {
 
 export function getComplaintEmptyMessage(filters: ComplaintFilters): string {
   return hasActiveComplaintFilters(filters)
-    ? 'Ningún reclamo coincide con los filtros.'
-    : 'Todavía no hay reclamos recibidos.';
+    ? 'Ningún mensaje coincide con los filtros.'
+    : 'Todavía no hay mensajes recibidos.';
 }
 
 export function mergeComplaintEmailStatuses(

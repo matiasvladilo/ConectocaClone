@@ -14,7 +14,7 @@ export function resolveComplaintQrOrigin(
 }
 
 export function complaintQrUrl(publicUrl: string): string {
-  return new URL('/reclamos', publicUrl).toString();
+  return new URL('/opina', publicUrl).toString();
 }
 
 export interface ComplaintQrDownloadDependencies {

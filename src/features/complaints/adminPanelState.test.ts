@@ -18,6 +18,7 @@ import {
 
 const filters: ComplaintFilters = {
   search: '',
+  kind: '',
   status: '',
   originType: '',
   branchId: '',
@@ -29,6 +30,7 @@ const filters: ComplaintFilters = {
 
 const complaint: ComplaintDetail = {
   id: 'case-1',
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   originType: 'other',
   branchName: null,
@@ -59,10 +61,10 @@ test('cualquier filtro aplicado reinicia la paginación sin mutar el valor anter
 });
 
 test('el vacío diferencia una bandeja nueva de filtros sin resultados', () => {
-  assert.equal(getComplaintEmptyMessage(filters), 'Todavía no hay reclamos recibidos.');
+  assert.equal(getComplaintEmptyMessage(filters), 'Todavía no hay mensajes recibidos.');
   assert.equal(
     getComplaintEmptyMessage({ ...filters, dateFrom: '2026-10-01' }),
-    'Ningún reclamo coincide con los filtros.',
+    'Ningún mensaje coincide con los filtros.',
   );
 });
 
@@ -172,6 +174,12 @@ test('applying the origin selector sets origin and branch together and resets th
 
 test('status count filters ignore the current search and request a single row', () => {
   assert.deepEqual(complaintStatusCountFilters('pending'), {
-    search: '', status: 'pending', originType: '', branchId: '', dateFrom: '', dateTo: '', page: 1, limit: 1,
+    search: '', kind: '', status: 'pending', originType: '', branchId: '', dateFrom: '', dateTo: '', page: 1, limit: 1,
   });
+});
+
+test('el tipo cuenta como filtro activo y los conteos lo ignoran', () => {
+  assert.equal(getComplaintEmptyMessage({ ...filters, kind: 'suggestion' }), 'Ningún mensaje coincide con los filtros.');
+  assert.equal(getComplaintEmptyMessage({ ...filters, page: 1 }), 'Todavía no hay mensajes recibidos.');
+  assert.equal(complaintStatusCountFilters('pending').kind, '');
 });

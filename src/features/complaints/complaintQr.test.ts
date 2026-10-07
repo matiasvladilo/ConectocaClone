@@ -27,12 +27,12 @@ test('falls back to the browser origin when the configured URL is invalid', () =
 test('builds the universal QR URL at the origin root without business data', () => {
   assert.equal(
     complaintQrUrl('https://app.conectoca.cl/admin?businessId=private-id'),
-    'https://app.conectoca.cl/reclamos',
+    'https://app.conectoca.cl/opina',
   );
 });
 
 test('preserves the development origin and port', () => {
-  assert.equal(complaintQrUrl('http://localhost:5173'), 'http://localhost:5173/reclamos');
+  assert.equal(complaintQrUrl('http://localhost:5173'), 'http://localhost:5173/opina');
 });
 
 test('generates and downloads the universal QR with the production options', async () => {
@@ -48,7 +48,7 @@ test('generates and downloads the universal QR with the production options', asy
   });
 
   assert.deepEqual(generated, [{
-    value: 'https://app.conectoca.cl/reclamos',
+    value: 'https://app.conectoca.cl/opina',
     options: { width: 1024, margin: 2, errorCorrectionLevel: 'H' },
   }]);
   assert.deepEqual(downloads, [{

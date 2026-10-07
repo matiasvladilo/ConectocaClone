@@ -14,3 +14,9 @@ test('isPublicComplaintPath does not intercept authenticated or nested routes', 
   assert.equal(isPublicComplaintPath('/reclamos/otro'), false);
   assert.equal(isPublicComplaintPath('/Reclamos'), false);
 });
+
+test('isPublicComplaintPath acepta la ruta nueva /opina', () => {
+  assert.equal(isPublicComplaintPath('/opina'), true);
+  assert.equal(isPublicComplaintPath('/opina/'), true);
+  assert.equal(isPublicComplaintPath('/opina/otro'), false);
+});

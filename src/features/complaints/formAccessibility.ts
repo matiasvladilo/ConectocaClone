@@ -1,6 +1,7 @@
 import type { ComplaintValidationErrors } from './types';
 
 const FIELD_IDS: Array<[keyof ComplaintValidationErrors, string]> = [
+  ['kind', 'complaint-kind-complaint'],
   ['originType', 'complaint-origin'],
   ['branchId', 'complaint-branch'],
   ['email', 'complaint-email'],

@@ -1,3 +1,4 @@
+export type ComplaintKind = 'complaint' | 'suggestion' | 'compliment';
 export type ComplaintOrigin = 'branch' | 'production' | 'other';
 export type ComplaintStatus = 'pending' | 'attended';
 export type ComplaintEmailStatus = 'pending' | 'sending' | 'sent' | 'failed';
@@ -9,6 +10,7 @@ export interface PublicComplaintConfig {
 }
 
 export interface ComplaintDraft {
+  kind: ComplaintKind | '';
   originType: ComplaintOrigin;
   branchId: string;
   email: string;
@@ -19,6 +21,7 @@ export interface ComplaintDraft {
 }
 
 export interface ComplaintValidationErrors {
+  kind?: string;
   originType?: string;
   branchId?: string;
   email?: string;
@@ -30,6 +33,7 @@ export interface ComplaintValidationErrors {
 
 export interface ComplaintSummary {
   id: string;
+  kind: ComplaintKind;
   caseNumber: string;
   originType: ComplaintOrigin;
   branchName: string | null;
@@ -62,6 +66,7 @@ export interface ComplaintDetail extends ComplaintSummary {
 
 export interface ComplaintFilters {
   search: string;
+  kind: ComplaintKind | '';
   status: ComplaintStatus | '';
   originType: ComplaintOrigin | '';
   branchId: string;

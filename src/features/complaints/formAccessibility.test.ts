@@ -10,3 +10,11 @@ test('firstInvalidComplaintField follows the public form order and leaves attach
   assert.equal(accessibility.firstInvalidComplaintField!({ branchId: 'Obligatoria' }), 'complaint-branch');
   assert.equal(accessibility.firstInvalidComplaintField!({ files: 'Inválido' }), null);
 });
+
+test('el tipo es el primer campo a enfocar', async () => {
+  const { firstInvalidComplaintField } = await import('./formAccessibility.ts');
+  assert.equal(
+    firstInvalidComplaintField({ kind: 'x', email: 'y' }),
+    'complaint-kind-complaint',
+  );
+});
