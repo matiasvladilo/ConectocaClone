@@ -329,7 +329,7 @@ export function createAdminComplaintService(
     repository: AdminComplaintRepository;
     mailer: ComplaintMailer;
     fromEmail: string;
-    recipientEmail: string;
+    recipientEmails: string[];
     appPublicUrl: string;
     now?: () => Date;
   },
@@ -351,7 +351,7 @@ export function createAdminComplaintService(
       const message = kind === 'confirmation'
         ? buildCustomerConfirmation(data)
         : buildCentralNotification(data);
-      const to = kind === 'confirmation' ? data.customerEmail : options.recipientEmail;
+      const to = kind === 'confirmation' ? data.customerEmail : options.recipientEmails;
       await options.mailer.send({ from: options.fromEmail, to, ...message });
       result = { status: 'sent', sentAt: now().toISOString(), error: null };
     } catch (error) {

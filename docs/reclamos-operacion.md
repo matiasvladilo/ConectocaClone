@@ -35,7 +35,7 @@ Los tres de correo (`COMPLAINTS_RECIPIENT_EMAIL`, `COMPLAINTS_FROM_EMAIL`, `RESE
 | Secreto | Valor |
 |---|---|
 | `COMPLAINTS_BUSINESS_ID` | `business_id` de La Oca en `businesses`: `d1fa7f40-c5e1-4bc2-9ffc-c8483950b758` |
-| `COMPLAINTS_RECIPIENT_EMAIL` | Casilla central que recibe todos los avisos |
+| `COMPLAINTS_RECIPIENT_EMAIL` | Correos que reciben el aviso de cada mensaje nuevo, separados por coma (`uno@mail.cl,contacto@laoca.info`). Un correo mal escrito impide que la función arranque. |
 | `COMPLAINTS_FROM_EMAIL` | Remitente en un dominio verificado en Resend, p. ej. `Reclamos La Oca <reclamos@tu-dominio.cl>` |
 | `RESEND_API_KEY` | API key de Resend con permiso de envío |
 | `APP_PUBLIC_URL` | Origen público de Conectoca, sin barra final: `https://conectocadev.netlify.app` |

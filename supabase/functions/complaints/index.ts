@@ -11,7 +11,7 @@ import {
   type AdminContext,
 } from './adminService.ts';
 import { createResendMailer, type ComplaintMailer } from './mailer.ts';
-import { isAllowedComplaintOrigin } from './domain.ts';
+import { isAllowedComplaintOrigin, parseRecipientEmails } from './domain.ts';
 import { createPublicComplaintService, PublicComplaintError } from './publicService.ts';
 import {
   ComplaintNotFoundError,
@@ -34,10 +34,10 @@ const serviceRoleKey = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
 const businessId = requiredEnv('COMPLAINTS_BUSINESS_ID');
 // El correo es opcional: sin estos tres valores los reclamos igual se guardan
 // y se ven en el panel, solo que no se envía ningún aviso.
-const recipientEmail = optionalEnv('COMPLAINTS_RECIPIENT_EMAIL');
+const recipientEmails = parseRecipientEmails(optionalEnv('COMPLAINTS_RECIPIENT_EMAIL'));
 const fromEmail = optionalEnv('COMPLAINTS_FROM_EMAIL');
 const resendApiKey = optionalEnv('RESEND_API_KEY');
-const emailEnabled = Boolean(recipientEmail && fromEmail && resendApiKey);
+const emailEnabled = Boolean(recipientEmails.length > 0 && fromEmail && resendApiKey);
 const appPublicUrl = requiredEnv('APP_PUBLIC_URL');
 const rateLimitSecret = requiredEnv('COMPLAINTS_RATE_LIMIT_SECRET');
 
@@ -58,7 +58,7 @@ const publicService = createPublicComplaintService({
   businessId,
   appPublicUrl,
   rateLimitSecret,
-  recipientEmail: recipientEmail ?? '',
+  recipientEmails,
   fromEmail: fromEmail ?? '',
   repository,
   mailer,
@@ -67,7 +67,7 @@ const adminService = createAdminComplaintService({
   repository,
   mailer: mailer ?? disabledMailer,
   fromEmail: fromEmail ?? '',
-  recipientEmail: recipientEmail ?? '',
+  recipientEmails,
   appPublicUrl,
 });
 

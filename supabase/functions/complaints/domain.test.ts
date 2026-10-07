@@ -6,6 +6,7 @@ import {
   createFormToken,
   verifyFormToken,
   isAllowedComplaintOrigin,
+  parseRecipientEmails,
 } from './domain.ts';
 
 test('branch exige una sucursal y normaliza el correo', () => {
@@ -70,4 +71,17 @@ test('la descripción admite desde 10 caracteres', () => {
     () => validateComplaintFields({ ...baseFields, kind: 'compliment', description: 'Muy bien' }),
     /entre 10 y 5\.000/,
   );
+});
+
+test('acepta varios destinatarios del aviso separados por coma', () => {
+  assert.deepEqual(
+    parseRecipientEmails(' uno@mail.cl, Contacto@LaOca.info ,uno@mail.cl,, '),
+    ['uno@mail.cl', 'contacto@laoca.info'],
+  );
+  assert.deepEqual(parseRecipientEmails(null), []);
+  assert.deepEqual(parseRecipientEmails(''), []);
+});
+
+test('rechaza un destinatario mal escrito para no perder avisos en silencio', () => {
+  assert.throws(() => parseRecipientEmails('uno@mail.cl, contacto-laoca.info'), /contacto-laoca\.info/);
 });

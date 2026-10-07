@@ -83,7 +83,7 @@ function serviceForTest(repository: AdminComplaintRepository, overrides: {
     repository,
     mailer: { send: overrides.send ?? (async () => undefined) },
     fromEmail: 'reclamos@empresa.cl',
-    recipientEmail: 'central@empresa.cl',
+    recipientEmails: ['central@empresa.cl', 'contacto@empresa.cl'],
     appPublicUrl: 'https://conectoca.cl',
     now: () => new Date('2026-10-05T13:00:00.000Z'),
   });
