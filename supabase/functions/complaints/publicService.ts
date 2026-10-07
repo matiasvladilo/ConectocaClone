@@ -184,7 +184,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
         requestTime,
       );
       if (!await options.repository.consumeRateLimit(rateLimitKey)) {
-        throw new PublicComplaintError('RATE_LIMITED', 'No pudimos recibir otro reclamo en este momento.');
+        throw new PublicComplaintError('RATE_LIMITED', 'No pudimos recibir otro mensaje en este momento.');
       }
 
       let fields;
@@ -193,7 +193,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
       } catch (error) {
         throw new PublicComplaintError(
           'VALIDATION_ERROR',
-          error instanceof Error ? error.message : 'Los datos del reclamo no son válidos.',
+          error instanceof Error ? error.message : 'Los datos del mensaje no son válidos.',
         );
       }
 
@@ -251,6 +251,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
         complaint = await options.repository.insertComplaint({
           id: complaintId,
           businessId: options.businessId,
+          kind: fields.kind,
           originType: fields.originType,
           branchProfileId: branch?.id ?? null,
           branchNameSnapshot: branch?.name ?? null,
@@ -265,7 +266,7 @@ export function createPublicComplaintService(options: PublicComplaintServiceOpti
       }
 
       const data = {
-        kind: fields.kind,
+        kind: complaint.kind,
         caseNumber: complaint.caseNumber,
         createdAt: complaint.createdAt,
         originLabel: originLabel(complaint),

@@ -17,6 +17,7 @@ import {
 
 const complaintDetail: ComplaintDetail = {
   id: 'case-1',
+  kind: 'complaint',
   caseNumber: 'REC-2026-000001',
   originType: 'other',
   branchName: null,
@@ -386,4 +387,9 @@ test('repositorio acota detalle y claim de correo por business_id', async () => 
   assert.ok(calls.some(call => call.method === 'eq'
     && call.args[0] === 'notification_email_status'
     && call.args[1] === 'failed'));
+});
+
+test('el listado acepta filtrar por tipo y rechaza tipos desconocidos', () => {
+  assert.equal(parseComplaintListQuery(new URLSearchParams('kind=suggestion')).kind, 'suggestion');
+  assert.throws(() => parseComplaintListQuery(new URLSearchParams('kind=queja')), /tipo/i);
 });

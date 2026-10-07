@@ -1,4 +1,4 @@
-import type { ComplaintOrigin } from './domain.ts';
+import { COMPLAINT_KINDS, type ComplaintKind, type ComplaintOrigin } from './domain.ts';
 import {
   buildCentralNotification,
   buildCustomerConfirmation,
@@ -68,6 +68,7 @@ export async function authorizeAdmin(input: {
 export interface ComplaintListQuery {
   search?: string;
   status?: 'pending' | 'attended';
+  kind?: ComplaintKind;
   originType?: ComplaintOrigin;
   branchId?: string;
   dateFrom?: string;
@@ -78,6 +79,7 @@ export interface ComplaintListQuery {
 
 export interface ComplaintSummary {
   id: string;
+  kind: ComplaintKind;
   caseNumber: string;
   originType: ComplaintOrigin;
   branchName: string | null;
@@ -240,6 +242,14 @@ export function parseComplaintListQuery(params: URLSearchParams): ComplaintListQ
       validationError('El estado no es válido.');
     }
     query.status = status;
+  }
+
+  const kind = params.get('kind');
+  if (kind) {
+    if (!COMPLAINT_KINDS.includes(kind as ComplaintKind)) {
+      validationError('El tipo no es válido.');
+    }
+    query.kind = kind as ComplaintKind;
   }
 
   const originType = params.get('originType');

@@ -1,4 +1,4 @@
-import type { ComplaintOrigin } from './domain.ts';
+import type { ComplaintKind, ComplaintOrigin } from './domain.ts';
 // Shared bounds keep handler validation and PostgREST filtering identical.
 import {
   complaintDateFromBoundary,
@@ -16,6 +16,7 @@ const EVIDENCE_BUCKET = 'complaint-evidence';
 export interface NewComplaintRecord {
   id: string;
   businessId: string;
+  kind: ComplaintKind;
   originType: ComplaintOrigin;
   branchProfileId: string | null;
   branchNameSnapshot: string | null;
@@ -36,6 +37,7 @@ export interface NewAttachmentRecord {
 
 export interface StoredComplaint {
   id: string;
+  kind: ComplaintKind;
   caseNumber: string;
   createdAt: string;
   originType: ComplaintOrigin;
@@ -80,6 +82,7 @@ interface SupabaseClientLike {
 
 interface ComplaintRow {
   id: string;
+  kind: ComplaintKind;
   case_number: string;
   created_at: string;
   origin_type: ComplaintOrigin;
@@ -94,6 +97,7 @@ interface ComplaintRow {
 interface AdminComplaintRow {
   id: string;
   business_id: string;
+  kind: ComplaintKind;
   case_number: string;
   origin_type: ComplaintOrigin;
   branch_name_snapshot: string | null;
@@ -150,6 +154,7 @@ function throwIfError(operation: string, error: SupabaseError | null): void {
 function toStoredComplaint(row: ComplaintRow): StoredComplaint {
   return {
     id: row.id,
+    kind: row.kind,
     caseNumber: row.case_number,
     createdAt: row.created_at,
     originType: row.origin_type,
@@ -165,6 +170,7 @@ function toStoredComplaint(row: ComplaintRow): StoredComplaint {
 function toComplaintSummary(row: AdminComplaintRow): ComplaintSummary {
   return {
     id: row.id,
+    kind: row.kind,
     caseNumber: row.case_number,
     originType: row.origin_type,
     branchName: row.branch_name_snapshot,
@@ -201,6 +207,7 @@ function toComplaintDetail(row: AdminComplaintRow): ComplaintDetail {
 const ADMIN_SUMMARY_SELECT = [
   'id',
   'business_id',
+  'kind',
   'case_number',
   'origin_type',
   'branch_name_snapshot',
@@ -292,6 +299,7 @@ export function createSupabaseComplaintRepository(
       const { data, error } = await client.rpc('insert_complaint_with_attachments', {
         p_id: input.id,
         p_business_id: input.businessId,
+        p_kind: input.kind,
         p_origin_type: input.originType,
         p_branch_profile_id: input.branchProfileId,
         p_branch_name_snapshot: input.branchNameSnapshot,
@@ -335,6 +343,7 @@ export function createSupabaseComplaintRepository(
         .eq('business_id', businessId);
 
       if (query.status) request = request.eq('status', query.status);
+      if (query.kind) request = request.eq('kind', query.kind);
       if (query.originType) request = request.eq('origin_type', query.originType);
       if (query.branchId) request = request.eq('branch_profile_id', query.branchId);
       if (query.dateFrom) request = request.gte('created_at', complaintDateFromBoundary(query.dateFrom));
@@ -445,7 +454,7 @@ export function createSupabaseComplaintRepository(
       if (!data) throw new ComplaintNotFoundError('complaint');
       const row = data as AdminComplaintRow;
       return {
-        kind: 'complaint',
+        kind: row.kind,
         caseNumber: row.case_number,
         createdAt: row.created_at,
         originLabel: originLabel(row),
