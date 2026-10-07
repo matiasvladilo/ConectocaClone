@@ -25,7 +25,7 @@ Migración `20261006_a_complaint_kind.sql`:
 
 - `complaints.kind text NOT NULL DEFAULT 'complaint' CHECK (kind IN ('complaint','suggestion','compliment'))`. El default asigna `complaint` a los casos existentes (hoy solo `REC-2026-000001`); después de la migración, el servidor envía siempre el tipo explícitamente.
 - `set_complaint_case_number()` usa el prefijo según `NEW.kind`: `REC`, `SUG` o `FEL`. La numeración sigue saliendo de `case_serial`, así que dos casos nunca comparten número aunque sean de tipos distintos. Los números existentes no cambian.
-- `insert_complaint_with_attachments` recibe el parámetro nuevo `p_kind text` y lo inserta. La firma anterior se elimina (`DROP FUNCTION`) para que no queden dos versiones.
+- Se crea una versión de `insert_complaint_with_attachments` con el parámetro nuevo `p_kind text`. La versión anterior se mantiene hasta la limpieza final (ver Compatibilidad), porque la función desplegada la sigue llamando hasta que se publique la nueva; PostgREST elige la versión según los nombres de parámetros enviados.
 - Índice `(business_id, kind, created_at DESC)` para el filtro del panel.
 - El mínimo de la descripción baja de 20 a 10 caracteres: se reemplaza el `CHECK` de longitud.
 
@@ -72,7 +72,7 @@ El frontend nuevo envía `kind`, pero la función actual lo ignoraría, y la fun
 1. Aplicar la migración. La columna tiene default, así que la función actual sigue insertando casos como `complaint` sin cambios.
 2. Desplegar la Edge Function nueva. A partir de aquí el frontend publicado todavía no envía `kind`: para no romper ese intervalo, el servidor acepta `kind` ausente como `complaint` **solo durante la transición** y se marca para eliminarse después del deploy de Netlify.
 3. Mergear a `main` (Netlify publica el frontend nuevo).
-4. Quitar la tolerancia del paso 2 y volver a desplegar la función.
+4. Quitar la tolerancia del paso 2, eliminar la versión anterior de `insert_complaint_with_attachments` con una segunda migración y volver a desplegar la función.
 
 ## Pruebas
 
