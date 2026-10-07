@@ -24,7 +24,7 @@ export function validateComplaintDraft(draft: ComplaintDraft): ComplaintValidati
   }
 
   if (originType !== 'branch' && originType !== 'production' && originType !== 'other') {
-    errors.originType = 'Selecciona el origen del reclamo';
+    errors.originType = 'Selecciona el origen';
   }
 
   if (originType === 'branch' && !branchId) {

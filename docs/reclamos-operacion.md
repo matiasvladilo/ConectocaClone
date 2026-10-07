@@ -193,7 +193,7 @@ Repetir el paso 3 después de cualquier cambio de dominio o de `VITE_APP_PUBLIC_
 ## Límites y anti-abuso
 
 - Hasta 5 archivos JPG, PNG, WebP o PDF, de 10 MB cada uno como máximo. El tipo se valida en el servidor.
-- Descripción de 20 a 5.000 caracteres; correo obligatorio.
+- Descripción de 10 a 5.000 caracteres; correo obligatorio.
 - Hasta 5 mensajes por hora por red de origen. La IP no se guarda: solo un HMAC efímero. Al superar el límite se responde `429` con un mensaje genérico.
 - El formulario se rechaza si se envía en menos de 2 segundos o después de 2 horas de abierto, o si trae el honeypot lleno.
 - Pendiente de comprobar en el entorno real: que la función acepte un envío con 5 archivos de 10 MB (≈50 MB). Si falla, el diseño contempla migrar a cargas firmadas de un solo uso, sin hacer público el bucket.
@@ -247,7 +247,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$BAS
 | 10 | Con `RESEND_API_KEY` inválida temporalmente, crear un caso: se guarda, el panel muestra `failed`; restaurar la key y reintentar: pasa a `sent` sin duplicar el caso. | |
 | 11 | Enviar un reclamo con 5 archivos cercanos a 10 MB. | |
 | 12 | Enviar una sugerencia y una felicitación: la pantalla final muestra su mensaje propio y el panel las etiqueta en azul y verde, con números `SUG-` y `FEL-`. | |
-| 13 | Con un usuario no admin: el perfil no muestra `Panel de Reclamos` y el enlace profundo muestra acceso denegado. | |
+| 13 | Con un usuario no admin: el perfil no muestra el botón `Reclamos y sugerencias` y el enlace profundo muestra acceso denegado. | |
 | 14 | Regresión: login, crear un pedido y navegar por las pantallas habituales. | |
 
 El sistema está listo para imprimir el QR cuando todas las filas pasan.

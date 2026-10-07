@@ -326,7 +326,7 @@ export function PublicComplaintForm() {
             <div className="space-y-4">
               <div>
                 <label htmlFor="complaint-origin" className="mb-2 block text-sm font-semibold text-gray-800">
-                  Origen del reclamo
+                  Origen
                 </label>
                 <div className="relative">
                   <select
@@ -545,19 +545,19 @@ export function PublicComplaintForm() {
             {isSubmitting ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-                Enviando reclamo…
+                Enviando…
               </>
             ) : (
               <>
                 <Send className="h-5 w-5" aria-hidden="true" />
-                Enviar reclamo
+                Enviar
               </>
             )}
           </button>
 
           <p className="flex items-start justify-center gap-2 px-3 text-center text-xs text-gray-500">
             <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            Usaremos tus datos únicamente para gestionar y responder este reclamo.
+            Usaremos tus datos únicamente para gestionar y responder tu mensaje.
           </p>
         </form>
       </main>
