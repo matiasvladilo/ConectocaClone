@@ -10,7 +10,7 @@ Diseño: [`docs/superpowers/specs/2026-10-05-sistema-reclamos-design.md`](superp
 | Tablas `complaints`, `complaint_attachments`, `complaint_rate_limits`, RPCs | `supabase/migrations/20261005_a_*.sql`, `20261005_b_*.sql`, `20261006_a_complaint_kind.sql`, `20261006_b_drop_complaint_insert_without_kind.sql` | `supabase db push` (a mano) |
 | Bucket privado `complaint-evidence` | misma migración `_a_` | idem |
 | Edge Function `complaints` | `supabase/functions/complaints/` | `supabase functions deploy` (a mano) |
-| Formulario `/reclamos` y panel admin | `src/features/complaints/` | Netlify, al mergear a `main` |
+| Formulario `/opina` (también `/reclamos`) y panel admin | `src/features/complaints/` | Netlify, al mergear a `main` |
 
 > Mergear a `main` **no** despliega la base de datos ni la Edge Function. Netlify solo publica el frontend.
 
@@ -93,7 +93,7 @@ Ejecutar desde la raíz del repo, con el CLI linkeado a conectocadev.
    npx supabase functions deploy complaints --no-verify-jwt
    ```
 
-5. **Frontend.** Configurar `VITE_APP_PUBLIC_URL` en Netlify → *Site configuration → Environment variables*, mergear a `main` y esperar el deploy. `netlify.toml` ya redirige `/*` a `index.html`, así que `/reclamos` lo sirve el SPA.
+5. **Frontend.** Configurar `VITE_APP_PUBLIC_URL` en Netlify → *Site configuration → Environment variables*, mergear a `main` y esperar el deploy. `netlify.toml` ya redirige `/*` a `index.html`, así que `/opina` y `/reclamos` los sirve el SPA.
 
 6. **Humo rápido.**
 
@@ -183,7 +183,7 @@ Después de `supabase secrets set`, volver a desplegar la función: el valor se 
 
 Los QR impresos apuntan a una URL fija. Si cambia el dominio público de Conectoca:
 
-1. Mantener el dominio anterior respondiendo, o redirigiendo `/opina` al nuevo, mientras existan QR impresos (la ruta `/reclamos` también redirige).
+1. Mantener el dominio anterior respondiendo en ambas rutas `/opina` y `/reclamos`, mientras existan QR impresos.
 2. Actualizar `APP_PUBLIC_URL` (secreto) y `VITE_APP_PUBLIC_URL` (Netlify) con el mismo valor; volver a desplegar la función y el sitio.
 3. Descargar el QR desde el panel en producción, escanearlo con un teléfono y confirmar que abre `<nuevo dominio>/opina` sin pedir login **antes** de imprimir.
 4. Comprobar que el enlace del correo central abre el caso en el nuevo dominio.
@@ -194,7 +194,7 @@ Repetir el paso 3 después de cualquier cambio de dominio o de `VITE_APP_PUBLIC_
 
 - Hasta 5 archivos JPG, PNG, WebP o PDF, de 10 MB cada uno como máximo. El tipo se valida en el servidor.
 - Descripción de 20 a 5.000 caracteres; correo obligatorio.
-- Hasta 5 reclamos por hora por red de origen. La IP no se guarda: solo un HMAC efímero. Al superar el límite se responde `429` con un mensaje genérico.
+- Hasta 5 mensajes por hora por red de origen. La IP no se guarda: solo un HMAC efímero. Al superar el límite se responde `429` con un mensaje genérico.
 - El formulario se rechaza si se envía en menos de 2 segundos o después de 2 horas de abierto, o si trae el honeypot lleno.
 - Pendiente de comprobar en el entorno real: que la función acepte un envío con 5 archivos de 10 MB (≈50 MB). Si falla, el diseño contempla migrar a cargas firmadas de un solo uso, sin hacer público el bucket.
 
