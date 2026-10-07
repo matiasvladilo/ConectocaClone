@@ -1,13 +1,13 @@
-# Reclamos — guía de operación
+# Reclamos, sugerencias y felicitaciones — guía de operación
 
-Cómo desplegar, configurar y mantener el sistema de reclamos con QR único.
+Cómo desplegar, configurar y mantener el sistema de reclamos con QR único que ahora recibe sugerencias y felicitaciones.
 Diseño: [`docs/superpowers/specs/2026-10-05-sistema-reclamos-design.md`](superpowers/specs/2026-10-05-sistema-reclamos-design.md).
 
 ## Piezas
 
 | Pieza | Dónde vive | Cómo se despliega |
 |---|---|---|
-| Tablas `complaints`, `complaint_attachments`, `complaint_rate_limits`, RPCs | `supabase/migrations/20261005_a_*.sql`, `20261005_b_*.sql` | `supabase db push` (a mano) |
+| Tablas `complaints`, `complaint_attachments`, `complaint_rate_limits`, RPCs | `supabase/migrations/20261005_a_*.sql`, `20261005_b_*.sql`, `20261006_a_complaint_kind.sql`, `20261006_b_drop_complaint_insert_without_kind.sql` | `supabase db push` (a mano) |
 | Bucket privado `complaint-evidence` | misma migración `_a_` | idem |
 | Edge Function `complaints` | `supabase/functions/complaints/` | `supabase functions deploy` (a mano) |
 | Formulario `/reclamos` y panel admin | `src/features/complaints/` | Netlify, al mergear a `main` |
@@ -15,6 +15,14 @@ Diseño: [`docs/superpowers/specs/2026-10-05-sistema-reclamos-design.md`](superp
 > Mergear a `main` **no** despliega la base de datos ni la Edge Function. Netlify solo publica el frontend.
 
 El proyecto Supabase vivo es **conectocadev** (`xxmiujtywnnlqmekakzq`), el que tienen linkeado `.env.local` y `supabase/.temp`. El nombre "conectoca" corresponde al proyecto abandonado.
+
+## Tipos de mensaje
+
+| Tipo | Prefijo | Mensaje al cliente |
+|---|---|---|
+| Reclamo | `REC-` | Recibimos tu reclamo — Lamentamos lo ocurrido. Lo vamos a revisar y te responderemos por correo. |
+| Sugerencia | `SUG-` | Gracias por tu sugerencia — Ya la estamos revisando con el equipo para seguir mejorando. |
+| Felicitación | `FEL-` | ¡Gracias por felicitarnos! — Le haremos llegar tus palabras al equipo. |
 
 ## Configuración
 
@@ -43,7 +51,7 @@ Los tres de correo (`COMPLAINTS_RECIPIENT_EMAIL`, `COMPLAINTS_FROM_EMAIL`, `RESE
 |---|---|
 | `VITE_APP_PUBLIC_URL` | El mismo valor que `APP_PUBLIC_URL` |
 
-El botón **Descargar QR** genera `<VITE_APP_PUBLIC_URL>/reclamos`. Si la variable falta, usa el dominio desde donde el admin abrió el panel, y el QR impreso podría apuntar a una URL equivocada. Es una variable de build: después de cambiarla en Netlify hay que volver a desplegar.
+El botón **Descargar QR** genera `<VITE_APP_PUBLIC_URL>/opina` (la ruta `/reclamos` sigue funcionando). Si la variable falta, usa el dominio desde donde el admin abrió el panel, y el QR impreso podría apuntar a una URL equivocada. Es una variable de build: después de cambiarla en Netlify hay que volver a desplegar.
 
 ## Primer despliegue
 
@@ -175,9 +183,9 @@ Después de `supabase secrets set`, volver a desplegar la función: el valor se 
 
 Los QR impresos apuntan a una URL fija. Si cambia el dominio público de Conectoca:
 
-1. Mantener el dominio anterior respondiendo, o redirigiendo `/reclamos` al nuevo, mientras existan QR impresos.
+1. Mantener el dominio anterior respondiendo, o redirigiendo `/opina` al nuevo, mientras existan QR impresos (la ruta `/reclamos` también redirige).
 2. Actualizar `APP_PUBLIC_URL` (secreto) y `VITE_APP_PUBLIC_URL` (Netlify) con el mismo valor; volver a desplegar la función y el sitio.
-3. Descargar el QR desde el panel en producción, escanearlo con un teléfono y confirmar que abre `<nuevo dominio>/reclamos` sin pedir login **antes** de imprimir.
+3. Descargar el QR desde el panel en producción, escanearlo con un teléfono y confirmar que abre `<nuevo dominio>/opina` sin pedir login **antes** de imprimir.
 4. Comprobar que el enlace del correo central abre el caso en el nuevo dominio.
 
 Repetir el paso 3 después de cualquier cambio de dominio o de `VITE_APP_PUBLIC_URL`.
@@ -227,7 +235,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$BAS
 
 | # | Paso | Resultado |
 |---|---|---|
-| 1 | Descargar el QR desde el panel en producción y escanearlo con un teléfono: abre `/reclamos` sin login. | |
+| 1 | Descargar el QR desde el panel en producción y escanearlo con un teléfono: abre `/opina` sin login. | |
 | 2 | Enviar un reclamo de sucursal con una imagen y un PDF. | |
 | 3 | La pantalla, el correo del cliente y el correo central muestran el mismo `REC-AAAA-NNNNNN`. | |
 | 4 | Con la sesión cerrada, abrir el enlace del correo central, iniciar sesión como admin: se abre ese caso. | |
@@ -238,7 +246,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$BAS
 | 9 | Reabrir: vuelve a `Pendiente`. | |
 | 10 | Con `RESEND_API_KEY` inválida temporalmente, crear un caso: se guarda, el panel muestra `failed`; restaurar la key y reintentar: pasa a `sent` sin duplicar el caso. | |
 | 11 | Enviar un reclamo con 5 archivos cercanos a 10 MB. | |
-| 12 | Con un usuario no admin: el perfil no muestra `Panel de Reclamos` y el enlace profundo muestra acceso denegado. | |
-| 13 | Regresión: login, crear un pedido y navegar por las pantallas habituales. | |
+| 12 | Enviar una sugerencia y una felicitación: la pantalla final muestra su mensaje propio y el panel las etiqueta en azul y verde, con números `SUG-` y `FEL-`. | |
+| 13 | Con un usuario no admin: el perfil no muestra `Panel de Reclamos` y el enlace profundo muestra acceso denegado. | |
+| 14 | Regresión: login, crear un pedido y navegar por las pantallas habituales. | |
 
 El sistema está listo para imprimir el QR cuando todas las filas pasan.
