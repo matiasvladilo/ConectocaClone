@@ -393,3 +393,27 @@ test('el listado acepta filtrar por tipo y rechaza tipos desconocidos', () => {
   assert.equal(parseComplaintListQuery(new URLSearchParams('kind=suggestion')).kind, 'suggestion');
   assert.throws(() => parseComplaintListQuery(new URLSearchParams('kind=queja')), /tipo/i);
 });
+
+test('repository.list aplica el filtro por tipo y por negocio', async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const result = { data: [] as unknown[], error: null, count: 0 };
+  const chain: any = {
+    select: (...args: unknown[]) => { calls.push({ method: 'select', args }); return chain; },
+    eq: (...args: unknown[]) => { calls.push({ method: 'eq', args }); return chain; },
+    gte: (...args: unknown[]) => { calls.push({ method: 'gte', args }); return chain; },
+    lte: (...args: unknown[]) => { calls.push({ method: 'lte', args }); return chain; },
+    or: (...args: unknown[]) => { calls.push({ method: 'or', args }); return chain; },
+    order: (...args: unknown[]) => { calls.push({ method: 'order', args }); return chain; },
+    range: async (...args: unknown[]) => { calls.push({ method: 'range', args }); return result; },
+  };
+  const repository = createSupabaseComplaintRepository({
+    from: () => chain,
+    storage: { from: () => ({}) },
+  } as any);
+
+  const page = await repository.list({ page: 1, limit: 20, kind: 'suggestion' } as any, 'biz-1');
+
+  assert.ok(calls.some(c => c.method === 'eq' && c.args[0] === 'kind' && c.args[1] === 'suggestion'));
+  assert.ok(calls.some(c => c.method === 'eq' && c.args[0] === 'business_id' && c.args[1] === 'biz-1'));
+  assert.equal(page.pagination.total, 0);
+});
