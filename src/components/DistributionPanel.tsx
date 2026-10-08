@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { Input } from './ui/input';
@@ -24,11 +24,6 @@ export type EstadoStock = 'agotado' | 'bajo' | 'ok';
 // Umbral por defecto para los productos que todavía no tienen min_stock cargado.
 // Replica el 10 que hasta ahora estaba hardcodeado en ProductManagement.
 export const MIN_STOCK_POR_DEFECTO = 10;
-
-// Clave de localStorage para recordar qué categoría eligió el admin. Se guarda
-// porque el panel se usa siempre sobre la misma categoría (la de Distribuidora)
-// y volver a elegirla en cada visita sería fricción pura.
-const CLAVE_CATEGORIA = 'conectoca:distribucion:categoria';
 
 /**
  * Los productos de stock ilimitado no se reponen, así que no participan del
@@ -58,6 +53,10 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoriaId, setCategoriaId] = useState<string>('all');
+  // Evita que un refresco de fondo (automático o del botón) pise el filtro
+  // de categoría que el usuario haya elegido a mano: el valor por defecto
+  // (Distribuidora) solo se aplica una vez, en la primera carga.
+  const categoriaInicializada = useRef(false);
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoStock>('todos');
 
@@ -97,12 +96,18 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
       setProducts(listaProductos);
       setCategories(respCategorias);
 
-      // La categoría guardada manda, pero solo si todavía existe (o es el
-      // valor especial "todas"): si la borraron, caer en la detección por
-      // nombre evita un panel vacío.
-      const guardada = localStorage.getItem(CLAVE_CATEGORIA);
-      const sigueExistiendo = guardada === 'all' || (guardada && respCategorias.some(c => c.id === guardada));
-      setCategoriaId(sigueExistiendo ? guardada! : elegirCategoriaInicial(respCategorias));
+      // Categoría por defecto: SIEMPRE Distribuidora al entrar al panel (es
+      // literalmente para lo que existe esta pantalla) — solo la primera vez
+      // que llegan las categorías, para no pisar un cambio de filtro que el
+      // usuario haya hecho a mano durante la sesión cuando llega un refresco
+      // de fondo. Antes esto se guardaba en localStorage y "recordaba" la
+      // última categoría elegida entre visitas, lo que terminó confundiendo:
+      // una sesión que había quedado en otra categoría (o en "Todas") mostraba
+      // números que no calzaban con los de Distribuidora y se leía como un bug.
+      if (!categoriaInicializada.current) {
+        categoriaInicializada.current = true;
+        setCategoriaId(elegirCategoriaInicial(respCategorias));
+      }
     } catch (error: any) {
       console.error('Error cargando el panel de distribución:', error);
       if (!silent) {
@@ -154,9 +159,11 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     }
   };
 
+  // No se persiste en localStorage a propósito: el filtro vuelve a
+  // Distribuidora en cada visita (ver categoriaInicializada), un cambio acá
+  // dura lo que dura la sesión del panel y nada más.
   const handleCambiarCategoria = (valor: string) => {
     setCategoriaId(valor);
-    localStorage.setItem(CLAVE_CATEGORIA, valor);
   };
 
   // Productos del ámbito del panel: los de la categoría elegida —incluidas sus
