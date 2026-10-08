@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { Input } from './ui/input';
@@ -71,37 +71,64 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   const [cargandoMovimientos, setCargandoMovimientos] = useState(false);
   const [errorMovimientos, setErrorMovimientos] = useState(false);
 
-  useEffect(() => {
-    const cargar = async () => {
-      try {
-        setLoading(true);
-        setErrorCarga(false);
-        const [respProductos, respCategorias] = await Promise.all([
-          productsAPI.getAll(accessToken),
-          categoriesAPI.getAll(accessToken),
-        ]);
-        const listaProductos = Array.isArray(respProductos)
-          ? respProductos
-          : (respProductos as any).data || [];
-        setProducts(listaProductos);
-        setCategories(respCategorias);
+  // `silent` evita el spinner y el toast de error en los refrescos de fondo:
+  // el usuario no pidió recargar, así que un refresco automático no debería
+  // interrumpirlo ni asustarlo si falla una vez (reintenta solo en el
+  // próximo ciclo). Ver los dos useEffect de abajo para quién llama con
+  // silent=true.
+  const cargar = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setLoading(true);
+      setErrorCarga(false);
+      const [respProductos, respCategorias] = await Promise.all([
+        productsAPI.getAll(accessToken),
+        categoriesAPI.getAll(accessToken),
+      ]);
+      const listaProductos = Array.isArray(respProductos)
+        ? respProductos
+        : (respProductos as any).data || [];
+      setProducts(listaProductos);
+      setCategories(respCategorias);
 
-        // La categoría guardada manda, pero solo si todavía existe (o es el
-        // valor especial "todas"): si la borraron, caer en la detección por
-        // nombre evita un panel vacío.
-        const guardada = localStorage.getItem(CLAVE_CATEGORIA);
-        const sigueExistiendo = guardada === 'all' || (guardada && respCategorias.some(c => c.id === guardada));
-        setCategoriaId(sigueExistiendo ? guardada! : elegirCategoriaInicial(respCategorias));
-      } catch (error: any) {
-        console.error('Error cargando el panel de distribución:', error);
+      // La categoría guardada manda, pero solo si todavía existe (o es el
+      // valor especial "todas"): si la borraron, caer en la detección por
+      // nombre evita un panel vacío.
+      const guardada = localStorage.getItem(CLAVE_CATEGORIA);
+      const sigueExistiendo = guardada === 'all' || (guardada && respCategorias.some(c => c.id === guardada));
+      setCategoriaId(sigueExistiendo ? guardada! : elegirCategoriaInicial(respCategorias));
+    } catch (error: any) {
+      console.error('Error cargando el panel de distribución:', error);
+      if (!silent) {
         setErrorCarga(true);
         toast.error('Error al cargar el panel');
-      } finally {
-        setLoading(false);
       }
-    };
-    cargar();
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [accessToken]);
+
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  // Refresco automático: sin esto, "Valor del inventario" y el resto de los
+  // números quedan congelados en lo que había al entrar, aunque la pestaña
+  // se deje abierta horas — se vio en vivo: una pestaña vieja mostraba
+  // $10.019.963 cuando el valor real ya había bajado a $9.628.993. El
+  // intervalo es la red de seguridad; el refresco al volver a la pestaña
+  // (visibilitychange) cubre el caso más común, que es dejarla abierta de
+  // fondo y volver más tarde.
+  useEffect(() => {
+    const intervalId = setInterval(() => cargar(true), 60000);
+    const alVolverVisible = () => {
+      if (document.visibilityState === 'visible') cargar(true);
+    };
+    document.addEventListener('visibilitychange', alVolverVisible);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', alVolverVisible);
+    };
+  }, [cargar]);
 
   const handleCambiarCategoria = (valor: string) => {
     setCategoriaId(valor);
