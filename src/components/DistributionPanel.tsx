@@ -5,7 +5,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw } from 'lucide-react';
+import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
 import type { Product, Category, StockEvent } from '../utils/api';
@@ -74,6 +74,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   // "Cargando…"), este es solo para que el botón de refrescar gire mientras
   // espera, sin tapar la tabla que ya está mostrando datos.
   const [refrescando, setRefrescando] = useState(false);
+  const [exportando, setExportando] = useState(false);
 
   // `silent` evita el spinner y el toast de error en los refrescos de fondo:
   // el usuario no pidió recargar, así que un refresco automático no debería
@@ -210,6 +211,38 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
       });
   }, [productosDelAmbito, filtroEstado, busqueda]);
 
+  // Exporta lo que está viendo en la tabla, no todo el ámbito: si filtró por
+  // "Agotados" o buscó algo puntual, el Excel tiene que coincidir con lo que
+  // tiene en pantalla, no sorprenderlo con filas que no pidió.
+  const handleExportarExcel = async () => {
+    if (filas.length === 0) {
+      toast.error('No hay productos para exportar con estos filtros');
+      return;
+    }
+    setExportando(true);
+    try {
+      const XLSX = await import('xlsx');
+      const etiquetaEstado: Record<EstadoStock, string> = { agotado: 'Agotado', bajo: 'Bajo', ok: 'OK' };
+      const filasExcel = filas.map(({ producto, estado }) => ({
+        'Producto': producto.name,
+        'Estado': etiquetaEstado[estado],
+        'Stock': producto.stock,
+        'Valor ($)': producto.lotsValue ?? producto.price * producto.stock,
+      }));
+      const hoja = XLSX.utils.json_to_sheet(filasExcel);
+      hoja['!cols'] = [{ wch: 40 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, hoja, 'Distribuidora');
+      const fecha = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(libro, `Distribuidora_${fecha}.xlsx`);
+    } catch (error) {
+      console.error('Error exportando a Excel:', error);
+      toast.error('No se pudo generar el Excel');
+    } finally {
+      setExportando(false);
+    }
+  };
+
   const abrirMovimientos = async (producto: Product) => {
     setProductoMovimientos(producto);
     setMovimientos([]);
@@ -239,16 +272,28 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               <p className="text-sm text-gray-600">Stock actual y productos a reponer</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            onClick={handleRefrescarManual}
-            disabled={refrescando}
-            className="gap-2"
-            aria-label="Refrescar"
-          >
-            <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{refrescando ? 'Actualizando…' : 'Refrescar'}</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleRefrescarManual}
+              disabled={refrescando}
+              className="gap-2"
+              aria-label="Refrescar"
+            >
+              <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{refrescando ? 'Actualizando…' : 'Refrescar'}</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleExportarExcel}
+              disabled={exportando || loading}
+              className="gap-2"
+              aria-label="Descargar Excel"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">{exportando ? 'Generando…' : 'Excel'}</span>
+            </Button>
+          </div>
         </div>
 
         {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
