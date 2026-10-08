@@ -5,7 +5,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History } from 'lucide-react';
+import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
 import type { Product, Category, StockEvent } from '../utils/api';
@@ -71,11 +71,18 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   const [cargandoMovimientos, setCargandoMovimientos] = useState(false);
   const [errorMovimientos, setErrorMovimientos] = useState(false);
 
+  // Separado de `loading`: ese es para la carga inicial (toda la pantalla en
+  // "Cargando…"), este es solo para que el botón de refrescar gire mientras
+  // espera, sin tapar la tabla que ya está mostrando datos.
+  const [refrescando, setRefrescando] = useState(false);
+
   // `silent` evita el spinner y el toast de error en los refrescos de fondo:
   // el usuario no pidió recargar, así que un refresco automático no debería
   // interrumpirlo ni asustarlo si falla una vez (reintenta solo en el
   // próximo ciclo). Ver los dos useEffect de abajo para quién llama con
-  // silent=true.
+  // silent=true. Siempre relanza el error (más allá de silent) para que el
+  // botón de refrescar manual pueda distinguir éxito de fallo y no mienta
+  // con un toast de "actualizado" cuando en realidad no trajo nada nuevo.
   const cargar = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -102,13 +109,14 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
         setErrorCarga(true);
         toast.error('Error al cargar el panel');
       }
+      throw error;
     } finally {
       if (!silent) setLoading(false);
     }
   }, [accessToken]);
 
   useEffect(() => {
-    cargar();
+    cargar().catch(() => {}); // el error ya se maneja adentro (setErrorCarga + toast)
   }, [cargar]);
 
   // Refresco automático: sin esto, "Valor del inventario" y el resto de los
@@ -119,9 +127,9 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   // (visibilitychange) cubre el caso más común, que es dejarla abierta de
   // fondo y volver más tarde.
   useEffect(() => {
-    const intervalId = setInterval(() => cargar(true), 60000);
+    const intervalId = setInterval(() => { cargar(true).catch(() => {}); }, 60000);
     const alVolverVisible = () => {
-      if (document.visibilityState === 'visible') cargar(true);
+      if (document.visibilityState === 'visible') cargar(true).catch(() => {});
     };
     document.addEventListener('visibilitychange', alVolverVisible);
     return () => {
@@ -129,6 +137,22 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
       document.removeEventListener('visibilitychange', alVolverVisible);
     };
   }, [cargar]);
+
+  // Refresco manual (botón del header): usa silent=true para no tapar la
+  // tabla con el "Cargando…" de la carga inicial —los datos viejos siguen
+  // visibles hasta que llegan los nuevos—, pero sí confirma con un toast
+  // porque acá el usuario pidió la acción explícitamente.
+  const handleRefrescarManual = async () => {
+    setRefrescando(true);
+    try {
+      await cargar(true);
+      toast.success('Datos actualizados');
+    } catch {
+      toast.error('No se pudo actualizar. Probá de nuevo.');
+    } finally {
+      setRefrescando(false);
+    }
+  };
 
   const handleCambiarCategoria = (valor: string) => {
     setCategoriaId(valor);
@@ -198,14 +222,26 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={onBack} aria-label="Volver">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Distribuidora</h1>
-            <p className="text-sm text-gray-600">Stock actual y productos a reponer</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={onBack} aria-label="Volver">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900">Distribuidora</h1>
+              <p className="text-sm text-gray-600">Stock actual y productos a reponer</p>
+            </div>
           </div>
+          <Button
+            variant="outline"
+            onClick={handleRefrescarManual}
+            disabled={refrescando}
+            className="gap-2"
+            aria-label="Refrescar"
+          >
+            <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{refrescando ? 'Actualizando…' : 'Refrescar'}</span>
+          </Button>
         </div>
 
         {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
