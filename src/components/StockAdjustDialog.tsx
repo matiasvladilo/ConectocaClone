@@ -52,10 +52,19 @@ export function StockAdjustDialog({
   }, [open, product?.id]);
 
   // Se acepta el signo menos para poder restar en modo "sumar" (mermas o
-  // roturas) sin necesitar un modo aparte.
-  const cantidad = /^-?\d+$/.test(valor.trim()) ? parseInt(valor.trim(), 10) : null;
+  // roturas) sin necesitar un modo aparte. Decimales solo si el producto se
+  // vende por fracción; se acepta coma o punto porque en el teclado de un
+  // celular en español lo natural es la coma.
+  const permiteDecimal = product?.allowDecimal === true;
+  const texto = valor.trim().replace(',', '.');
+  const formatoValido = permiteDecimal ? /^-?(\d+(\.\d+)?|\.\d+)$/ : /^-?\d+$/;
+  const cantidad = formatoValido.test(texto) ? Number(texto) : null;
   const hayNumero = cantidad !== null;
-  const nuevoStock = !hayNumero ? null : modo === 'sumar' ? stockActual + cantidad : cantidad;
+  // Redondeo a 3 decimales: 6.8 + 0.1 en JS da 6.8999999999999995, y eso
+  // terminaría guardado tal cual en products.stock (numeric).
+  const nuevoStock = !hayNumero
+    ? null
+    : Math.round((modo === 'sumar' ? stockActual + cantidad : cantidad) * 1000) / 1000;
   const quedaNegativo = nuevoStock !== null && nuevoStock < 0;
 
   // El costo solo es obligatorio cuando esto va a ser una reposición real
@@ -116,8 +125,8 @@ export function StockAdjustDialog({
                 handleConfirmar();
               }
             }}
-            placeholder={modo === 'sumar' ? 'Ej: 20' : 'Ej: 47'}
-            inputMode="numeric"
+            placeholder={permiteDecimal ? (modo === 'sumar' ? 'Ej: 2.5' : 'Ej: 6.8') : (modo === 'sumar' ? 'Ej: 20' : 'Ej: 47')}
+            inputMode={permiteDecimal ? 'decimal' : 'numeric'}
             autoFocus
             autoComplete="off"
             disabled={saving}

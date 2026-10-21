@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
-import { Checkbox } from './ui/checkbox';
+import { Switch } from './ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from './ui/select';
@@ -19,7 +19,6 @@ import {
   Trash2,
   DollarSign,
   BoxIcon,
-  Sparkles,
   Search,
   Image as ImageIcon,
   Folder,
@@ -1139,6 +1138,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                       id="stock"
                       type="number"
                       min="0"
+                      // Sin step el navegador asume 1 y rechaza "6.8" con su
+                      // propio tooltip, aunque el producto se venda por fracción.
+                      step={formData.allowDecimal ? 'any' : '1'}
                       value={formData.stock}
                       onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
                       placeholder="0"
@@ -1166,66 +1168,37 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                 </p>
               </div>
 
-              {/* Unlimited Stock Checkbox */}
-              <div className="col-span-2">
-                <motion.div
-                  className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200"
-                  whileHover={{ scale: 1.01 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Checkbox
+              {/* Opciones de stock: mismo patrón de interruptores que UserProfile,
+                  en un solo bloque neutro para que no compitan con el resto del form. */}
+              <div className="col-span-2 rounded-lg border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <Label htmlFor="unlimited-stock" className="cursor-pointer flex-1 min-w-0">
+                    <div>
+                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>Stock ilimitado</p>
+                      <p className="text-xs text-gray-500 mt-0.5">No descuenta stock al vender</p>
+                    </div>
+                  </Label>
+                  <Switch
                     id="unlimited-stock"
                     checked={formData.unlimitedStock}
-                    onCheckedChange={(checked: boolean | "indeterminate") =>
-                      setFormData(prev => alternarStockIlimitado(prev, checked === true))
+                    onCheckedChange={(checked) =>
+                      setFormData(prev => alternarStockIlimitado(prev, checked))
                     }
-                    className="border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                   />
-                  <div className="flex-1">
-                    <label
-                      htmlFor="unlimited-stock"
-                      className="text-sm text-blue-900 cursor-pointer select-none block"
-                      style={{ fontWeight: 500 }}
-                    >
-                      ∞ Stock Ilimitado / Sin Control
-                    </label>
-                    <p className="text-xs text-blue-700 mt-0.5">
-                      Ideal para productos bajo pedido o servicios sin inventario físico
-                    </p>
-                  </div>
-                  <Sparkles className="w-5 h-5 text-blue-500" />
-                </motion.div>
-              </div>
-
-              {/* Allow Decimal Checkbox */}
-              <div className="col-span-2">
-                <motion.div
-                  className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-200"
-                  whileHover={{ scale: 1.01 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Checkbox
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-gray-200">
+                  <Label htmlFor="allow-decimal" className="cursor-pointer flex-1 min-w-0">
+                    <div>
+                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>Venta por fracción</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Permite cantidades como 0.5 o 1.5</p>
+                    </div>
+                  </Label>
+                  <Switch
                     id="allow-decimal"
                     checked={formData.allowDecimal}
-                    onCheckedChange={(checked: boolean | "indeterminate") => setFormData({
-                      ...formData,
-                      allowDecimal: checked === true
-                    })}
-                    className="border-amber-400 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
+                    onCheckedChange={(checked) => setFormData({ ...formData, allowDecimal: checked })}
                   />
-                  <div className="flex-1">
-                    <label
-                      htmlFor="allow-decimal"
-                      className="text-sm text-amber-900 cursor-pointer select-none block"
-                      style={{ fontWeight: 500 }}
-                    >
-                      ½ Venta por fracción / decimal
-                    </label>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      Permite pedir 0.5, 1.5, etc. — ideal para pan, masas y productos por peso
-                    </p>
-                  </div>
-                </motion.div>
+                </div>
               </div>
 
               <div className="col-span-2">

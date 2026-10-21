@@ -84,7 +84,7 @@ function toProduct(r: any, lotsValue?: number) {
     price: Number(r.price),
     image: r.image_url || '',
     imageUrl: r.image_url || '',
-    stock: r.stock,
+    stock: Number(r.stock),
     minStock: r.min_stock != null ? Number(r.min_stock) : undefined,
     unlimitedStock: r.unlimited_stock,
     trackStock: r.track_stock,
@@ -802,7 +802,7 @@ app.post("/make-server-6d979413/products", async (c) => {
     const skuError = await checkDuplicateSku(profile.businessId, skuNorm);
     if (skuError) return c.json({ error: skuError }, 400);
 
-    const isUnlimited = unlimitedStock === true || parseInt(stock) === -1;
+    const isUnlimited = unlimitedStock === true || parseFloat(stock) === -1;
     const { data: newProduct, error: insertErr } = await supabaseAdmin
       .from('products')
       .insert({
@@ -811,7 +811,9 @@ app.post("/make-server-6d979413/products", async (c) => {
         description: description || '',
         price: parseFloat(price),
         image_url: imageUrl || image || '',
-        stock: isUnlimited ? 0 : (stock !== undefined ? parseInt(stock) : 100),
+        // parseFloat: los productos con allow_decimal guardan stock con decimales
+        // (products.stock es numeric); parseInt cortaba 6.8 a 6.
+        stock: isUnlimited ? 0 : (stock !== undefined ? parseFloat(stock) : 100),
         min_stock: minStock !== undefined && minStock !== null && minStock !== '' ? Number(minStock) : null,
         unlimited_stock: isUnlimited,
         track_stock: !isUnlimited,
@@ -912,7 +914,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     // lote correspondiente.
     let enLotesParaReposicion = false;
     if (stock !== undefined && modo === 'sumar' && existing.unlimited_stock !== true) {
-      const deltaPrevisto = parseInt(stock) - Number(existing.stock);
+      const deltaPrevisto = parseFloat(stock) - Number(existing.stock);
       if (deltaPrevisto > 0) {
         const { data: enLotes } = await supabaseAdmin.rpc('producto_usa_lotes', { p_product_id: productId });
         enLotesParaReposicion = enLotes === true;
@@ -928,7 +930,7 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
     if (description !== undefined) updateData.description = description;
     if (price !== undefined) updateData.price = parseFloat(price);
     if (stock !== undefined) {
-      const stockVal = parseInt(stock);
+      const stockVal = parseFloat(stock);
       if (stockVal === -1) {
         // Legacy signal: -1 means unlimited stock
         updateData.stock = 0;
@@ -1568,7 +1570,7 @@ app.post("/make-server-6d979413/orders", async (c) => {
       }
 
       if (!isUnlimited) {
-        const stockNuevo = product.stock - item.quantity;
+        const stockNuevo = Number(product.stock) - item.quantity;
         await supabaseAdmin
           .from('products')
           .update({ stock: stockNuevo })
@@ -1874,7 +1876,7 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
       if (product) {
         const isUnlimited = product.unlimited_stock === true || product.track_stock === false;
         if (!isUnlimited) {
-          const stockNuevo = product.stock + item.quantity;
+          const stockNuevo = Number(product.stock) + item.quantity;
           await supabaseAdmin
             .from('products')
             .update({ stock: stockNuevo })
