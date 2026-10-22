@@ -186,7 +186,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
           paddingTop: 'max(env(safe-area-inset-top), 20px)'
         }}
       >
-        <div className="max-w-md mx-auto px-6 py-6">
+        <div className="max-w-md mx-auto px-6 py-6 home-contenedor">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <motion.div
@@ -260,7 +260,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
           {orders.length > 0 && isAdmin ? (
             // Admin stats - Comprehensive global view
             <motion.div
-              className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5"
+              className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 home-stats"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
@@ -384,9 +384,23 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
         </div>
       </div>
 
-      <div className="max-w-md mx-auto px-6 py-6 space-y-6 relative z-10">
+      {/* En escritorio (>=1024px) el inicio se ensancha: los botones de acción
+          pasan a una fila horizontal arriba y los pedidos quedan en una sola
+          columna más ancha. El CSS de Tailwind está precompilado y casi no trae
+          variantes lg:, por eso va acá con media query (mismo patrón que
+          ProductManagement). */}
+      <style>{`
+        @media (min-width: 1024px) {
+          .home-contenedor { max-width: 64rem; }
+          .home-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+          .home-acciones { display: flex; gap: 0.75rem; }
+          .home-acciones > * { flex: 1 1 0; margin: 0 !important; }
+          .home-acciones button { margin-top: 0 !important; }
+        }
+      `}</style>
+      <div className="max-w-md mx-auto px-6 py-6 space-y-6 relative z-10 home-contenedor">
         {/* Action Buttons */}
-        <div className="space-y-3">
+        <div className="space-y-3 home-acciones">
           {/* Dashboard Button - Only for production users - ABOVE production orders button */}
           {onGoToDashboard && isProduction && (
             <motion.div
@@ -847,14 +861,22 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                       const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
                                       const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
                                       const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
-                                      if (deadlineDay && createdDay && deadlineDay !== createdDay) {
-                                        return 'Pedido anticipado';
-                                      }
-                                      return new Date(createdAt).toLocaleString('es-CL', {
+                                      const hora = new Date(createdAt).toLocaleString('es-CL', {
                                         hour: '2-digit',
                                         minute: '2-digit',
                                         hour12: false
                                       });
+                                      // Un pedido anticipado se hizo otro día que el de entrega:
+                                      // además de la hora se muestra la fecha en que se hizo,
+                                      // si no "14:32" se leería como hora de hoy.
+                                      if (deadlineDay && createdDay && deadlineDay !== createdDay) {
+                                        const fecha = new Date(createdAt).toLocaleDateString('es-CL', {
+                                          day: 'numeric',
+                                          month: 'short'
+                                        });
+                                        return `Pedido anticipado · ${fecha}, ${hora}`;
+                                      }
+                                      return hora;
                                     })()}
                                   </span>
                                   {order.customerName && (
