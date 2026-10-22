@@ -28,7 +28,9 @@ import {
   ChefHat,
   Loader2,
   Boxes,
-  MessageSquare
+  MessageSquare,
+  ChevronDown,
+  Truck
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -43,6 +45,7 @@ interface UserProfileProps {
   onLogout: () => void;
   onUpdateProfile?: (updates: Partial<User>) => void;
   onViewAnalytics?: () => void;
+  onViewDispatch?: () => void;
   onViewDistribution?: () => void;
   onViewComplaints?: () => void;
   pendingComplaintsCount?: number;
@@ -54,7 +57,7 @@ interface UserProfileProps {
   accessToken?: string;
 }
 
-export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDispatch, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -68,6 +71,7 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [orderUpdates, setOrderUpdates] = useState(true);
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressValue, setAddressValue] = useState(user.address || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -460,7 +464,63 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
           </Card>
         </motion.div>
 
-        {/* Notifications Settings */}
+        {/* Accesos a secciones: grilla compacta de 2 columnas. Antes era una
+            pila de botones de ancho completo con degradados de colores distintos,
+            que ocupaba casi toda la pantalla. Cada acceso conserva su color solo
+            en el ícono, y los permisos por rol son los mismos de antes. */}
+        {(() => {
+          const esAdmin = user.role === 'admin';
+          const esAdminOProduccion = esAdmin || user.role === 'production';
+          const accesos = [
+            esAdmin && onViewDispatch && { label: 'Despacho', icon: Truck, color: '#0047BA', onClick: onViewDispatch },
+            esAdminOProduccion && onViewAnalytics && { label: 'Analíticas', icon: BarChart3, color: '#0059FF', onClick: onViewAnalytics },
+            esAdminOProduccion && onViewDistribution && { label: 'Distribuidora', icon: Boxes, color: '#0047BA', onClick: onViewDistribution },
+            esAdmin && onViewComplaints && { label: 'Reclamos', icon: MessageSquare, color: '#DC2626', onClick: onViewComplaints, badge: pendingComplaintsCount },
+            esAdmin && onManageAttendance && { label: 'Asistencia', icon: Clock, color: '#059669', onClick: onManageAttendance },
+            esAdmin && onManageProductionAreas && { label: 'Áreas de producción', icon: Factory, color: '#F97316', onClick: onManageProductionAreas },
+            esAdminOProduccion && onManageProducts && { label: 'Productos', icon: Package, color: '#D99A00', onClick: onManageProducts },
+            esAdminOProduccion && onManageIngredients && { label: 'Materia prima', icon: Warehouse, color: '#7C3AED', onClick: onManageIngredients },
+            esAdminOProduccion && onManageProductIngredients && { label: 'Recetas', icon: ChefHat, color: '#DB2777', onClick: onManageProductIngredients },
+          ].filter(Boolean) as { label: string; icon: typeof Package; color: string; onClick: () => void; badge?: number }[];
+
+          if (accesos.length === 0) return null;
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+              className="grid grid-cols-2 gap-3"
+            >
+              {accesos.map(({ label, icon: Icon, color, onClick, badge }) => (
+                <motion.button
+                  key={label}
+                  type="button"
+                  onClick={onClick}
+                  whileTap={{ scale: 0.97 }}
+                  className="relative flex items-center gap-3 p-3 bg-white text-left hover:bg-gray-50 transition-colors"
+                  style={{ borderRadius: '14px', border: '1px solid #E0EDFF', boxShadow: '0 1px 3px rgba(0, 71, 186, 0.06)' }}
+                >
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center"
+                    style={{ background: `${color}1A`, flexShrink: 0 }}
+                  >
+                    <Icon className="w-5 h-5" style={{ color }} />
+                  </div>
+                  <span className="text-sm text-gray-800 leading-tight" style={{ fontWeight: 600 }}>
+                    {label}
+                  </span>
+                  {typeof badge === 'number' && badge > 0 && (
+                    <Badge className="absolute top-2 right-2 bg-red-600 text-white">{badge}</Badge>
+                  )}
+                </motion.button>
+              ))}
+            </motion.div>
+          );
+        })()}
+
+        {/* Notifications Settings: cerrado por defecto para que los botones de
+            secciones sean lo primero que se ve; se despliega tocando el encabezado. */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -470,7 +530,19 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
             className="border-2 shadow-lg"
             style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
           >
-            <CardHeader>
+            <CardHeader
+              role="button"
+              tabIndex={0}
+              aria-expanded={showNotificationSettings}
+              onClick={() => setShowNotificationSettings(v => !v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setShowNotificationSettings(v => !v);
+                }
+              }}
+              className="cursor-pointer select-none"
+            >
               <div className="flex items-center gap-2.5">
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center"
@@ -486,8 +558,13 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
                     Configura cómo deseas recibir actualizaciones
                   </CardDescription>
                 </div>
+                <ChevronDown
+                  className="w-5 h-5 text-gray-400 ml-auto transition-transform"
+                  style={{ transform: showNotificationSettings ? 'rotate(180deg)' : undefined }}
+                />
               </div>
             </CardHeader>
+            {showNotificationSettings && (
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors">
                 <Label htmlFor="email-notifications" className="cursor-pointer flex-1">
@@ -620,6 +697,7 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
                 </div>
               )}
             </CardContent>
+            )}
           </Card>
         </motion.div>
 
@@ -717,244 +795,6 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
               </CardContent>
             </Card>
           </motion.div>
-        )}
-
-        {/* Analytics button (Admin and Production) */}
-        {(user.role === 'admin' || user.role === 'production') && onViewAnalytics && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-            whileTap={{ scale: 0.98 }}
-            className={user.role === 'production' ? '' : 'mb-4'}
-          >
-            <Button
-              onClick={onViewAnalytics}
-              className="w-full h-12 relative overflow-hidden group"
-              style={{
-                background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: 600,
-                boxShadow: '0 4px 14px rgba(0, 89, 255, 0.3)'
-              }}
-            >
-              <div className="flex items-center gap-2 relative z-10 text-white">
-                <BarChart3 className="w-5 h-5" />
-                Ver Panel de Analíticas
-              </div>
-              <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-            </Button>
-          </motion.div>
-        )}
-
-        {/* Panel de Distribuidora (Admin y Producción) */}
-        {(user.role === 'admin' || user.role === 'production') && onViewDistribution && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.22 }}
-            whileTap={{ scale: 0.98 }}
-            className="mb-4"
-          >
-            <Button
-              onClick={onViewDistribution}
-              className="w-full h-12 relative overflow-hidden group"
-              style={{
-                background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: 600,
-                boxShadow: '0 4px 14px rgba(0, 89, 255, 0.3)'
-              }}
-            >
-              <div className="flex items-center gap-2 relative z-10 text-white">
-                <Boxes className="w-5 h-5" />
-                Panel de Distribuidora
-              </div>
-            </Button>
-          </motion.div>
-        )}
-
-        {user.role === 'admin' && onViewComplaints && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.24 }}
-            whileTap={{ scale: 0.98 }}
-            className="mb-4"
-          >
-            <Button
-              onClick={onViewComplaints}
-              className="w-full h-12 relative overflow-hidden group"
-              style={{
-                background: 'linear-gradient(90deg, #EF4444 0%, #DC2626 100%)',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: 600,
-                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.3)'
-              }}
-            >
-              <div className="flex w-full items-center gap-2 relative z-10 text-white">
-                <MessageSquare className="w-5 h-5" />
-                Reclamos y sugerencias
-                {typeof pendingComplaintsCount === 'number' && pendingComplaintsCount > 0 && (
-                  <Badge className="ml-auto bg-white text-red-600">{pendingComplaintsCount}</Badge>
-                )}
-              </div>
-            </Button>
-          </motion.div>
-        )}
-
-        {/* Admin actions */}
-        {user.role === 'admin' && (
-          <>
-            {/* Attendance Management button */}
-            {onManageAttendance && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.25 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={onManageAttendance}
-                  className="w-full h-12 relative overflow-hidden group"
-                  style={{
-                    background: 'linear-gradient(90deg, #10B981 0%, #059669 100%)',
-                    borderRadius: '12px',
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)'
-                  }}
-                >
-                  <div className="flex items-center gap-2 relative z-10 text-white">
-                    <Clock className="w-5 h-5" />
-                    Gestión de Asistencia
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#059669] to-[#047857] opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Button>
-              </motion.div>
-            )}
-
-            {/* Production Areas Management button */}
-            {onManageProductionAreas && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.35 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={onManageProductionAreas}
-                  className="w-full h-12 relative overflow-hidden group"
-                  style={{
-                    background: 'linear-gradient(90deg, #FB923C 0%, #F97316 100%)',
-                    borderRadius: '12px',
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 14px rgba(251, 146, 60, 0.3)'
-                  }}
-                >
-                  <div className="flex items-center gap-2 relative z-10 text-white">
-                    <Factory className="w-5 h-5" />
-                    Áreas de Producción
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#FB923C] to-[#F97316] opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Button>
-              </motion.div>
-            )}
-          </>
-        )}
-
-        {/* Producción y Admin actions */}
-        {(user.role === 'admin' || user.role === 'production') && (
-          <>
-            {/* Product Management button */}
-            {onManageProducts && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.3 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={onManageProducts}
-                  className="w-full h-12 relative overflow-hidden group"
-                  style={{
-                    background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
-                    borderRadius: '12px',
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 14px rgba(255, 212, 59, 0.3)',
-                    color: '#0047BA'
-                  }}
-                >
-                  <div className="flex items-center gap-2 relative z-10">
-                    <Package className="w-5 h-5" />
-                    Gestionar Productos
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#FFC700] to-[#FFB800] opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Button>
-              </motion.div>
-            )}
-
-            {/* Ingredients Management button */}
-            {onManageIngredients && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.4 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={onManageIngredients}
-                  className="w-full h-12 relative overflow-hidden group"
-                  style={{
-                    background: 'linear-gradient(90deg, #8B5CF6 0%, #7C3AED 100%)',
-                    borderRadius: '12px',
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 14px rgba(139, 92, 246, 0.3)'
-                  }}
-                >
-                  <div className="flex items-center gap-2 relative z-10 text-white">
-                    <Warehouse className="w-5 h-5" />
-                    Stock de Materia Prima
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#7C3AED] to-[#6D28D9] opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Button>
-              </motion.div>
-            )}
-
-            {/* Product Ingredients Management button */}
-            {onManageProductIngredients && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.45 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <Button
-                  onClick={onManageProductIngredients}
-                  className="w-full h-12 relative overflow-hidden group"
-                  style={{
-                    background: 'linear-gradient(90deg, #EC4899 0%, #DB2777 100%)',
-                    borderRadius: '12px',
-                    fontSize: '15px',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 14px rgba(236, 72, 153, 0.3)'
-                  }}
-                >
-                  <div className="flex items-center gap-2 relative z-10 text-white">
-                    <ChefHat className="w-5 h-5" />
-                    Recetas e Ingredientes
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#DB2777] to-[#BE185D] opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Button>
-              </motion.div>
-            )}
-          </>
         )}
 
         {/* Logout Button */}

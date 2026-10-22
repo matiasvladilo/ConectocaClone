@@ -471,7 +471,8 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
           )}
 
           {/* Production Area Button - Only for admin and dispatch users */}
-          {onGoToProduction && (user.role === 'admin' || user.role === 'dispatch') && (
+          {/* El admin entra a Despacho desde Mi Perfil: acá solo queda Gestionar Productos como botón principal. */}
+          {onGoToProduction && user.role === 'dispatch' && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -498,8 +499,40 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
             </motion.div>
           )}
 
-          {/* Bakery KDS Button */}
-          {onGoToBakeryKDS && (user.role === 'admin' || user.role === 'dispatch' || user.role === 'pastry') && (
+          {/* Gestionar Productos (admin): ocupa el lugar del botón de Pastelería,
+              que el admin igual puede abrir desde el panel. Va en azul (el color que
+              tenía Despacho en este lugar) para no repetir el amarillo de
+              "Realizar nuevo pedido" justo arriba. */}
+          {onManageProducts && user.role === 'admin' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.33 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onManageProducts}
+                className="w-full h-12 relative overflow-hidden group shadow-lg mt-3"
+                style={{
+                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)',
+                  color: 'white'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Package className="w-5 h-5" />
+                  Gestionar Productos
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Bakery KDS Button (despacho y pastelería; el admin ve Gestionar Productos) */}
+          {onGoToBakeryKDS && (user.role === 'dispatch' || user.role === 'pastry') && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}

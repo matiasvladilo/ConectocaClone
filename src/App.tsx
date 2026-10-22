@@ -1817,7 +1817,7 @@ export default function App() {
             }
           }}
           onManageProducts={
-            currentUser.role === 'production'
+            currentUser.role === 'production' || currentUser.role === 'admin'
               ? () => setCurrentScreen('products')
               : undefined
           }
@@ -1872,6 +1872,9 @@ export default function App() {
           onLogout={handleLogout}
           onUpdateProfile={handleUpdateProfile}
           onViewAnalytics={() => setCurrentScreen("analytics")}
+          onViewDispatch={
+            currentUser.role === "admin" ? () => setCurrentScreen("production") : undefined
+          }
           onViewDistribution={
             currentUser.role === "admin" || currentUser.role === "production"
               ? () => setCurrentScreen("distribucion")
