@@ -500,11 +500,18 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     return matchesSearch && matchesCategory;
   });
 
+  // Las tarjetas de arriba siguen al filtro de categoría (no al buscador): con
+  // "Distribuidora" elegida, mostrar los totales de todo el catálogo no decía
+  // nada de lo que se está mirando.
+  const productosDeLaCategoria = idsDelFiltro === null
+    ? products
+    : products.filter(p => !!p.categoryId && idsDelFiltro.has(p.categoryId));
+
   const stats = {
-    total: products.length,
-    lowStock: products.filter(p => !p.unlimitedStock && p.stock !== -1 && p.stock < 10).length,
-    outOfStock: products.filter(p => !p.unlimitedStock && p.stock === 0).length,
-    totalValue: products.reduce((sum, p) => sum + (p.price * (p.unlimitedStock || p.stock === -1 ? 0 : p.stock)), 0)
+    total: productosDeLaCategoria.length,
+    lowStock: productosDeLaCategoria.filter(p => !p.unlimitedStock && p.stock !== -1 && p.stock < 10).length,
+    outOfStock: productosDeLaCategoria.filter(p => !p.unlimitedStock && p.stock === 0).length,
+    totalValue: productosDeLaCategoria.reduce((sum, p) => sum + (p.price * (p.unlimitedStock || p.stock === -1 ? 0 : p.stock)), 0)
   };
 
   // Fallback del Suspense mientras se descarga el chunk de ZXing (~119 kB
