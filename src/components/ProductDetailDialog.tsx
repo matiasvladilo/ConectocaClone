@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Package, Edit, BoxIcon, Trash2, ChevronRight, ListChecks, History } from 'lucide-react';
 import { stockEventsAPI, type Product, type StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
-import { ETIQUETA_MOVIMIENTO, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
+import { etiquetaMovimiento, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
 import { toast } from 'sonner';
 
 interface ProductDetailDialogProps {
@@ -171,7 +171,7 @@ function FichaContenido({
               {movimientos && movimientos.map(m => (
                 <div key={m.id} className="flex items-center justify-between border-b px-4 py-2">
                   <div>
-                    <div className="text-sm text-gray-900">{ETIQUETA_MOVIMIENTO[m.type]}</div>
+                    <div className="text-sm text-gray-900">{etiquetaMovimiento(m)}</div>
                     {/* formatDateCL no sirve acá: su parseDate corta el string a los
                         primeros 10 caracteres y arma un Date sin hora (pensado para
                         campos YYYY-MM-DD tipo `deadline`, no para un timestamp real).

@@ -1145,6 +1145,7 @@ export interface StockEvent {
   quantity: number;   // siempre positiva: el signo lo da el `type`
   stockAfter?: number;
   orderId?: string;
+  customerName?: string; // local del pedido; falta si el pedido se borró
   createdAt: string;
 }
 

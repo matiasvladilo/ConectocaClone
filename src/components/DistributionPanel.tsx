@@ -12,7 +12,7 @@ import type { Product, Category, StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
-import { ETIQUETA_MOVIMIENTO, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
+import { etiquetaMovimiento, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
 
 interface DistributionPanelProps {
   onBack: () => void;
@@ -479,7 +479,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               {movimientos.map(m => (
                 <div key={m.id} className="flex items-center justify-between border-b py-2">
                   <div>
-                    <div className="text-sm text-gray-900">{ETIQUETA_MOVIMIENTO[m.type]}</div>
+                    <div className="text-sm text-gray-900">{etiquetaMovimiento(m)}</div>
                     <div className="text-xs text-gray-500">{formatDateCL(m.createdAt)}</div>
                   </div>
                   {m.type === 'ajuste' ? (

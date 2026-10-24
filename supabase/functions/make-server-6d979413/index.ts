@@ -1385,7 +1385,40 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
       return c.json({ error: 'Error al obtener movimientos' }, 500);
     }
 
-    return c.json({ data: (data || []).map(toStockEvent) });
+    // El kardex solo guarda order_id; el local al que se despachó vive en el
+    // pedido (orders.customer_name, o el nombre del perfil si viene vacío, igual
+    // que en GET /orders). Un pedido borrado ya no está y el evento queda sin
+    // local: la UI cae a la etiqueta genérica.
+    const eventos = (data || []).map(toStockEvent);
+    const orderIds = [...new Set(eventos.map((e: any) => e.orderId).filter(Boolean))];
+    if (orderIds.length > 0) {
+      const { data: pedidos } = await supabaseAdmin
+        .from('orders')
+        .select('id, customer_name, user_id')
+        .eq('business_id', profile.businessId)
+        .in('id', orderIds as string[]);
+
+      const sinNombre = [...new Set((pedidos || []).filter((o: any) => !o.customer_name).map((o: any) => o.user_id).filter(Boolean))];
+      const perfiles: Record<string, string> = {};
+      if (sinNombre.length > 0) {
+        const { data: profs } = await supabaseAdmin
+          .from('profiles')
+          .select('id, name')
+          .in('id', sinNombre as string[]);
+        (profs || []).forEach((p: any) => { if (p.name) perfiles[p.id] = p.name; });
+      }
+
+      const localPorPedido: Record<string, string> = {};
+      (pedidos || []).forEach((o: any) => {
+        const nombre = o.customer_name || perfiles[o.user_id];
+        if (nombre) localPorPedido[o.id] = nombre;
+      });
+      eventos.forEach((e: any) => {
+        if (e.orderId && localPorPedido[e.orderId]) e.customerName = localPorPedido[e.orderId];
+      });
+    }
+
+    return c.json({ data: eventos });
   } catch (err: any) {
     console.error('Error getting stock events:', err);
     return c.json({ error: 'Error al obtener movimientos' }, 500);

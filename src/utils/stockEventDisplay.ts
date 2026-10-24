@@ -8,6 +8,12 @@ export const ETIQUETA_MOVIMIENTO: Record<StockEvent['type'], string> = {
   devolucion: 'Devolución por pedido borrado',
 };
 
+/** En un despacho se nombra el local cuando el pedido todavía existe. */
+export function etiquetaMovimiento(m: Pick<StockEvent, 'type' | 'customerName'>): string {
+  if (m.type === 'despacho' && m.customerName) return `Despacho a ${m.customerName}`;
+  return ETIQUETA_MOVIMIENTO[m.type];
+}
+
 /**
  * Cómo se dibuja cada tipo de movimiento.
  *
