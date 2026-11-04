@@ -20,6 +20,17 @@ No se dio por buena ninguna defensa sin comprobarla contra la base real:
 - **Cuentas demo**: se confirmó que existen en `profiles` de la base real.
 - **No se ejecutó ninguna escritura, migración ni explotación destructiva contra producción.** Los hallazgos que implicarían escribir (C-01, C-02) están probados por la combinación de política + grant + cuerpo de la función, que es concluyente, y se dejan sin explotar a propósito.
 
+### Verificación empírica adicional (2026-11-03, con una sesión real provista por el usuario)
+
+Con un token de un usuario admin real, en caja negra contra producción:
+
+- **Login y lecturas intactos**: `POST /auth/v1/token` devolvió sesión; `GET /profile` → `role: admin`; `GET /products` → 468; `GET /orders` → 6003. Las correcciones del Edge Function no rompen el camino feliz.
+- **C-02 probado sin escribir una sola fila**: `PATCH /rest/v1/profiles?id=eq.<uuid-inexistente>` con `{"role":"admin","business_id":"…"}` → **HTTP 200 con `[]`**. El id falso garantiza 0 filas afectadas; el 200 (en vez de 403) confirma que el grant de `UPDATE` sobre la columna `role` existe. Tras aplicar la migración `_c`, la misma petición debe dar 403.
+- **C-03 reconfirmado sin sesión**: `GET /rest/v1/backup_ingredients_20260629` solo con la clave anónima → HTTP 200 con datos.
+- **A-08 reconfirmado**: `GET /rest/v1/businesses?select=invite_code` devolvió el código a un miembro.
+
+Estas cuatro siguen reproducibles **porque las migraciones están sin aplicar**. Es el estado esperado hasta que se autorice su aplicación.
+
 ## Resumen
 
 | Severidad | Cantidad |
