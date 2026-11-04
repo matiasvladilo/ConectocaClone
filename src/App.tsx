@@ -26,11 +26,9 @@ import { Toaster } from "./components/ui/sonner";
 import { createClient, setRememberSession } from "./utils/supabase/client";
 import { registerServiceWorker } from "./utils/registerServiceWorker";
 import {
-  authAPI,
   ordersAPI,
   profileAPI,
   notificationsAPI,
-  productsAPI,
   API_BASE_URL,
   type Order as APIOrder,
   type PaginatedResponse,
@@ -314,7 +312,6 @@ export default function App() {
     return () => {
       subscription.unsubscribe();
     };
-    // initializeDemoUsers(); // Disabled to prevent blocking login requests on load
   }, []);
 
   useEffect(() => {
@@ -438,176 +435,17 @@ export default function App() {
     };
   }, [currentUser]);
 
-  const initializeDemoUsers = async () => {
-    // Create demo users if they don't exist (silently)
-    // All demo users belong to the same demo business
-    const demoUsers = [
-      {
-        email: "admin@demo.com",
-        password: "demo123",
-        name: "Administrador Demo",
-        role: "admin" as const,
-        isFirst: true, // First user creates the business
-      },
-      {
-        email: "produccion@demo.com",
-        password: "demo123",
-        name: "Equipo de Producción",
-        role: "production" as const,
-        isFirst: false,
-      },
-      {
-        email: "despacho@demo.com",
-        password: "demo123",
-        name: "Equipo de Despacho",
-        role: "dispatch" as const,
-        isFirst: false,
-      },
-      {
-        email: "local@demo.com",
-        password: "demo123",
-        name: "Local Centro Demo",
-        role: "local" as const,
-        isFirst: false,
-      },
-    ];
-
-    // Demo business invite code (static for demo users)
-    const DEMO_BUSINESS_CODE = "DEMOCODE";
-
-    let firstUserCreated = false;
-
-    for (const user of demoUsers) {
-      try {
-        if (user.isFirst) {
-          // First user creates the demo business
-          await authAPI.signup(
-            user.email,
-            user.password,
-            user.name,
-            user.role,
-            'create',
-            'Negocio Demo - La Oca',
-            undefined
-          );
-          console.log(`✓ Demo business created by ${user.email}`);
-          firstUserCreated = true;
-          // Wait longer to ensure business is fully saved before others try to join
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        } else {
-          // Other users join the demo business
-          // Retry logic in case business is not yet available
-          let retries = 3;
-          let success = false;
-
-          while (retries > 0 && !success) {
-            try {
-              await authAPI.signup(
-                user.email,
-                user.password,
-                user.name,
-                user.role,
-                'join',
-                undefined,
-                DEMO_BUSINESS_CODE
-              );
-              console.log(`✓ Demo user joined business: ${user.email}`);
-              success = true;
-            } catch (joinError: any) {
-              const joinErrorMsg = joinError?.message || "";
-
-              // If user already exists, that's fine
-              if (joinErrorMsg.includes("already") || joinErrorMsg.includes("registrado")) {
-                success = true;
-                break;
-              }
-
-              // If code is invalid, retry after delay
-              if (joinErrorMsg.includes("Código de invitación inválido") && retries > 1) {
-                console.log(`⏳ Business not ready yet, retrying for ${user.email}... (${retries - 1} attempts left)`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                retries--;
-              } else {
-                throw joinError;
-              }
-            }
-          }
-        }
-      } catch (error: any) {
-        // User already exists - this is expected and OK, no need to log
-        // Only log if it's a different error
-        const errorMsg = error?.message || "";
-        if (
-          !errorMsg.includes("already") &&
-          !errorMsg.includes("registrado") &&
-          !errorMsg.includes("Código de invitación inválido")
-        ) {
-          console.warn(
-            `Note: Could not create demo user ${user.email}:`,
-            errorMsg,
-          );
-        }
-        // Silently continue if user already exists or code is invalid (will retry next time)
-      }
-    }
-
-    // If first user was just created, also create demo products
-    if (firstUserCreated) {
-      await initializeDemoProducts();
-    }
-  };
-
-  const initializeDemoProducts = async () => {
-    try {
-      // Login as demo user to create products
-      const { data: { session } } = await supabase.auth.signInWithPassword({
-        email: 'admin@demo.com',
-        password: 'demo123'
-      });
-
-      if (!session?.access_token) {
-        console.log('Could not login to create demo products');
-        return;
-      }
-
-      // Create some demo products
-      const demoProducts = [
-        {
-          name: 'Pan Francés',
-          description: 'Pan fresco del día',
-          price: 2.50,
-          stock: 100
-        },
-        {
-          name: 'Croissant',
-          description: 'Croissant de mantequilla',
-          price: 3.50,
-          stock: 50
-        },
-        {
-          name: 'Empanada de Pollo',
-          description: 'Empanada casera de pollo',
-          price: 4.00,
-          stock: 30
-        }
-      ];
-
-      for (const product of demoProducts) {
-        try {
-          await productsAPI.create(session.access_token, product);
-        } catch (error: any) {
-          // Ignore errors, products might already exist
-        }
-      }
-
-      console.log('✓ Demo products initialized');
-
-      // Sign out after creating products
-      await supabase.auth.signOut();
-    } catch (error) {
-      // Silently fail, demo products are optional
-    }
-  };
+  // A-01: acá vivían `initializeDemoUsers` e `initializeDemoProducts`, con la
+  // contraseña de cuatro cuentas demo en claro — una de ellas con rol admin y
+  // existente en la base real. Era código muerto desde que la llamada quedó
+  // comentada, pero la credencial seguía en el fuente y en el historial de git,
+  // y la cuenta seguía activa.
+  //
+  // Eliminar el código no desactiva las cuentas: rotarlas o borrarlas en
+  // Supabase Auth es un cambio en producción y está anotado como pendiente en
+  // docs/SECURITY_AUDIT.md (A-01). Si vuelve a hacer falta un entorno de
+  // demostración, va en un proyecto Supabase aparte, no en el que tiene los
+  // datos reales.
 
   const checkSession = async () => {
     try {

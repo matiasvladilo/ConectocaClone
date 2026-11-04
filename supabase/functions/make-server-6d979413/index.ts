@@ -1,7 +1,19 @@
-import { Hono } from "npm:hono";
-import { cors } from "npm:hono/cors";
-import { logger } from "npm:hono/logger";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+// Versiones FIJAS a propósito. Antes estos tres imports eran `npm:hono` sin
+// versión: cada despliegue resolvía la última publicada en ese instante, así que
+// el despliegue no era reproducible y una versión comprometida entraba sin que
+// cambiara una línea del repositorio. Se usa la misma versión que ya tenía
+// pineada la function `complaints`.
+import { Hono } from "npm:hono@4.12.5";
+import { cors } from "npm:hono@4.12.5/cors";
+import { logger } from "npm:hono@4.12.5/logger";
+import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import {
+  autorizar,
+  autorizarPropioOConPermiso,
+  tienePermiso,
+  type Permiso,
+  type ResultadoAutorizacion,
+} from "./authz.ts";
 
 const app = new Hono();
 
@@ -31,10 +43,33 @@ const supabaseAuth = createClient(
 
 app.use('*', logger(console.log));
 
+/**
+ * Orígenes permitidos. Antes era `origin: "*"`, que dejaba a cualquier sitio
+ * web invocar la API desde el navegador de un usuario.
+ *
+ * APP_PUBLIC_URL es el mismo secreto que ya usa la function `complaints`, así
+ * que no hay nueva configuración que recordar. Los dos orígenes de Capacitor
+ * van fijos porque son constantes del contenedor nativo (iOS usa
+ * `capacitor://localhost`, Android `http://localhost`), no valores de entorno.
+ */
+const APP_PUBLIC_URL = Deno.env.get('APP_PUBLIC_URL')?.trim().replace(/\/+$/, '') || '';
+const ORIGENES_PERMITIDOS = new Set(
+  [
+    APP_PUBLIC_URL,
+    'capacitor://localhost',
+    'http://localhost',
+    // Desarrollo local con `npm run dev` (vite.config.ts: puerto 3000 por defecto).
+    'http://localhost:3000',
+    'http://localhost:5173',
+  ].filter(Boolean),
+);
+
 app.use(
   "/*",
   cors({
-    origin: "*",
+    // Devolver undefined ante un origen no permitido omite la cabecera
+    // Access-Control-Allow-Origin, que es lo que hace que el navegador corte.
+    origin: (origin) => (ORIGENES_PERMITIDOS.has(origin) ? origin : undefined),
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
@@ -331,14 +366,98 @@ async function getProfile(userId: string) {
   return data ? toProfile(data) : null;
 }
 
-// Roles habilitados para gestionar materias primas y recetas.
-// Coincide con lo que la app ya muestra en pantalla (App.tsx: los botones de
-// Materias Primas y Recetas solo aparecen para admin y production), así que el
-// permiso real del servidor y lo que ve el usuario van juntos.
-const ROLES_MATERIAS_PRIMAS = ['admin', 'production'];
-
+// La matriz rol → permiso vive en ./authz.ts. Este archivo no debe volver a
+// escribir un array de roles literal: si una ruta necesita un permiso que no
+// está en la matriz, se agrega allá.
 function puedeGestionarMateriasPrimas(profile: any) {
-  return !!profile?.role && ROLES_MATERIAS_PRIMAS.includes(profile.role);
+  return tienePermiso(profile, 'materias_primas.gestionar');
+}
+
+/**
+ * Preámbulo único de toda ruta autenticada: valida el JWT, carga el perfil y
+ * aplica el permiso (y, si se le pasa el recurso, el aislamiento entre
+ * negocios). Devuelve o la respuesta de error ya formada, o el perfil.
+ *
+ * Usarlo es lo que evita el modo de falla que tenía este archivo: antes cada
+ * ruta repetía a mano `verifyAuth` + `getProfile` + dos condiciones, y las que
+ * se olvidaban de una de las condiciones no se distinguían a simple vista de
+ * las que estaban completas.
+ *
+ * `recurso` se pasa en las rutas que primero tienen que cargar la fila (para
+ * poder comparar su business_id); en ese caso se llama en dos pasos: primero
+ * `sesion()` para saber quién pide, después `aplicar()` con el recurso cargado.
+ */
+interface Sesion {
+  /** No-null = hay que cortar y devolver esta respuesta. Null = autorizado. */
+  respuesta: Response | null;
+  userId: string;
+  user: any;
+  profile: any;
+}
+
+async function sesion(c: any): Promise<Sesion> {
+  const { error, userId, user } = await verifyAuth(c.req.header('Authorization'));
+  if (error) {
+    return { respuesta: c.json({ error }, 401), userId: '', user: null, profile: null };
+  }
+
+  const profile = await getProfile(userId!);
+  return { respuesta: null, userId: userId!, user, profile };
+}
+
+/** Convierte un ResultadoAutorizacion en respuesta HTTP, o null si autorizó. */
+function rechazo(c: any, resultado: ResultadoAutorizacion): Response | null {
+  if (resultado.ok) return null;
+  return c.json({ error: resultado.error }, resultado.status ?? 403);
+}
+
+/**
+ * Atajo para el caso más común: ruta que no carga un recurso previo (listados,
+ * creaciones, configuración). Un solo `await` reemplaza las cuatro líneas que
+ * antes se copiaban.
+ */
+async function sesionConPermiso(c: any, permiso: Permiso): Promise<Sesion> {
+  const s = await sesion(c);
+  if (s.respuesta) return s;
+
+  const no = rechazo(c, autorizar({ perfil: s.profile, permiso }));
+  if (no) return { ...s, respuesta: no };
+
+  return s;
+}
+
+/**
+ * Roles que un usuario puede asignarse a sí mismo al registrarse con un código
+ * de invitación. Ninguno concede permisos sobre los datos del negocio (ver la
+ * matriz en authz.ts): son los roles con los que alguien se suma a operar.
+ *
+ * Los que faltan — admin, production, dispatch, pastry — solo los otorga un
+ * admin ya existente. Esa es la diferencia entre "elegir cómo trabajo" y
+ * "elegir qué permisos tengo", que es lo que A-02 permitía confundir.
+ */
+const ROLES_AUTOSERVICIO = new Set(['local', 'worker', 'user']);
+
+/** Roles que un admin puede otorgar a un miembro de su negocio. */
+const ROLES_ASIGNABLES_POR_ADMIN = new Set([
+  'admin', 'production', 'dispatch', 'pastry', 'local', 'worker', 'user',
+]);
+
+/**
+ * Código de invitación con un PRNG criptográfico. Reemplaza a
+ * `Math.random().toString(36).substring(2, 10)`, cuyas salidas son predecibles
+ * a partir de otras salidas del mismo motor.
+ *
+ * Se excluyen I, O, 0 y 1 del alfabeto: el código se dicta y se transcribe a
+ * mano, y confundirlos generaba reintentos contra un endpoint sin rate limit.
+ */
+const ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generarCodigoInvitacion(largo = 10): string {
+  const bytes = new Uint8Array(largo);
+  crypto.getRandomValues(bytes);
+  let codigo = '';
+  for (const b of bytes) codigo += ALFABETO_CODIGO[b % ALFABETO_CODIGO.length];
+  return codigo;
 }
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
@@ -382,6 +501,13 @@ app.post("/make-server-6d979413/signup", async (c) => {
       return c.json({ error: 'Debes seleccionar crear o unirte a un negocio' }, 400);
     }
 
+    // M-06: antes solo se comprobaba que `password` no estuviera vacío. El
+    // único límite era un minLength={6} en el HTML, que no se aplica del lado
+    // del servidor y se salta mandando el request a mano.
+    if (typeof password !== 'string' || password.length < 8) {
+      return c.json({ error: 'La contraseña debe tener al menos 8 caracteres' }, 400);
+    }
+
     let businessId = '';
     let business: any = null;
 
@@ -390,51 +516,28 @@ app.post("/make-server-6d979413/signup", async (c) => {
         return c.json({ error: 'El nombre del negocio debe tener al menos 3 caracteres' }, 400);
       }
 
-      const inviteCode = businessName.includes('Demo') && businessName.includes('Oca')
-        ? 'DEMOCODE'
-        : Math.random().toString(36).substring(2, 10).toUpperCase();
+      // A-02: se eliminó el caso especial 'DEMOCODE', que era un código de
+      // invitación fijo y conocido (está escrito en App.tsx) hacia un negocio
+      // reutilizado. Cualquiera que lo conociera entraba a ese negocio.
+      //
+      // El código ahora sale de crypto.getRandomValues y no de
+      // Math.random().toString(36), que no es un PRNG criptográfico: sus
+      // salidas son predecibles a partir de otras salidas del mismo motor.
+      const inviteCode = generarCodigoInvitacion();
 
-      if (inviteCode === 'DEMOCODE') {
-        const { data: existingDemo } = await supabaseAdmin
-          .from('businesses')
-          .select('*')
-          .eq('invite_code', 'DEMOCODE')
-          .maybeSingle();
-
-        if (existingDemo) {
-          business = toBusiness(existingDemo);
-          businessId = existingDemo.id;
-          console.log(`Reusing demo business: ${business.name} (${businessId})`);
-        } else {
-          const { data: newBiz, error: bizErr } = await supabaseAdmin
-            .from('businesses')
-            .insert({
-              name: businessName.trim(),
-              invite_code: inviteCode,
-              owner_id: null,
-            })
-            .select()
-            .single();
-          if (bizErr) throw bizErr;
-          business = toBusiness(newBiz);
-          businessId = newBiz.id;
-          console.log(`Demo business created: ${businessName} (${businessId})`);
-        }
-      } else {
-        const { data: newBiz, error: bizErr } = await supabaseAdmin
-          .from('businesses')
-          .insert({
-            name: businessName.trim(),
-            invite_code: inviteCode,
-            owner_id: null,
-          })
-          .select()
-          .single();
-        if (bizErr) throw bizErr;
-        business = toBusiness(newBiz);
-        businessId = newBiz.id;
-        console.log(`Business created: ${businessName} (${businessId})`);
-      }
+      const { data: newBiz, error: bizErr } = await supabaseAdmin
+        .from('businesses')
+        .insert({
+          name: businessName.trim(),
+          invite_code: inviteCode,
+          owner_id: null,
+        })
+        .select()
+        .single();
+      if (bizErr) throw bizErr;
+      business = toBusiness(newBiz);
+      businessId = newBiz.id;
+      console.log(`Business created: ${businessName} (${businessId})`);
     } else {
       if (!businessCode || businessCode.trim().length === 0) {
         return c.json({ error: 'Debes proporcionar un codigo de invitacion' }, 400);
@@ -455,7 +558,21 @@ app.post("/make-server-6d979413/signup", async (c) => {
       console.log(`User joining business: ${business.name} (${businessId})`);
     }
 
-    const userRole = businessAction === 'create' ? 'admin' : (role || 'user');
+    // A-02: antes esto era `businessAction === 'create' ? 'admin' : (role || 'user')`,
+    // con `role` tomado tal cual del cuerpo de la petición. El formulario ofrece
+    // el desplegable completo, "admin — Acceso completo al sistema" incluido, así
+    // que cualquiera que recibiera el código de invitación para entrar como local
+    // podía elegir admin y quedar con acceso total al negocio. No hacía falta
+    // ninguna herramienta: estaba en la pantalla de registro.
+    //
+    // El rol sigue siendo elegible al registrarse, porque el alta de un local
+    // nuevo es autoservicio y no hay a quién esperar — pero solo entre los roles
+    // que no conceden permisos sobre el negocio. Los elevados (admin,
+    // production, dispatch, pastry) los otorga un admin después, por
+    // PUT /business/members/:id/role.
+    const userRole = businessAction === 'create'
+      ? 'admin'
+      : (ROLES_AUTOSERVICIO.has(role) ? role : 'user');
 
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -643,7 +760,7 @@ app.post("/make-server-6d979413/business/regenerate-code", async (c) => {
     if (!biz) return c.json({ error: 'Negocio no encontrado' }, 404);
     if (biz.owner_id !== userId) return c.json({ error: 'Solo el propietario puede regenerar el codigo' }, 403);
 
-    const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const newCode = generarCodigoInvitacion();
     await supabaseAdmin
       .from('businesses')
       .update({ invite_code: newCode })
@@ -656,14 +773,15 @@ app.post("/make-server-6d979413/business/regenerate-code", async (c) => {
   }
 });
 
+// M-08: antes devolvía nombre, CORREO, rol y fecha de alta de todo el negocio a
+// cualquier rol. Es la materia prima de un phishing interno dirigido (y A-05 ya
+// aportaba el canal). El listado de miembros es una pantalla de administración.
 app.get("/make-server-6d979413/business/members", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesionConPermiso(c, 'negocio.ver_miembros');
+  if (s.respuesta) return s.respuesta;
+  const { profile } = s;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
     const { data: members } = await supabaseAdmin
       .from('profiles')
       .select('id, name, email, role, created_at')
@@ -692,6 +810,90 @@ app.get("/make-server-6d979413/business/members", async (c) => {
   } catch (err: any) {
     console.error('Error getting members:', err);
     return c.json({ error: 'Error al obtener miembros del negocio' }, 500);
+  }
+});
+
+/**
+ * Cambio de rol de un miembro. Es la contraparte necesaria de A-02: al dejar de
+ * aceptar roles elevados en el registro, tiene que existir la vía legítima para
+ * otorgarlos, o un negocio nuevo no podría designar a su equipo de producción.
+ *
+ * Tres resguardos:
+ *  - solo admin del MISMO negocio (el chequeo de negocio va sobre el perfil
+ *    destino, no sobre el id, que es lo que evita tocar a alguien de otro
+ *    inquilino);
+ *  - nadie cambia su propio rol, lo que impide que un admin se degrade y deje al
+ *    negocio sin administrador por accidente;
+ *  - al propietario del negocio no se le puede sacar el admin.
+ *
+ * Se escribe en `profiles` y en `user_metadata` a la vez: el token lleva el rol
+ * en los metadatos y create_order_with_stock lo lee de ahí, así que dejar uno
+ * sin el otro deja al usuario con dos roles distintos según quién pregunte.
+ */
+app.put("/make-server-6d979413/business/members/:id/role", async (c) => {
+  const s = await sesionConPermiso(c, 'negocio.ver_miembros');
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
+
+  try {
+    const miembroId = c.req.param('id');
+    const { role: nuevoRol } = await c.req.json();
+
+    if (!ROLES_ASIGNABLES_POR_ADMIN.has(nuevoRol)) {
+      return c.json({ error: 'Rol no válido' }, 400);
+    }
+
+    if (miembroId === userId) {
+      return c.json({ error: 'No podés cambiar tu propio rol' }, 403);
+    }
+
+    const { data: miembro } = await supabaseAdmin
+      .from('profiles')
+      .select('id, business_id, role')
+      .eq('id', miembroId)
+      .maybeSingle();
+
+    if (!miembro) return c.json({ error: 'Miembro no encontrado' }, 404);
+    if (miembro.business_id !== profile.businessId) {
+      return c.json({ error: 'No tienes permiso' }, 403);
+    }
+
+    const { data: biz } = await supabaseAdmin
+      .from('businesses')
+      .select('owner_id')
+      .eq('id', profile.businessId)
+      .maybeSingle();
+
+    if (biz?.owner_id === miembroId && nuevoRol !== 'admin') {
+      return c.json({ error: 'El propietario del negocio no puede dejar de ser admin' }, 403);
+    }
+
+    const { data: actualizado, error: updateErr } = await supabaseAdmin
+      .from('profiles')
+      .update({ role: nuevoRol })
+      .eq('id', miembroId)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    // Se leen los metadatos actuales y se reescriben completos en vez de mandar
+    // solo `role`: así el `name` no depende de que el merge del lado del
+    // proveedor se comporte como esperamos.
+    const { data: usuarioActual } = await supabaseAdmin.auth.admin.getUserById(miembroId);
+    await supabaseAdmin.auth.admin.updateUserById(miembroId, {
+      user_metadata: {
+        ...(usuarioActual?.user?.user_metadata || {}),
+        role: nuevoRol,
+        businessId: profile.businessId,
+      },
+    });
+
+    console.log(`Role changed: ${miembroId} ${miembro.role} -> ${nuevoRol} by ${userId}`);
+    return c.json({ data: toProfile(actualizado) });
+  } catch (err: any) {
+    console.error('Error changing member role:', err);
+    return c.json({ error: 'Error al cambiar el rol del miembro' }, 500);
   }
 });
 
@@ -783,14 +985,15 @@ app.get("/make-server-6d979413/products", async (c) => {
   }
 });
 
+// A-09: esta ruta solo exigía tener un negocio asignado, sin chequear rol. Un
+// `local` o un `worker` podía crear productos del negocio por API, aunque la
+// pantalla de Gestión de Productos nunca se les ofrece.
 app.post("/make-server-6d979413/products", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesionConPermiso(c, 'productos.escribir');
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
     const body = await c.req.json();
     const { name, description, price, image, imageUrl, stock, categoryId, productionAreaId, ingredients, unlimitedStock, allowDecimal, laborCost, sku, minStock } = body;
 
@@ -867,14 +1070,15 @@ app.post("/make-server-6d979413/products", async (c) => {
   }
 });
 
+// A-09: igual que POST /products, antes no chequeaba rol. Un `local` podía
+// cambiar el precio y el stock de cualquier producto de su negocio por API.
 app.put("/make-server-6d979413/products/:id", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesionConPermiso(c, 'productos.escribir');
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
 
   try {
     const productId = c.req.param('id');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     // Se traen stock y unlimited_stock además de los campos de permisos: el
     // registro en el kardex necesita el stock PREVIO para calcular el delta.
@@ -1128,14 +1332,14 @@ app.put("/make-server-6d979413/products/:id", async (c) => {
   }
 });
 
+// A-09: antes no chequeaba rol. Un `local` podía borrar productos del negocio.
 app.delete("/make-server-6d979413/products/:id", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesionConPermiso(c, 'productos.escribir');
+  if (s.respuesta) return s.respuesta;
+  const { profile } = s;
 
   try {
     const productId = c.req.param('id');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const { data: existing } = await supabaseAdmin
       .from('products')
@@ -1159,19 +1363,31 @@ app.delete("/make-server-6d979413/products/:id", async (c) => {
 // ─── PRODUCT INGREDIENTS (nested under /products/:id) ────────────────────────
 
 app.get('/make-server-6d979413/products/:id/ingredients', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
 
   try {
     const productId = c.req.param('id');
 
+    // A-03: antes esta ruta no chequeaba ni rol ni negocio. Se seleccionaba el
+    // producto solo por id y se devolvía la receta completa con el costo por
+    // unidad de cada materia prima a cualquier usuario autenticado, de
+    // cualquier negocio. Por eso business_id entra en el SELECT: sin el campo
+    // no hay con qué comparar.
     const { data: product } = await supabaseAdmin
       .from('products')
-      .select('id, name')
+      .select('id, name, business_id')
       .eq('id', productId)
       .maybeSingle();
 
     if (!product) return c.json({ error: 'Product not found' }, 404);
+
+    const no = rechazo(c, autorizar({
+      perfil: s.profile,
+      permiso: 'recetas.leer',
+      recursoBusinessId: product.business_id,
+    }));
+    if (no) return no;
 
     const { data: relations } = await supabaseAdmin
       .from('product_ingredients')
@@ -1197,25 +1413,49 @@ app.get('/make-server-6d979413/products/:id/ingredients', async (c) => {
 });
 
 app.put('/make-server-6d979413/products/:id/ingredients', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!puedeGestionarMateriasPrimas(profile)) {
-      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
-    }
-
     const productId = c.req.param('id');
     const { ingredients } = await c.req.json();
 
     const { data: product } = await supabaseAdmin
       .from('products')
-      .select('id, name')
+      .select('id, name, business_id')
       .eq('id', productId)
       .maybeSingle();
 
     if (!product) return c.json({ error: 'Product not found' }, 404);
+
+    // A-03: faltaba el chequeo de negocio. Sin él, un admin del negocio A podía
+    // reescribir la receta de un producto del negocio B — y como el primer paso
+    // de esta ruta es borrar las líneas existentes, el daño era destructivo.
+    const no = rechazo(c, autorizar({
+      perfil: s.profile,
+      permiso: 'recetas.gestionar',
+      recursoBusinessId: product.business_id,
+    }));
+    if (no) return no;
+
+    // Los ingredientes también se validan contra el negocio: aceptar un
+    // ingredientId ajeno mezclaría materias primas entre inquilinos.
+    const idsPedidos = Array.isArray(ingredients)
+      ? [...new Set(ingredients.map((i: any) => i?.ingredientId).filter(Boolean))]
+      : [];
+    const idsValidos = new Set<string>();
+    if (idsPedidos.length > 0) {
+      const { data: propios } = await supabaseAdmin
+        .from('ingredients')
+        .select('id')
+        .eq('business_id', s.profile.businessId)
+        .in('id', idsPedidos as string[]);
+      (propios || []).forEach((i: any) => idsValidos.add(i.id));
+
+      if (idsValidos.size !== idsPedidos.length) {
+        return c.json({ error: 'Alguna materia prima no pertenece a tu negocio' }, 403);
+      }
+    }
 
     await supabaseAdmin.from('product_ingredients').delete().eq('product_id', productId);
 
@@ -1251,15 +1491,10 @@ app.put('/make-server-6d979413/products/:id/ingredients', async (c) => {
 });
 
 app.post('/make-server-6d979413/products/:id/ingredients', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!puedeGestionarMateriasPrimas(profile)) {
-      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
-    }
-
     const productId = c.req.param('id');
     const { ingredientId, quantity } = await c.req.json();
 
@@ -1269,17 +1504,30 @@ app.post('/make-server-6d979413/products/:id/ingredients', async (c) => {
 
     const { data: product } = await supabaseAdmin
       .from('products')
-      .select('id, name')
+      .select('id, name, business_id')
       .eq('id', productId)
       .maybeSingle();
     if (!product) return c.json({ error: 'Product not found' }, 404);
 
+    // A-03: faltaba el chequeo de negocio, tanto del producto como del
+    // ingrediente. Sin el segundo se podía vincular una materia prima del
+    // negocio A a un producto del negocio B.
+    const no = rechazo(c, autorizar({
+      perfil: s.profile,
+      permiso: 'recetas.gestionar',
+      recursoBusinessId: product.business_id,
+    }));
+    if (no) return no;
+
     const { data: ingredient } = await supabaseAdmin
       .from('ingredients')
-      .select('id, name, unit, cost_per_unit')
+      .select('id, name, unit, cost_per_unit, business_id')
       .eq('id', ingredientId)
       .maybeSingle();
     if (!ingredient) return c.json({ error: 'Ingredient not found' }, 404);
+    if (ingredient.business_id !== s.profile.businessId) {
+      return c.json({ error: 'La materia prima no pertenece a tu negocio' }, 403);
+    }
 
     await supabaseAdmin
       .from('product_ingredients')
@@ -1312,17 +1560,29 @@ app.post('/make-server-6d979413/products/:id/ingredients', async (c) => {
 });
 
 app.delete('/make-server-6d979413/products/:productId/ingredients/:ingredientId', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!puedeGestionarMateriasPrimas(profile)) {
-      return c.json({ error: 'No tenes permiso para gestionar recetas' }, 403);
-    }
-
     const productId = c.req.param('productId');
     const ingredientId = c.req.param('ingredientId');
+
+    // A-03: faltaba el chequeo de negocio, así que se podía borrar una línea de
+    // receta de otro inquilino conociendo los dos ids.
+    const { data: productoDueno } = await supabaseAdmin
+      .from('products')
+      .select('id, business_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!productoDueno) return c.json({ error: 'Product not found' }, 404);
+
+    const no = rechazo(c, autorizar({
+      perfil: s.profile,
+      permiso: 'recetas.gestionar',
+      recursoBusinessId: productoDueno.business_id,
+    }));
+    if (no) return no;
 
     const { data: relation } = await supabaseAdmin
       .from('product_ingredients')
@@ -1356,7 +1616,7 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
     const productId = c.req.param('id');
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-    if (profile.role !== 'admin' && profile.role !== 'production') return c.json({ error: 'No autorizado' }, 403);
+    if (!tienePermiso(profile, 'productos.kardex')) return c.json({ error: 'No autorizado' }, 403);
 
     // El tope duro evita que un limit gigante en la query traiga la tabla entera.
     // Number.isFinite atrapa el `limit=abc`: sin esto parseInt devuelve NaN,
@@ -1427,40 +1687,93 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
 
 // ─── UPLOAD PRODUCT IMAGE ─────────────────────────────────────────────────────
 
+/**
+ * Tipos de imagen aceptados, con la extensión que les corresponde y su firma
+ * mágica.
+ *
+ * M-04: antes la validación era `file.type.startsWith('image/')`, que es la
+ * cabecera que DECLARA el cliente, y la extensión salía de
+ * `file.name.split('.').pop()` sin lista blanca. Dos consecuencias: un
+ * `image/svg+xml` servido desde la URL firmada es XSS almacenado (un SVG
+ * ejecuta scripts), y la extensión podía traer caracteres de ruta, porque
+ * `split('.').pop()` sobre `"x.jpg/../y"` devuelve `"jpg/../y"` y eso se
+ * concatenaba en la clave del objeto.
+ *
+ * Ahora la extensión se DERIVA del tipo validado: nada del nombre que manda el
+ * cliente llega a la clave del objeto.
+ */
+const IMAGENES_PERMITIDAS: Array<{ mime: string; ext: string; firma: number[] }> = [
+  { mime: 'image/jpeg', ext: 'jpg', firma: [0xFF, 0xD8, 0xFF] },
+  { mime: 'image/png', ext: 'png', firma: [0x89, 0x50, 0x4E, 0x47] },
+  { mime: 'image/webp', ext: 'webp', firma: [0x52, 0x49, 0x46, 0x46] }, // "RIFF"
+];
+
+/**
+ * Vigencia de la URL firmada: un año. SIGUE SIENDO DEMASIADO, y es el único
+ * punto de M-04 que esta corrección NO arregla.
+ *
+ * No se acortó porque `products.image_url` guarda la URL firmada completa, no la
+ * ruta del objeto. Bajar la vigencia a días dejaría en 404 las imágenes de los
+ * 471 productos ya cargados en cuanto venciera la firma guardada: sería cambiar
+ * una exposición por una rotura.
+ *
+ * Arreglarlo de verdad es una tarea aparte y en este orden: (1) guardar
+ * `storage_path` junto a `image_url`, (2) rellenarlo para las filas existentes
+ * derivándolo de la URL guardada, (3) firmar a demanda en GET /products con
+ * createSignedUrls (en lote, no una llamada por producto), (4) recién entonces
+ * bajar esta constante. Mientras tanto, la URL firmada es de hecho pública para
+ * quien la obtenga, pero no es adivinable: lleva un UUID y un HMAC.
+ */
+const VIGENCIA_URL_IMAGEN_SEGUNDOS = 31536000; // 1 año — ver nota de arriba
+
+function detectarImagen(bytes: Uint8Array, mimeDeclarado: string) {
+  return IMAGENES_PERMITIDAS.find(tipo =>
+    tipo.mime === mimeDeclarado &&
+    tipo.firma.every((b, i) => bytes[i] === b)
+  );
+}
+
+// M-04: antes esta ruta no chequeaba rol — cualquier usuario con negocio podía
+// subir al bucket. Subir imágenes es parte de gestionar el catálogo.
 app.post("/make-server-6d979413/upload-product-image", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesionConPermiso(c, 'productos.escribir');
+  if (s.respuesta) return s.respuesta;
+  const { profile } = s;
 
   try {
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
     const formData = await c.req.formData();
     const file = formData.get('file') as File;
 
     if (!file) return c.json({ error: 'No se proporciono ningun archivo' }, 400);
-    if (!file.type.startsWith('image/')) return c.json({ error: 'El archivo debe ser una imagen' }, 400);
     if (file.size > 5 * 1024 * 1024) return c.json({ error: 'La imagen no debe superar los 5MB' }, 400);
-
-    const bucketName = `make-6d979413-products`;
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${profile.businessId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
+    // El tipo se confirma contra los bytes, no contra lo que declara el cliente.
+    const tipo = detectarImagen(buffer, file.type);
+    if (!tipo) {
+      return c.json({ error: 'El archivo debe ser una imagen JPG, PNG o WEBP' }, 400);
+    }
+
+    const bucketName = `make-6d979413-products`;
+    const aleatorio = crypto.randomUUID();
+    const fileName = `${profile.businessId}/${Date.now()}-${aleatorio}.${tipo.ext}`;
+
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
       .from(bucketName)
-      .upload(fileName, buffer, { contentType: file.type, upsert: false });
+      // contentType sale del tipo verificado, no de file.type: así el bucket no
+      // puede devolver el objeto con un Content-Type que el cliente eligió.
+      .upload(fileName, buffer, { contentType: tipo.mime, upsert: false });
 
     if (uploadError) {
       console.error('Error uploading file:', uploadError);
-      return c.json({ error: `Error al subir la imagen: ${uploadError.message}` }, 500);
+      return c.json({ error: 'Error al subir la imagen' }, 500);
     }
 
     const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
       .from(bucketName)
-      .createSignedUrl(fileName, 31536000);
+      .createSignedUrl(fileName, VIGENCIA_URL_IMAGEN_SEGUNDOS);
 
     if (signedUrlError) {
       return c.json({ error: 'Error al crear la URL de la imagen' }, 500);
@@ -1487,7 +1800,7 @@ app.get("/make-server-6d979413/orders", async (c) => {
     const limit = parseInt(c.req.query('limit') || '50');
     const offset = (page - 1) * limit;
 
-    const isStaff = ['admin', 'production', 'dispatch', 'pastry'].includes(profile.role);
+    const isStaff = tienePermiso(profile, 'pedidos.leer_de_otros');
 
     let query = supabaseAdmin
       .from('orders')
@@ -1541,14 +1854,18 @@ app.get("/make-server-6d979413/orders", async (c) => {
       }
     });
   } catch (err: any) {
+    // B-05: antes esto devolvía `details: err.message`, que filtra mensajes de
+    // Postgres (nombres de columna, constraints) a quien llame. El resto del
+    // archivo ya responde genérico; el detalle queda en el log del servidor.
     console.error('Error getting orders:', err);
-    return c.json({ error: 'Error al obtener pedidos', details: err.message }, 500);
+    return c.json({ error: 'Error al obtener pedidos' }, 500);
   }
 });
 
 app.get("/make-server-6d979413/orders/:id", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
 
   try {
     const orderId = c.req.param('id');
@@ -1560,9 +1877,19 @@ app.get("/make-server-6d979413/orders/:id", async (c) => {
 
     if (!order) return c.json({ error: 'Pedido no encontrado' }, 404);
 
-    const profile = await getProfile(userId!);
-    const isStaff = ['admin', 'production', 'dispatch', 'pastry'].includes(profile?.role || '');
-    if (order.user_id !== userId && !isStaff) return c.json({ error: 'No autorizado' }, 403);
+    // A-04: faltaba el chequeo de negocio. `isStaff` era cierto para cualquier
+    // rol operativo DE CUALQUIER NEGOCIO, así que con el UUID de un pedido
+    // ajeno se leían sus líneas, su total, el local y la dirección de entrega.
+    // GET /orders (el listado) sí filtraba por business_id: la omisión era solo
+    // de esta ruta.
+    const no = rechazo(c, autorizarPropioOConPermiso({
+      perfil: profile,
+      permiso: 'pedidos.leer_de_otros',
+      usuarioId: userId!,
+      recursoUsuarioId: order.user_id,
+      recursoBusinessId: order.business_id,
+    }));
+    if (no) return no;
 
     return c.json(toOrder(order));
   } catch (err: any) {
@@ -1571,120 +1898,28 @@ app.get("/make-server-6d979413/orders/:id", async (c) => {
   }
 });
 
+/**
+ * M-03: esta ruta quedó RETIRADA.
+ *
+ * Qué hacía mal: leía el stock, calculaba el descuento en el Edge Function y
+ * escribía, sin FOR UPDATE ni transacción — dos pedidos simultáneos del mismo
+ * producto sobrevendían. Además guardaba `total` tal como lo mandaba el cliente
+ * y no chequeaba rol.
+ *
+ * Es exactamente el problema que vino a resolver la RPC create_order_with_stock
+ * (migración 20260629_create_order_with_stock.sql), que descuenta bajo
+ * FOR UPDATE y crea el pedido en la misma transacción. El cliente ya usa la RPC
+ * desde entonces (src/utils/api.tsx, ordersAPI.create): esta ruta era la vía
+ * vieja que quedó abierta y accesible.
+ *
+ * Se responde 410 Gone y no 404 a propósito: si algún cliente viejo todavía la
+ * llama, el error dice qué pasó en vez de parecer un typo en la URL.
+ */
 app.post("/make-server-6d979413/orders", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
-
-  try {
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
-
-    const { products, deadline, total, notes } = await c.req.json();
-    if (!products || !deadline) return c.json({ error: 'Productos y fecha limite son requeridos' }, 400);
-
-    // Validate and update stock for each product
-    for (const item of products) {
-      const { data: product } = await supabaseAdmin
-        .from('products')
-        .select('id, name, stock, unlimited_stock, track_stock, business_id')
-        .eq('id', item.productId)
-        .maybeSingle();
-
-      if (!product) return c.json({ error: `Producto "${item.name}" no encontrado` }, 404);
-      if (product.business_id !== profile.businessId) {
-        return c.json({ error: `Producto "${item.name}" no pertenece a tu negocio` }, 403);
-      }
-
-      const isUnlimited = product.unlimited_stock === true || product.track_stock === false || product.stock === -1;
-      if (!isUnlimited && product.stock < item.quantity) {
-        return c.json({
-          error: `Stock insuficiente para "${item.name}". Disponible: ${product.stock}, Solicitado: ${item.quantity}`
-        }, 400);
-      }
-
-      if (!isUnlimited) {
-        const stockNuevo = Number(product.stock) - item.quantity;
-        await supabaseAdmin
-          .from('products')
-          .update({ stock: stockNuevo })
-          .eq('id', item.productId);
-
-        // Mismo tipo que usa la RPC create_order_with_stock: es exactamente el
-        // mismo hecho (salida por pedido de un local).
-        // orderId va null a propósito: el pedido todavía no existe (se crea más
-        // abajo). Registrar acá y no después es deliberado: si la creación del
-        // pedido falla, el stock ya se descontó igual, y un evento sin order_id
-        // es mucho mejor que un descuento invisible.
-        await registrarStockEvent({
-          businessId: profile.businessId,
-          productId: product.id,
-          productName: product.name,
-          type: 'despacho',
-          quantity: item.quantity,
-          stockAfter: stockNuevo,
-          createdBy: userId,
-        });
-      }
-    }
-
-    // Calculate area statuses
-    const areaStatuses: Record<string, string> = {};
-    for (const item of products) {
-      if (item.productionAreaId) {
-        areaStatuses[item.productionAreaId] = 'pending';
-      }
-    }
-
-    // Create order
-    const { data: newOrder, error: orderErr } = await supabaseAdmin
-      .from('orders')
-      .insert({
-        business_id: profile.businessId,
-        user_id: userId,
-        status: 'pending',
-        progress: 0,
-        total: parseFloat(total),
-        deadline,
-        notes: notes || null,
-        delivery_address: profile.address || null,
-        customer_name: profile.name || null,
-        area_statuses: areaStatuses,
-        item_statuses: {},
-      })
-      .select()
-      .single();
-
-    if (orderErr) {
-      console.error('Error creating order:', orderErr);
-      return c.json({ error: 'Error al crear pedido' }, 500);
-    }
-
-    // Insert order items
-    const itemRows = products.map((item: any) => ({
-      order_id: newOrder.id,
-      product_id: item.productId,
-      product_name: item.name,
-      quantity: item.quantity,
-      price: item.price,
-      production_area_id: item.productionAreaId || null,
-      area_status: 'pending',
-    }));
-
-    await supabaseAdmin.from('order_items').insert(itemRows);
-
-    // Fetch complete order
-    const { data: fullOrder } = await supabaseAdmin
-      .from('orders')
-      .select('*, order_items(*, production_area:production_areas(name, color, icon))')
-      .eq('id', newOrder.id)
-      .single();
-
-    console.log(`Order created: ${newOrder.id} for business ${profile.businessId}`);
-    return c.json(toOrder(fullOrder || newOrder));
-  } catch (err: any) {
-    console.error('Error creating order:', err);
-    return c.json({ error: 'Error al crear pedido' }, 500);
-  }
+  return c.json({
+    error: 'Esta ruta fue retirada. Los pedidos se crean con la RPC create_order_with_stock, '
+      + 'que descuenta el stock de forma atómica.',
+  }, 410);
 });
 
 app.put("/make-server-6d979413/orders/:id", async (c) => {
@@ -1704,8 +1939,8 @@ app.put("/make-server-6d979413/orders/:id", async (c) => {
     if (!currentOrder) return c.json({ error: 'Pedido no encontrado' }, 404);
     if (currentOrder.business_id !== profile?.businessId) return c.json({ error: 'No autorizado' }, 403);
 
-    const allowedRoles = ['admin', 'dispatch', 'production'];
-    if (!allowedRoles.includes(profile?.role || '')) {
+    const puedeEditar = tienePermiso(profile, 'pedidos.editar');
+    if (!puedeEditar) {
       return c.json({ error: 'No tienes permiso para editar este pedido' }, 403);
     }
     const updates = await c.req.json();
@@ -1764,7 +1999,10 @@ app.put("/make-server-6d979413/orders/:id/status", async (c) => {
     const { status, progress } = await c.req.json();
 
     const userRole = profile?.role || '';
-    const isPowerUser = ['production', 'dispatch', 'admin', 'pastry'].includes(userRole);
+    const isPowerUser = tienePermiso(profile, 'pedidos.cambiar_estado');
+    // Excepción deliberada y acotada: un local marca como entregado lo que
+    // recibe. Es el único cambio de estado que puede hacer, y solo hacia
+    // entregado.
     const isLocalDelivering = ['local', 'user'].includes(userRole) &&
       ['entregado', 'delivered'].includes(status);
 
@@ -1777,6 +2015,14 @@ app.put("/make-server-6d979413/orders/:id/status", async (c) => {
       .maybeSingle();
 
     if (!currentOrder) return c.json({ error: 'Pedido no encontrado' }, 404);
+
+    // A-11: `business_id` ya se traía en el SELECT de arriba pero NUNCA se
+    // comparaba, así que cualquier rol operativo podía cambiar el estado de un
+    // pedido de otro negocio conociendo su UUID — marcarlo entregado, o
+    // cancelarlo. El campo estaba; faltaba la línea que lo usa.
+    if (currentOrder.business_id !== profile?.businessId) {
+      return c.json({ error: 'No tienes permiso' }, 403);
+    }
 
     const normalizedStatus = ORDER_STATUS_MAP[status] || 'pending';
     const { data: updated } = await supabaseAdmin
@@ -1810,7 +2056,7 @@ app.put("/make-server-6d979413/orders/:id/area-status", async (c) => {
     const orderId = c.req.param('id');
     const profile = await getProfile(userId!);
 
-    if (!['production', 'dispatch', 'admin'].includes(profile?.role || '')) {
+    if (!tienePermiso(profile, 'pedidos.cambiar_estado_area')) {
       return c.json({ error: 'No autorizado' }, 403);
     }
 
@@ -1824,6 +2070,12 @@ app.put("/make-server-6d979413/orders/:id/area-status", async (c) => {
       .maybeSingle();
 
     if (!currentOrder) return c.json({ error: 'Pedido no encontrado' }, 404);
+
+    // A-11: misma omisión que en PUT /orders/:id/status — se cargaba el pedido
+    // por id y se escribía sin comprobar que fuera del negocio del usuario.
+    if (currentOrder.business_id !== profile?.businessId) {
+      return c.json({ error: 'No tienes permiso' }, 403);
+    }
 
     // Update items in this area
     const normalAreaStatus = ['in_progress', 'completed', 'pending'].includes(status) ? status : 'pending';
@@ -1879,13 +2131,12 @@ app.put("/make-server-6d979413/orders/:id/area-status", async (c) => {
 });
 
 app.delete("/make-server-6d979413/orders/:id", async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
 
   try {
     const orderId = c.req.param('id');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const { data: order } = await supabaseAdmin
       .from('orders')
@@ -1894,7 +2145,23 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
       .maybeSingle();
 
     if (!order) return c.json({ error: 'Pedido no encontrado' }, 404);
-    if (order.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    // A-10: antes solo se validaba el negocio, sin rol ni dueño. Un local podía
+    // borrar el pedido de otro local — y borrar un pedido restituye stock y
+    // escribe devoluciones en el kardex, así que el efecto iba más allá del
+    // pedido.
+    //
+    // No se exige el permiso a secas porque borrar el pedido PROPIO es un uso
+    // legítimo y existente: OrderDetail.tsx muestra el botón a todos los roles.
+    // La regla queda "tu rol te autoriza, o es tuyo".
+    const no = rechazo(c, autorizarPropioOConPermiso({
+      perfil: profile,
+      permiso: 'pedidos.editar',
+      usuarioId: userId,
+      recursoUsuarioId: order.user_id,
+      recursoBusinessId: order.business_id,
+    }));
+    if (no) return no;
 
     // Restore stock for each item
     for (const item of (order.order_items || [])) {
@@ -1998,8 +2265,36 @@ app.post('/make-server-6d979413/notifications', async (c) => {
       return c.json({ error: 'Missing required fields: title, message, type' }, 400);
     }
 
-    const targetId = targetUserId || authUserId;
     const notifType = VALID_NOTIFICATION_TYPES.has(type) ? type : 'info';
+
+    // A-05: `targetUserId` se usaba sin validar. Cualquier usuario autenticado
+    // podía escribir una notificación con título y texto arbitrarios en la
+    // bandeja de cualquier persona de cualquier negocio — phishing dentro de la
+    // propia app, en una superficie que además dispara aviso sonoro.
+    //
+    // Notificarse a uno mismo sigue libre (es lo que hace la app para los avisos
+    // locales). Notificar a otro exige el permiso Y que el destinatario sea del
+    // mismo negocio.
+    let targetId = authUserId!;
+    if (targetUserId && targetUserId !== authUserId) {
+      const no = rechazo(c, autorizar({
+        perfil: profile,
+        permiso: 'notificaciones.enviar_a_otros',
+      }));
+      if (no) return no;
+
+      const { data: destinatario } = await supabaseAdmin
+        .from('profiles')
+        .select('id, business_id')
+        .eq('id', targetUserId)
+        .maybeSingle();
+
+      if (!destinatario || destinatario.business_id !== profile?.businessId) {
+        return c.json({ error: 'El destinatario no pertenece a tu negocio' }, 403);
+      }
+
+      targetId = targetUserId;
+    }
 
     const { data: notification, error: insertErr } = await supabaseAdmin
       .from('notifications')
@@ -2190,7 +2485,7 @@ app.post('/make-server-6d979413/categories', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'categorias.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
     if (!profile.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const { name, description, color, parentId } = await c.req.json();
@@ -2232,7 +2527,7 @@ app.put('/make-server-6d979413/categories/:id', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'categorias.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const categoryId = c.req.param('id');
     const { data: existing } = await supabaseAdmin
@@ -2294,7 +2589,7 @@ app.delete('/make-server-6d979413/categories/:id', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'categorias.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const categoryId = c.req.param('id');
     const { data: category } = await supabaseAdmin
@@ -2370,7 +2665,7 @@ app.post('/make-server-6d979413/production-areas', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'areas.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
     if (!profile.businessId) return c.json({ error: 'User has no associated business' }, 400);
 
     const { name, description, color, icon } = await c.req.json();
@@ -2414,7 +2709,7 @@ app.put('/make-server-6d979413/production-areas/:id', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'areas.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const areaId = c.req.param('id');
     const { data: existing } = await supabaseAdmin
@@ -2467,7 +2762,7 @@ app.delete('/make-server-6d979413/production-areas/:id', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'areas.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const areaId = c.req.param('id');
     const { data: area } = await supabaseAdmin
@@ -2871,7 +3166,7 @@ app.get('/make-server-6d979413/attendance/all-records', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (!['admin', 'production'].includes(profile?.role || '')) {
+    if (!tienePermiso(profile, 'asistencia.ver_de_otros')) {
       return c.json({ error: 'Unauthorized: Admin or production access required' }, 403);
     }
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
@@ -2898,7 +3193,7 @@ app.get('/make-server-6d979413/attendance/records/:date', async (c) => {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
-    const isAdmin = ['admin', 'production'].includes(profile.role);
+    const isAdmin = tienePermiso(profile, 'asistencia.ver_de_otros');
 
     let query = supabaseAdmin
       .from('attendance_records')
@@ -2926,7 +3221,7 @@ app.put('/make-server-6d979413/attendance/records/:recordId', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'asistencia.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const recordId = c.req.param('recordId');
     const { data: record } = await supabaseAdmin
@@ -2966,7 +3261,7 @@ app.delete('/make-server-6d979413/attendance/records/:recordId', async (c) => {
 
   try {
     const profile = await getProfile(userId!);
-    if (profile?.role !== 'admin') return c.json({ error: 'Unauthorized: Admin access required' }, 403);
+    if (!tienePermiso(profile, 'asistencia.gestionar')) return c.json({ error: 'Unauthorized: Admin access required' }, 403);
 
     const recordId = c.req.param('recordId');
     const { data: record } = await supabaseAdmin
@@ -3031,7 +3326,7 @@ app.post('/make-server-6d979413/production-orders', async (c) => {
   try {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'User or business not found' }, 404);
-    if (!['production', 'admin'].includes(profile.role)) {
+    if (!tienePermiso(profile, 'produccion.ordenes')) {
       return c.json({ error: 'Unauthorized: Production or Admin role required' }, 403);
     }
 
@@ -3110,7 +3405,7 @@ app.patch('/make-server-6d979413/production-orders/:orderId/status', async (c) =
   try {
     const profile = await getProfile(userId!);
     if (!profile) return c.json({ error: 'User not found' }, 404);
-    if (!['production', 'admin'].includes(profile.role)) {
+    if (!tienePermiso(profile, 'produccion.ordenes')) {
       return c.json({ error: 'Unauthorized: Production or Admin role required' }, 403);
     }
 
@@ -3311,7 +3606,7 @@ app.delete('/make-server-6d979413/production-orders/:orderId', async (c) => {
   try {
     const profile = await getProfile(userId!);
     if (!profile) return c.json({ error: 'User not found' }, 404);
-    if (!['production', 'admin'].includes(profile.role)) {
+    if (!tienePermiso(profile, 'produccion.ordenes')) {
       return c.json({ error: 'Unauthorized: Production or Admin role required' }, 403);
     }
 
@@ -3626,14 +3921,21 @@ app.put('/make-server-6d979413/nutrition/ingredients/:id', async (c) => {
 // Todo lo que hace falta para calcular la etiqueta de un producto, en una llamada.
 // El motor de cálculo vive en el frontend (src/utils/nutricion) y es puro; este
 // endpoint solo junta los datos.
+// El aislamiento por negocio acá ya estaba bien. Lo que faltaba era el rol: el
+// dataset incluye `lineas`, que es la receta con el nombre y la cantidad de cada
+// materia prima — la misma información que A-03 protege en
+// GET /products/:id/ingredients. Dejarla abierta acá habría hecho que arreglar
+// una ruta no sirviera de nada, porque la otra devolvía lo mismo.
+//
+// No rompe nada: el único consumidor es ProductIngredientConfig, que se abre
+// desde Gestión de Productos (admin/production).
 app.get('/make-server-6d979413/nutrition/products/:id/dataset', async (c) => {
-  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
-  if (error) return c.json({ error }, 401);
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
+  const { profile } = s;
 
   try {
     const productId = c.req.param('id');
-    const profile = await getProfile(userId!);
-    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
 
     const { data: producto } = await supabaseAdmin
       .from('products')
@@ -3642,7 +3944,13 @@ app.get('/make-server-6d979413/nutrition/products/:id/dataset', async (c) => {
       .maybeSingle();
 
     if (!producto) return c.json({ error: 'Producto no encontrado' }, 404);
-    if (producto.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
+
+    const no = rechazo(c, autorizar({
+      perfil: profile,
+      permiso: 'recetas.leer',
+      recursoBusinessId: producto.business_id,
+    }));
+    if (no) return no;
 
     // La receta con la unidad de cada materia prima. `quantity` viene expresado en
     // esa unidad, no en gramos: convertirlo es trabajo del motor.
@@ -3793,7 +4101,7 @@ app.put('/make-server-6d979413/nutrition/label-settings', async (c) => {
     const profile = await getProfile(userId!);
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
     // Los datos del elaborador y el logo son configuración del negocio: solo admin.
-    if (profile.role !== 'admin') {
+    if (!tienePermiso(profile, 'etiquetas.configurar')) {
       return c.json({ error: 'Solo un administrador puede cambiar la configuracion de etiquetas' }, 403);
     }
 

@@ -335,8 +335,12 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       }
 
       const token = session.access_token;
+      // B-02: acá se logueaban la longitud del token y sus primeros 30
+      // caracteres. No incluía la firma, así que el token no era reutilizable a
+      // partir del log, pero exponía el encabezado y el inicio del payload en
+      // la consola y en cualquier recolector de logs. No hay motivo para
+      // imprimir parte de un token.
       console.log('✓ Using fresh access token from Supabase session');
-      console.log('🔑 Token length:', token.length, 'First 30 chars:', token.substring(0, 30));
 
       // Load ingredients
       console.log('📦 Loading ingredients...');

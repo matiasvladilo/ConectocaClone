@@ -30,22 +30,21 @@
             "@radix-ui/react-toggle": "^1.1.2",
             "@radix-ui/react-toggle-group": "^1.1.2",
             "@radix-ui/react-tooltip": "^1.1.8",
-            "@supabase/supabase-js": "*",
-            "@vitejs/plugin-react": "*",
+            "@supabase/supabase-js": "^2.98.0",
+            "@vitejs/plugin-react": "^5.1.4",
             "@zxing/browser": "^0.2.1",
             "@zxing/library": "^0.23.0",
             "class-variance-authority": "^0.7.1",
-            "clsx": "*",
+            "clsx": "^2.1.1",
             "cmdk": "^1.1.1",
             "date-fns": "^3.6.0",
             "embla-carousel-react": "^8.6.0",
-            "hono": "*",
+            "hono": "^4.12.5",
             "input-otp": "^1.4.2",
             "jspdf": "^4.2.1",
             "lucide-react": "^0.487.0",
-            "motion": "*",
+            "motion": "^12.35.1",
             "next-themes": "^0.4.6",
-            "path": "*",
             "qrcode": "^1.5.4",
             "react": "^18.3.1",
             "react-day-picker": "^8.10.1",
@@ -55,10 +54,9 @@
             "react-resizable-panels": "^2.1.7",
             "recharts": "^2.15.2",
             "sonner": "^2.0.3",
-            "tailwind-merge": "*",
+            "tailwind-merge": "^3.5.0",
             "vaul": "^1.1.2",
-            "vite": "*",
-            "xlsx": "^0.18.5"
+            "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
       },
       "devDependencies": {
             "@types/node": "^20.10.0",
@@ -67,11 +65,11 @@
             "@types/react-dom": "^19.2.3",
             "@vitejs/plugin-react-swc": "^3.10.2",
             "typescript": "^5.9.3",
-            "vite": "6.3.5"
+            "vite": "^6.4.5"
       },
       "scripts": {
             "dev": "vite",
             "build": "npm exec vite -- build",
-            "test": "node --test src/utils/*.test.ts src/utils/nutricion/*.test.ts src/features/complaints/*.test.ts supabase/functions/complaints/*.test.ts"
+            "test": "node --test src/utils/*.test.ts src/utils/nutricion/*.test.ts src/features/complaints/*.test.ts supabase/functions/complaints/*.test.ts supabase/functions/make-server-6d979413/*.test.ts"
       }
 }

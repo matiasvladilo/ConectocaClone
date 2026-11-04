@@ -6,6 +6,33 @@
   command = "npm run dev"
   targetPort = 3000
 
+# M-02: antes no había ninguna cabecera de seguridad. Son la defensa en
+# profundidad que contiene un XSS si llega a entrar uno, y lo que evita que el
+# sitio sea embebible en un iframe ajeno.
+#
+# La CSP permite `self` más el host de Supabase. Los dos `unsafe-*` de
+# `style-src` no son un descuido ni se pueden quitar hoy: Tailwind y los
+# componentes de Radix inyectan estilos en línea (posicionamiento de popovers,
+# animaciones), y `motion/react` también. Sacarlos rompe la interfaz. `script-src`
+# en cambio queda sin `unsafe-inline` ni `unsafe-eval`, que es donde la CSP de
+# verdad aporta.
+#
+# `connect-src` usa el comodín de subdominio de supabase.co porque el proyecto se
+# resuelve en tiempo de build desde VITE_SUPABASE_URL: fijar el host exacto acá
+# obligaría a generar el toml, y dejaría de servir al cambiar de proyecto (que es
+# justo lo que pasó entre conectoca y conectocadev).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # La app no usa ninguna de estas tres: negarlas evita que un script inyectado
+    # las pida. La cámara NO se niega: la usa el escáner de códigos de barras.
+    Permissions-Policy = "geolocation=(), microphone=(), payment=(), camera=(self)"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

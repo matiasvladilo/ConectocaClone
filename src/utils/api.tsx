@@ -222,7 +222,10 @@ export const authAPI = {
     email: string,
     password: string,
     name: string,
-    role: 'local' | 'admin' | 'production' | 'dispatch' | 'worker' | 'user',
+    // A-02: solo roles de autoservicio. El servidor ignora cualquier otro valor
+    // (ROLES_AUTOSERVICIO en el Edge Function) y cae a 'user'; el tipo acotado
+    // está para que un llamador nuevo no vuelva a intentarlo sin darse cuenta.
+    role: 'local' | 'worker' | 'user',
     businessAction: 'create' | 'join',
     businessName?: string,
     businessCode?: string
@@ -1094,6 +1097,22 @@ export const businessAPI = {
 
   getMembers: async (token: string): Promise<{ business: { id: string; name: string }; members: BusinessMember[]; totalMembers: number }> => {
     const response = await fetchAPI('/business/members', {}, token);
+    return response?.data || response;
+  },
+
+  // Contraparte de A-02: al dejar de aceptar roles elevados en el registro,
+  // esta es la vía legítima para otorgarlos. Solo admin del mismo negocio; el
+  // servidor además impide cambiarse el rol a uno mismo y quitarle admin al
+  // propietario del negocio.
+  setMemberRole: async (
+    token: string,
+    memberId: string,
+    role: UserProfile['role'],
+  ): Promise<UserProfile> => {
+    const response = await fetchAPI(`/business/members/${memberId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }, token);
     return response?.data || response;
   },
 };

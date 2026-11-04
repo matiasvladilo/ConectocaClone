@@ -53,7 +53,9 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<'local' | 'admin' | 'production' | 'dispatch' | 'worker' | 'pastry' | 'user'>('user');
+  // A-02: el tipo se acota a los roles de autoservicio. Los elevados los
+  // otorga un admin después del alta, no el propio usuario al registrarse.
+  const [role, setRole] = useState<'local' | 'worker' | 'user'>('user');
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPasswordRecovery, setShowPasswordRecovery] = useState(false);
@@ -82,6 +84,14 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
     if (isCreatingAccount && !name) {
       toast.error('Por favor ingresa tu nombre');
+      return;
+    }
+
+    // M-06: el servidor ahora exige 8 caracteres. Validarlo también acá es para
+    // que el aviso llegue antes de la ida y vuelta, no en lugar del chequeo del
+    // servidor: el minLength del input se saltea mandando el request a mano.
+    if (isCreatingAccount && password.length < 8) {
+      toast.error('La contraseña debe tener al menos 8 caracteres');
       return;
     }
 
@@ -130,7 +140,9 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       if (error.message?.includes('Invalid login credentials')) {
         errorMessage = isCreatingAccount
           ? 'Error al crear la cuenta. Por favor intenta de nuevo.'
-          : 'Credenciales incorrectas. Verifica tu email y contraseña o usa las credenciales de demo.';
+          // Ya no hay "credenciales de demo" que sugerir: las cuentas demo se
+          // retiraron junto con sus contraseñas en claro (A-01).
+          : 'Credenciales incorrectas. Verificá tu email y contraseña.';
       } else if (error.message?.includes('already registered') || error.message?.includes('ya está registrado')) {
         errorMessage = 'Este email ya está registrado. Por favor inicia sesión.';
         setIsCreatingAccount(false);
@@ -466,7 +478,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                         <Shield className="w-4 h-4" />
                         Rol
                       </Label>
-                      <Select value={role} onValueChange={(value: 'local' | 'admin' | 'production' | 'dispatch' | 'worker' | 'pastry' | 'user') => setRole(value)}>
+                      <Select value={role} onValueChange={(value: 'local' | 'worker' | 'user') => setRole(value)}>
                         <SelectTrigger
                           className="h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20"
                           style={{ borderRadius: '10px' }}
@@ -492,40 +504,32 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                               <span>Trabajador</span>
                             </div>
                           </SelectItem>
-                          <SelectItem value="admin">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                              <span>Administrador</span>
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="production">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-                              <span>Producción</span>
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="dispatch">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                              <span>Despacho</span>
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="pastry">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-pink-500"></div>
-                              <span>Pastelería</span>
-                            </div>
-                          </SelectItem>
+                          {/*
+                            A-02: acá había además Administrador, Producción,
+                            Despacho y Pastelería. El servidor tomaba el rol tal
+                            cual venía, así que cualquiera que recibiera el
+                            código de invitación para entrar como local podía
+                            elegir "Administrador — Acceso completo al sistema"
+                            y quedar con acceso total al negocio.
+
+                            Los cuatro roles elevados ahora los otorga un admin
+                            desde el panel de miembros. El servidor ignora
+                            cualquier otro valor que llegue acá (ver
+                            ROLES_AUTOSERVICIO en el Edge Function), así que
+                            quitarlos de la lista no es la defensa: es que la
+                            pantalla diga la verdad sobre lo que va a pasar.
+                          */}
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-gray-500 mt-1.5">
                         {role === 'user' && '👤 Acceso básico a pedidos y perfil'}
                         {role === 'local' && '🏪 Acceso a realizar y ver pedidos'}
                         {role === 'worker' && '👷 Acceso al módulo de asistencia de personal'}
-                        {role === 'admin' && '👑 Acceso completo al sistema'}
-                        {role === 'production' && '🏭 Acceso al área de producción y gestión de pedidos'}
-                        {role === 'dispatch' && '🚚 Acceso al módulo de despacho'}
-                        {role === 'pastry' && '🍰 Acceso al KDS de pastelería'}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Los roles de administración (Producción, Despacho, Pastelería,
+                        Administrador) los asigna un administrador del negocio una vez
+                        que ingresás.
                       </p>
                     </motion.div>
                   )}
@@ -662,7 +666,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     className="pl-11 pr-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
                     style={{ borderRadius: '10px' }}
                   />
@@ -677,7 +681,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   </button>
                 </div>
                 {isCreatingAccount && (
-                  <p className="text-xs text-gray-500 mt-1.5">Mínimo 6 caracteres</p>
+                  <p className="text-xs text-gray-500 mt-1.5">Mínimo 8 caracteres</p>
                 )}
                 {!isCreatingAccount && (
                   <div className="flex justify-end pt-1">
