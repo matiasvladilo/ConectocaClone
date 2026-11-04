@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">La Oca</string>
+    <string name="title_activity_main">La Oca</string>
+    <string name="package_name">cl.conectoca.app</string>
+    <string name="custom_url_scheme">cl.conectoca.app</string>
+</resources>

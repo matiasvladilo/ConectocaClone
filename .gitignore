@@ -132,3 +132,37 @@ supabase/.temp/
 # Worktrees aislados de Claude Code y scratch de subagent-driven-development
 .claude/worktrees/
 .superpowers/
+
+# Local Netlify folder
+.netlify
+
+# ── Capacitor / plataformas nativas ───────────────────────────────────────────
+# Las carpetas ios/ y android/ SÍ se versionan (son parte del proyecto nativo),
+# pero sus artefactos de build y dependencias resueltas no.
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+android/.idea/
+android/local.properties
+android/app/release/
+*.keystore
+!android/app/debug.keystore
+
+# iOS
+ios/App/build/
+ios/App/Pods/
+ios/App/App/public/
+ios/App/DerivedData/
+ios/.sourcemaps/
+# SPM: dependencias resueltas y caché de paquetes
+ios/App/App/CapApp-SPM/.build/
+ios/App/.swiftpm/
+
+# Web assets copiados por `cap sync` (se regeneran desde build/)
+android/app/src/main/assets/public/
+
+# Material de trabajo local (PDFs de referencia, previews)
+tmp/

@@ -3,6 +3,18 @@
       "version": "0.1.0",
       "private": true,
       "dependencies": {
+            "@capacitor/android": "7.6.10",
+            "@capacitor/app": "7.1.2",
+            "@capacitor/cli": "7.6.10",
+            "@capacitor/core": "7.6.10",
+            "@capacitor/filesystem": "7.1.9",
+            "@capacitor/ios": "7.6.10",
+            "@capacitor/keyboard": "7.0.6",
+            "@capacitor/network": "7.0.4",
+            "@capacitor/preferences": "7.0.4",
+            "@capacitor/share": "7.0.4",
+            "@capacitor/splash-screen": "7.0.5",
+            "@capacitor/status-bar": "7.0.6",
             "@jsr/supabase__supabase-js": "^2.49.8",
             "@radix-ui/react-accordion": "^1.2.3",
             "@radix-ui/react-alert-dialog": "^1.1.6",
@@ -70,6 +82,12 @@
       "scripts": {
             "dev": "vite",
             "build": "npm exec vite -- build",
-            "test": "node --test src/utils/*.test.ts src/utils/nutricion/*.test.ts src/features/complaints/*.test.ts supabase/functions/complaints/*.test.ts supabase/functions/make-server-6d979413/*.test.ts"
+            "test": "node --test src/utils/*.test.ts src/utils/nutricion/*.test.ts src/features/complaints/*.test.ts supabase/functions/complaints/*.test.ts supabase/functions/make-server-6d979413/*.test.ts",
+            "cap:sync": "npm run build && npx cap sync",
+            "cap:copy": "npm run build && npx cap copy",
+            "cap:ios": "npm run cap:sync && npx cap open ios",
+            "cap:android": "npm run cap:sync && npx cap open android",
+            "cap:update": "npx cap update",
+            "cap:doctor": "npx cap doctor"
       }
 }

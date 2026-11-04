@@ -5,8 +5,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { construirEtiquetaFrontal, construirEtiquetaPosterior } from "../utils/nutricion/etiquetas";
 import type { DatosElaborador } from "../utils/nutricion/etiquetas";
 import type { Lienzo } from "../utils/nutricion/etiquetaLayout";
-import { canvasAPng, precargarImagenes, renderizarCanvas } from "../utils/nutricion/render/renderCanvas";
+import { precargarImagenes, renderizarCanvas } from "../utils/nutricion/render/renderCanvas";
 import { descargarPdf, nombreArchivo, renderizarPdf } from "../utils/nutricion/render/renderPdf";
+import { entregarArchivo } from "../utils/descargarArchivo";
 import type { ResultadoEtiqueta } from "../utils/nutricion/armado";
 import { toast } from "sonner";
 
@@ -146,7 +147,7 @@ export function LabelGenerator({
       if (!(await registrar())) return;
       await precargarImagenes(lienzo);
       const doc = renderizarPdf(lienzo);
-      descargarPdf(doc, nombreArchivo(resultado.denominacion, sufijo, "pdf"));
+      await descargarPdf(doc, nombreArchivo(resultado.denominacion, sufijo, "pdf"));
     } catch (e: any) {
       console.error("Error generando PDF:", e);
       toast.error(e.message || "Error al generar el PDF");
@@ -164,10 +165,15 @@ export function LabelGenerator({
       // 600 dpi: es un raster que puede terminar en una imprenta, y a 300 el
       // texto chico de los sellos se empasta.
       const canvas = renderizarCanvas(lienzo, 600);
-      const a = document.createElement("a");
-      a.href = canvasAPng(canvas);
-      a.download = nombreArchivo(resultado.denominacion, sufijo, "png");
-      a.click();
+      // canvas → Blob → helper unificado: el <a download> no funciona en el
+      // WebView de Capacitor (ver src/utils/descargarArchivo.ts).
+      const blob: Blob = await new Promise((resolve, reject) =>
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('No se pudo generar el PNG'))),
+          'image/png',
+        ),
+      );
+      await entregarArchivo(blob, nombreArchivo(resultado.denominacion, sufijo, "png"), 'image/png');
     } catch (e: any) {
       console.error("Error generando PNG:", e);
       toast.error(e.message || "Error al generar el PNG");

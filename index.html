@@ -3,7 +3,11 @@
 <html lang="es-CL">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: la app usa toda la pantalla, incluido el área del
+         notch; las safe areas se respetan con env(safe-area-inset-*) en el CSS
+         (src/index.css). maximum-scale evita el zoom involuntario al enfocar un
+         input en iOS. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>La Oca</title>
 
     <!-- PWA -->

@@ -6,6 +6,7 @@
 
 import { jsPDF } from 'jspdf';
 import type { Lienzo, Primitiva } from '../etiquetaLayout.ts';
+import { entregarArchivo } from '../../descargarArchivo.ts';
 
 // jsPDF mide las fuentes en puntos; el layout está en milímetros.
 const MM_A_PT = 72 / 25.4;
@@ -79,8 +80,12 @@ function dibujar(doc: jsPDF, p: Primitiva) {
   }
 }
 
-export function descargarPdf(doc: jsPDF, nombreArchivo: string) {
-  doc.save(nombreArchivo);
+export async function descargarPdf(doc: jsPDF, nombreArchivo: string) {
+  // `doc.output('blob')` en vez de `doc.save()`: así el mismo PDF sirve para el
+  // camino web y el nativo. doc.save() hace internamente el truco del
+  // <a download>, que no funciona dentro del WebView de Capacitor.
+  const blob = doc.output('blob');
+  await entregarArchivo(blob, nombreArchivo, 'application/pdf');
 }
 
 /** "Bizcocho Marmolado" → "bizcocho-marmolado-etiqueta.pdf" */

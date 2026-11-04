@@ -13,6 +13,7 @@ import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { etiquetaMovimiento, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
+import { exportarLibroExcel } from '../utils/descargarArchivo';
 
 interface DistributionPanelProps {
   onBack: () => void;
@@ -234,7 +235,9 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, hoja, 'Distribuidora');
       const fecha = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(libro, `Distribuidora_${fecha}.xlsx`);
+      // XLSX.write(...,{type:'array'}) + helper en vez de XLSX.writeFile: este
+      // último hace el <a download> que no funciona en el WebView de Capacitor.
+      await exportarLibroExcel(libro, `Distribuidora_${fecha}.xlsx`);
     } catch (error) {
       console.error('Error exportando a Excel:', error);
       toast.error('No se pudo generar el Excel');

@@ -56,7 +56,12 @@ const APP_PUBLIC_URL = Deno.env.get('APP_PUBLIC_URL')?.trim().replace(/\/+$/, ''
 const ORIGENES_PERMITIDOS = new Set(
   [
     APP_PUBLIC_URL,
+    // Contenedor nativo (Capacitor). iOS sirve el bundle desde
+    // `capacitor://localhost`; Android, con androidScheme:'https'
+    // (capacitor.config.ts), desde `https://localhost`. Son constantes del
+    // contenedor, no valores de entorno.
     'capacitor://localhost',
+    'https://localhost',
     'http://localhost',
     // Desarrollo local con `npm run dev` (vite.config.ts: puerto 3000 por defecto).
     'http://localhost:3000',

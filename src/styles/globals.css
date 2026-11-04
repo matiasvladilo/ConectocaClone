@@ -807,3 +807,28 @@ body {
     display: none;
   }
 }
+/* ── Capacitor: áreas seguras (notch, barra de estado, home indicator) ─────────
+   CSS plano, sin clases de Tailwind, para no depender del pipeline. Las reglas
+   solo aplican dentro del contenedor nativo (clase .cap-native puesta por
+   src/utils/initNative.ts). env(safe-area-inset-*) vale 0 en el navegador, así
+   que aunque se filtrara no afectaría a la PWA. */
+.cap-native body {
+  /* El inset superior (barra de estado / notch) y el inferior (home indicator)
+     se respetan a nivel body. El fondo del body usa el color del theme para que
+     la franja del inset no se vea blanca sobre pantallas de fondo oscuro. */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  box-sizing: border-box;
+  background-color: #0c3c84;
+}
+
+/* Variables disponibles para los componentes que necesiten el inset puntual
+   (p. ej. una barra fija que deba quedar por encima del home indicator). */
+.cap-native {
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
+}

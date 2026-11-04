@@ -25,6 +25,8 @@ import { AudioInitializer } from "./components/AudioInitializer";
 import { Toaster } from "./components/ui/sonner";
 import { createClient, setRememberSession } from "./utils/supabase/client";
 import { registerServiceWorker } from "./utils/registerServiceWorker";
+import { isNativePlatform } from "./utils/platform";
+import { useAndroidBackButton } from "./utils/useAndroidBackButton";
 import {
   ordersAPI,
   profileAPI,
@@ -182,6 +184,16 @@ export default function App() {
     setCurrentScreen(destino);
   };
 
+  // Botón atrás de Android. "home" y "login" son raíz: desde ahí el back
+  // minimiza la app. Desde cualquier otra pantalla, vuelve a "home" (el mismo
+  // destino al que lleva el botón "volver" de casi todas las pantallas). Es un
+  // retroceso de un nivel, suficiente para una navegación plana por estado.
+  const esPantallaRaiz = currentScreen === "home" || currentScreen === "login";
+  useAndroidBackButton({
+    canExit: esPantallaRaiz,
+    onBack: esPantallaRaiz ? null : () => setCurrentScreen("home"),
+  });
+
   // Debug: Log screen changes
   useEffect(() => {
     console.log("Current Screen changed to:", currentScreen);
@@ -247,21 +259,30 @@ export default function App() {
       (document.body.style as any).textSizeAdjust = "100%";
     }
 
-    // Register Service Worker for PWA
-    registerServiceWorker({
-      onSuccess: () => {
-        console.log('[PWA] Content cached for offline use');
-      },
-      onUpdate: () => {
-        console.log('[PWA] New version available');
-        toast.info('Nueva versión disponible. Recarga la página para actualizar.', {
-          duration: 10000,
-        });
-      },
-      onError: (error) => {
-        console.error('[PWA] Service worker registration failed:', error);
-      },
-    });
+    // Register Service Worker for PWA.
+    //
+    // Solo en el navegador. Dentro del contenedor nativo (Capacitor) el bundle
+    // ya viaja empaquetado y se renueva con cada `cap sync`; un service worker
+    // con caché cache-first serviría el bundle anterior y mostraría una versión
+    // vieja de la app tras actualizar. Además la rama de caché de respuestas de
+    // API del SW (B-01 de la auditoría) no aporta nada acá y es mejor no tenerla
+    // activa sobre datos autenticados.
+    if (!isNativePlatform()) {
+      registerServiceWorker({
+        onSuccess: () => {
+          console.log('[PWA] Content cached for offline use');
+        },
+        onUpdate: () => {
+          console.log('[PWA] New version available');
+          toast.info('Nueva versión disponible. Recarga la página para actualizar.', {
+            duration: 10000,
+          });
+        },
+        onError: (error) => {
+          console.error('[PWA] Service worker registration failed:', error);
+        },
+      });
+    }
 
     checkSession();
 

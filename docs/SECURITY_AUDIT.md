@@ -31,6 +31,27 @@ Con un token de un usuario admin real, en caja negra contra producción:
 
 Estas cuatro siguen reproducibles **porque las migraciones están sin aplicar**. Es el estado esperado hasta que se autorice su aplicación.
 
+### Migraciones aplicadas a producción (2026-11-03, con autorización del usuario)
+
+Se aplicaron **`_c` y `_d`** a `conectocadev`. Verificado tras aplicarlas, con la misma sesión real:
+
+| Hallazgo | Antes | Después |
+|---|---|---|
+| C-03 — `GET backup_*` con anon key | HTTP 200 + datos | **HTTP 404** (tablas movidas al esquema `backups`) |
+| C-02 — `PATCH profiles` role (id inexistente) | HTTP 200 | **HTTP 403** (grant de columna revocado) |
+| C-02 — `PATCH profiles` role (id propio) | — | **HTTP 403** (segunda capa `WITH CHECK`) |
+| A-08 — `GET businesses?select=invite_code` | devolvía el código | **HTTP 403** `permission denied` |
+
+Sin regresión: `businesses?select=id,name` → 200; `/profile`, `/products` (468), `/orders` (6003) por el Edge Function → OK; las RPC de preview siguen invocables. El advisor **crítico `rls_disabled` (ERROR) desapareció**: ya no hay tablas en `public` sin RLS.
+
+**Pendiente de aplicar — `_a` y `_b` (C-01)**, a propósito: el `REVOKE` de `create_order_with_stock` debe ir en el mismo movimiento que el `supabase functions deploy` del Edge Function, porque la autorización nueva vive dentro de la función (`_b`) y desplegar el código sin la migración, o al revés, deja una ventana inconsistente en la creación de pedidos. Secuencia recomendada, en un solo bloque de mantenimiento:
+
+1. `supabase functions deploy make-server-6d979413`
+2. aplicar `20261103_a_*.sql` y `20261103_b_*.sql`
+3. crear un pedido de prueba y confirmar que descuenta stock
+
+También pendientes, porque no son SQL: **rotar/eliminar las cuentas `@demo.com`** en Supabase Auth (A-01) y **activar la protección de contraseñas filtradas** en Authentication → Policies (M-06).
+
 ## Resumen
 
 | Severidad | Cantidad |

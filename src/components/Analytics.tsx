@@ -47,6 +47,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { exportarLibroExcel } from "../utils/descargarArchivo";
 
 interface AnalyticsProps {
   user: User;
@@ -785,7 +786,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         : `ultimos_${dateRangeInDays}_dias`;
 
       const fileName = `Reporte_ConectOca_${rangeStr}.xlsx`;
-      XLSX.writeFile(workbook, fileName);
+      await exportarLibroExcel(workbook, fileName);
 
       toast.success('Reporte Excel generado exitosamente');
     } catch (error) {
@@ -949,7 +950,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
       const fileName = `GoogleDrive_ConectOca_${rangeStr}.xlsx`;
 
-      XLSX.writeFile(workbook, fileName);
+      await exportarLibroExcel(workbook, fileName);
 
       toast.success('Reporte compatible con Google Drive generado');
     } catch (error) {
