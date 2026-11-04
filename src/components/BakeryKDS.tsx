@@ -629,8 +629,8 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-900 shadow-2xl">
+      {/* Header. Inset del notch en el header de color (env()=0 en web). */}
+      <div className="bg-gradient-to-r from-blue-700 to-blue-900 shadow-2xl" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-3">
           {/* Top row with logo and controls */}
           <div className="flex items-center justify-between mb-3 gap-2">

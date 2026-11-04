@@ -169,7 +169,7 @@ export function DispatchOrders({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-yellow-50 p-4 md:p-6 lg:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-yellow-50 p-4 md:p-6 lg:p-8" style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}>
       {/* Hidden print component */}
       {selectedOrderForPrint && (
         <div className="hidden print:block">

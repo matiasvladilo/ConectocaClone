@@ -150,10 +150,14 @@ export function NotificationsPanel({
           >
             {/* Header */}
             <div
-              className="p-6"
+              className="px-6 pb-6"
               style={{
                 background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-                borderBottom: '3px solid #FFD43B'
+                borderBottom: '3px solid #FFD43B',
+                // Este panel es `fixed top-0`, así que arranca pegado a la barra
+                // de estado / notch: sin este inset el título quedaba tapado en
+                // el contenedor nativo. En web el env() vale 0 y queda el 24px.
+                paddingTop: 'max(env(safe-area-inset-top), 24px)'
               }}
             >
               <div className="flex items-center justify-between mb-4">

@@ -3,7 +3,7 @@ import { User, Order } from '../App';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Package, Plus, User as UserIcon, Clock, CheckCircle2, Truck, Sparkles, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
+import { Package, Plus, User as UserIcon, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
@@ -69,7 +69,10 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 const SCROLL_KEY = 'ordersScrollPosition';
 
 export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
-  const [showFutureOrders, setShowFutureOrders] = React.useState(true);
+  // Control segmentado de la lista de pedidos (estilo iOS). Reemplaza al
+  // botón "Mostrar/Ocultar Futuros", que mezclaba los pedidos de días
+  // siguientes arriba de los de hoy.
+  const [segmento, setSegmento] = React.useState<'hoy' | 'proximos' | 'anteriores'>('hoy');
 
   // Catálogo para poder mostrar la categoría de cada pedido en su tarjeta
   // (pedido de un trabajador: cuesta encontrar el pedido correcto a simple
@@ -77,6 +80,21 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   // de sus productos, así que hay que cruzar por productId contra el catálogo.
   const [catalogProducts, setCatalogProducts] = React.useState<Product[] | null>(null);
   const [catalogCategories, setCatalogCategories] = React.useState<Category[] | null>(null);
+
+  // Resumen de pedidos: colapsado por defecto para que "Realizar nuevo pedido" y
+  // la lista de pedidos sean lo primero que se ve. Se recuerda la preferencia:
+  // si el usuario lo expande, queda expandido la próxima vez.
+  const [statsExpanded, setStatsExpanded] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('conectoca_home_stats_expanded') === 'true'; }
+    catch { return false; }
+  });
+  const toggleStats = () => {
+    setStatsExpanded(prev => {
+      const next = !prev;
+      try { localStorage.setItem('conectoca_home_stats_expanded', String(next)); } catch { /* storage no disponible */ }
+      return next;
+    });
+  };
 
   React.useEffect(() => {
     (async () => {
@@ -134,6 +152,36 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   // If pagination is enabled, use all orders (already paginated from backend)
   // Otherwise, show only first 5 orders (legacy behavior)
   const displayOrders = pagination ? orders : orders.slice(0, 5);
+
+  // Cada pedido cae en un segmento según su día de entrega (o el de creación
+  // si no tiene fecha de entrega), comparando fechas LOCALES para no correrse
+  // de día por la zona horaria.
+  const inicioDeHoy = new Date();
+  inicioDeHoy.setHours(0, 0, 0, 0);
+  const diaDelPedido = (order: Order) => {
+    if (order.deadline) {
+      const [y, m, d] = order.deadline.split('T')[0].split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    const creado = new Date(order.createdAt || order.date);
+    creado.setHours(0, 0, 0, 0);
+    return creado;
+  };
+  const pedidosPorSegmento: Record<'hoy' | 'proximos' | 'anteriores', Order[]> = { hoy: [], proximos: [], anteriores: [] };
+  displayOrders.forEach(order => {
+    const dia = diaDelPedido(order).getTime();
+    const destino = dia === inicioDeHoy.getTime() ? 'hoy' : dia > inicioDeHoy.getTime() ? 'proximos' : 'anteriores';
+    pedidosPorSegmento[destino].push(order);
+  });
+
+  // Hoy y Próximos salen de la página 1 (la API ordena por fecha de creación,
+  // así que lo reciente está ahí); la paginación solo tiene sentido en Anteriores.
+  const cambiarSegmento = (nuevo: 'hoy' | 'proximos' | 'anteriores') => {
+    setSegmento(nuevo);
+    if (nuevo !== 'anteriores' && pagination && pagination.page !== 1 && onPageChange) {
+      onPageChange(1);
+    }
+  };
 
   // Calculate quick stats
   const pendingOrders = orders.filter(o => o.status === 'pending').length;
@@ -205,8 +253,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 <h1 className="text-white tracking-wide" style={{ fontSize: '18px', fontWeight: 600 }}>
                   CONECTOCA
                 </h1>
-                <p className="text-blue-100 text-xs flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3" />
+                <p className="text-blue-100 text-xs">
                   Gestión de Pedidos La Oca
                 </p>
               </div>
@@ -233,37 +280,46 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
             transition={{ delay: 0.1 }}
             className="space-y-2"
           >
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                ¡Hola, {user.name}! 👋
-              </h2>
-              {isAdmin && (
-                <Badge
-                  className="border px-2.5 py-1 text-xs"
-                  style={{
-                    background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
-                    color: '#0047BA',
-                    fontWeight: 600,
-                    boxShadow: '0 2px 8px rgba(255, 212, 59, 0.3)'
-                  }}
-                >
-                  👑 ADMINISTRADOR
-                </Badge>
-              )}
-            </div>
+            <h2 className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
+              ¡Hola, {user.name}! 👋
+            </h2>
+            {/* El rol ya lo comunica esta línea de panel; el badge
+                "👑 ADMINISTRADOR" era redundante y ocupaba alto de más. */}
             <p className="text-blue-100" style={{ fontSize: '14px' }}>
               {isAdmin ? 'Panel de Administración - Vista Global' : isProduction ? 'Panel de Producción' : 'Bienvenido a tu panel de pedidos'}
             </p>
           </motion.div>
 
-          {/* Quick Stats */}
-          {orders.length > 0 && isAdmin ? (
+          {/* Resumen de pedidos (colapsable). La barra siempre muestra los
+              números clave de un vistazo; el chevron despliega las tarjetas. */}
+          {orders.length > 0 && (
+            <div className="mt-6">
+              <button
+                onClick={toggleStats}
+                aria-expanded={statsExpanded}
+                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl backdrop-blur-md text-left"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.12)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <span className="text-blue-50 text-xs sm:text-sm truncate">
+                  {isAdmin
+                    ? `${pendingOrders} pend · ${inProgressOrders} en proceso · ${completedOrders} listos · ${dispatchedOrders} desp · ${uniqueCustomers} clientes`
+                    : `${pendingOrders} pendientes · ${inProgressOrders} en proceso`}
+                </span>
+                {statsExpanded
+                  ? <ChevronUp className="w-4 h-4 text-blue-100 shrink-0" />
+                  : <ChevronDown className="w-4 h-4 text-blue-100 shrink-0" />}
+              </button>
+
+          {statsExpanded && (isAdmin ? (
             // Admin stats - Comprehensive global view
             <motion.div
-              className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 home-stats"
-              initial={{ opacity: 0, y: 10 }}
+              className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 home-stats"
+              initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
+              transition={{ duration: 0.2 }}
             >
               <div
                 className="p-3 rounded-xl backdrop-blur-md"
@@ -341,13 +397,13 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 </p>
               </div>
             </motion.div>
-          ) : orders.length > 0 && (
+          ) : (
             // Regular user stats
             <motion.div
-              className="mt-6 grid grid-cols-2 gap-3"
-              initial={{ opacity: 0, y: 10 }}
+              className="mt-2 grid grid-cols-2 gap-3"
+              initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
+              transition={{ duration: 0.2 }}
             >
               <div
                 className="p-3 rounded-xl backdrop-blur-md"
@@ -380,6 +436,8 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 </p>
               </div>
             </motion.div>
+          ))}
+            </div>
           )}
         </div>
       </div>
@@ -396,6 +454,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
           .home-acciones { display: flex; gap: 0.75rem; }
           .home-acciones > * { flex: 1 1 0; margin: 0 !important; }
           .home-acciones button { margin-top: 0 !important; }
+          .home-segmentos { max-width: 420px; }
         }
       `}</style>
       <div className="max-w-md mx-auto px-6 py-6 space-y-6 relative z-10 home-contenedor">
@@ -612,17 +671,6 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
               {pagination ? 'Mis Pedidos' : 'Pedidos Recientes'}
             </h3>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowFutureOrders(!showFutureOrders)}
-                className={`text-[11px] px-2.5 py-1 rounded-full transition-all flex items-center gap-1 border font-medium ${showFutureOrders
-                  ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                  : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
-                  }`}
-                title={showFutureOrders ? 'Ocultar Pedidos Futuros' : 'Mostrar Pedidos Futuros'}
-              >
-                <Store className="w-3 h-3" />
-                {showFutureOrders ? 'Ocultar Futuros' : 'Mostrar Futuros'}
-              </button>
               {pagination && (
                 <span
                   className="text-xs px-2 py-1 rounded-full"
@@ -636,6 +684,49 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 </span>
               )}
             </div>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Filtrar pedidos"
+            className="flex p-1 mb-4 home-segmentos"
+            style={{ background: 'rgba(0, 71, 186, 0.08)', borderRadius: '10px' }}
+          >
+            {([
+              ['hoy', 'Hoy'],
+              ['proximos', 'Próximos'],
+              ['anteriores', 'Anteriores'],
+            ] as const).map(([valor, etiqueta]) => {
+              const activo = segmento === valor;
+              const cantidad = valor === 'anteriores' ? null : pedidosPorSegmento[valor].length;
+              return (
+                <button
+                  key={valor}
+                  type="button"
+                  role="tab"
+                  aria-selected={activo}
+                  onClick={() => cambiarSegmento(valor)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-sm transition-colors"
+                  style={{
+                    borderRadius: '8px',
+                    fontWeight: activo ? 600 : 500,
+                    color: activo ? '#0047BA' : '#64748B',
+                    background: activo ? 'white' : 'transparent',
+                    boxShadow: activo ? '0 1px 3px rgba(0, 71, 186, 0.15)' : 'none'
+                  }}
+                >
+                  {etiqueta}
+                  {cantidad !== null && cantidad > 0 && (
+                    <span
+                      className="text-xs rounded-full"
+                      style={{ background: activo ? 'rgba(0, 71, 186, 0.1)' : 'rgba(100, 116, 139, 0.12)', lineHeight: '18px', padding: '0 6px' }}
+                    >
+                      {cantidad}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="space-y-3">
@@ -689,97 +780,38 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
             ) : (
               <div className={isLoading ? 'opacity-50 transition-opacity duration-300 pointer-events-none' : ''}>
                 {(() => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
+                  const etiquetaDeDia = (order: Order) =>
+                    diaDelPedido(order).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
 
-                  const getDeadlineLocal = (deadline: string) => {
-                    const parts = deadline.split('T')[0].split('-');
-                    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    d.setHours(0, 0, 0, 0);
-                    return d;
-                  };
-
-                  const isTodayOrder = (deadline?: string) => {
-                    if (!deadline) return false;
-                    const dl = getDeadlineLocal(deadline);
-                    return dl.getTime() === today.getTime();
-                  };
-
-                  const isFutureOrder = (deadline?: string) => {
-                    if (!deadline) return false;
-                    const dl = getDeadlineLocal(deadline);
-                    return dl > today;
-                  };
-
-                  const getDateKey = (dateStr: string) => {
-                    const date = new Date(dateStr);
-                    return date.toLocaleDateString('es-CL', {
-                      weekday: 'long',
-                      day: 'numeric',
-                      month: 'long'
-                    });
-                  };
-
-                  // Separate upcoming (today + future, toggle-controlled) and regular orders
-                  const upcomingOrders: typeof displayOrders = [];
-                  const regularOrders: typeof displayOrders = [];
-
-                  displayOrders.forEach(order => {
-                    if (isTodayOrder(order.deadline) || isFutureOrder(order.deadline)) {
-                      upcomingOrders.push(order);
-                    } else {
-                      regularOrders.push(order);
-                    }
+                  // Agrupa por día manteniendo el orden de llegada. En Próximos se
+                  // ordena del día más cercano al más lejano.
+                  const pedidosDelSegmento = pedidosPorSegmento[segmento];
+                  const grupos: Record<string, typeof displayOrders> = {};
+                  const ordenados = segmento === 'proximos'
+                    ? [...pedidosDelSegmento].sort((x, y) => diaDelPedido(x).getTime() - diaDelPedido(y).getTime())
+                    : pedidosDelSegmento;
+                  ordenados.forEach(order => {
+                    const clave = etiquetaDeDia(order);
+                    if (!grupos[clave]) grupos[clave] = [];
+                    grupos[clave].push(order);
                   });
 
-                  // Group regular orders by deadline (if exists) or creation date
-                  const regularGrouped: Record<string, typeof displayOrders> = {};
-                  regularOrders.forEach(order => {
-                    let dateKey: string;
-                    if (order.deadline) {
-                      const parts = order.deadline.split('T')[0].split('-');
-                      const dl = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                      dateKey = dl.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-                    } else {
-                      dateKey = getDateKey(order.createdAt || order.date);
-                    }
-                    if (!regularGrouped[dateKey]) regularGrouped[dateKey] = [];
-                    regularGrouped[dateKey].push(order);
-                  });
-
-                  // Group upcoming orders by deadline, marking today vs future
-                  // Each entry: { orders, isToday }
-                  const upcomingGrouped: Record<string, { orders: typeof displayOrders; isToday: boolean }> = {};
-                  upcomingOrders.forEach(order => {
-                    const parts = order.deadline!.split('T')[0].split('-');
-                    const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    const isToday = isTodayOrder(order.deadline);
-                    const dateKey = isToday
-                      ? 'Hoy · ' + deadlineDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
-                      : 'Para el ' + deadlineDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-                    if (!upcomingGrouped[dateKey]) upcomingGrouped[dateKey] = { orders: [], isToday };
-                    upcomingGrouped[dateKey].orders.push(order);
-                  });
-
-                  const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, isFutureGroup: boolean, isTodayGroup: boolean = false) => (
+                  const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, mostrarTitulo: boolean) => (
                     <div key={dateLabel} className="space-y-3 mb-6">
-                      {/* Date Header */}
-                      <motion.div
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.3 + (groupIndex * 0.1) }}
-                        className="flex items-center gap-2 pb-1 pt-2"
-                      >
-                        <div className={`h-px flex-1 ${isTodayGroup ? 'bg-gradient-to-r from-orange-300 to-transparent' : isFutureGroup ? 'bg-gradient-to-r from-purple-300 to-transparent' : 'bg-gradient-to-r from-blue-200 to-transparent'}`} />
-                        <span
-                          className={`text-sm font-medium capitalize px-2 py-1 rounded-full backdrop-blur-sm border ${isTodayGroup ? 'text-orange-800 bg-orange-50/80 border-orange-200 shadow-sm' : isFutureGroup ? 'text-purple-800 bg-purple-50/80 border-purple-200 shadow-sm' : 'text-blue-800 bg-blue-50/80 border-blue-100'}`}
+                      {/* Date Header (en Hoy no hace falta: todo es del mismo día) */}
+                      {mostrarTitulo && (
+                        <motion.div
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.1 + (groupIndex * 0.05) }}
+                          className="flex items-center gap-2 pb-1 pt-2"
                         >
-                          {isTodayGroup && <Clock className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-orange-600" />}
-                          {!isTodayGroup && isFutureGroup && <Clock className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-purple-600" />}
-                          {dateLabel}
-                        </span>
-                        <div className={`h-px flex-1 ${isTodayGroup ? 'bg-gradient-to-l from-orange-300 to-transparent' : isFutureGroup ? 'bg-gradient-to-l from-purple-300 to-transparent' : 'bg-gradient-to-l from-blue-200 to-transparent'}`} />
-                      </motion.div>
+                          <span className="text-sm font-medium text-gray-500">
+                            {dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
+                          </span>
+                          <div className="h-px flex-1 bg-gradient-to-r from-blue-200 to-transparent" />
+                        </motion.div>
+                      )}
 
                       {/* Orders for this date */}
                       {groupOrders.map((order, index) => {
@@ -799,7 +831,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                             transition={{ delay: 0.4 + (groupIndex * 0.1) + (index * 0.05) }}
                           >
                             <Card
-                              className={`cursor-pointer transition-all duration-300 border-2 group ${isTodayGroup ? 'hover:shadow-xl' : isFutureGroup ? 'hover:shadow-md border-dashed bg-slate-50 border-purple-200' : 'hover:shadow-xl'}`}
+                              className="cursor-pointer transition-all duration-300 border-2 group hover:shadow-xl"
                               onClick={() => handleViewOrder(order)}
                               style={{
                                 borderRadius: '16px',
@@ -813,7 +845,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                 <div className="flex justify-between items-start gap-3">
                                   <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <CardTitle
-                                      className={`${isTodayGroup ? 'text-orange-900 group-hover:text-orange-700' : isFutureGroup ? 'text-purple-900 group-hover:text-purple-700' : 'text-[#0047BA] group-hover:text-[#0059FF]'} transition-colors truncate`}
+                                      className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors truncate"
                                       style={{ fontSize: '16px', fontWeight: 600 }}
                                     >
                                       Pedido #{order.id.slice(0, 8).toUpperCase()}
@@ -929,27 +961,24 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                     </div>
                   );
 
-                  // Render today (always visible) + future (toggle-controlled) first, then regular
-                  let currentGroupIndex = 0;
-                  const renderedGroups: React.ReactNode[] = [];
-
-                  Object.entries(upcomingGrouped).forEach(([dateKey, { orders, isToday }]) => {
-                    if (isToday || showFutureOrders) {
-                      renderedGroups.push(renderOrderGroup([dateKey, orders], currentGroupIndex++, !isToday, isToday));
-                    }
-                  });
-
-                  Object.entries(regularGrouped).forEach(entry => {
-                    renderedGroups.push(renderOrderGroup(entry, currentGroupIndex++, false, false));
-                  });
-
-                  return renderedGroups;
+                  const entradas = Object.entries(grupos);
+                  if (entradas.length === 0) {
+                    const vacio = {
+                      hoy: 'No hay pedidos para hoy',
+                      proximos: 'No hay pedidos para los próximos días',
+                      anteriores: 'No hay pedidos anteriores en esta página',
+                    }[segmento];
+                    return (
+                      <p className="text-center text-sm text-gray-500" style={{ padding: '40px 0' }}>{vacio}</p>
+                    );
+                  }
+                  return entradas.map((entrada, i) => renderOrderGroup(entrada, i, segmento !== 'hoy'));
                 })()}
               </div>
             )}
 
             {/* Pagination Controls */}
-            {pagination && onPageChange && (
+            {pagination && onPageChange && segmento === 'anteriores' && (
               <div className="mt-6">
                 <PaginationControls
                   pagination={pagination}

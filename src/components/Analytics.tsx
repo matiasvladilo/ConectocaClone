@@ -962,8 +962,9 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 overflow-x-hidden">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl">
+      {/* Header. El inset del notch va acá para que el azul del header llegue
+          hasta la barra de estado en el contenedor nativo (env()=0 en web). */}
+      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="max-w-7xl mx-auto px-4 py-5">
           <div className="flex items-center gap-3 mb-4">
             <motion.button

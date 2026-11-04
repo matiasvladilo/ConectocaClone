@@ -417,9 +417,6 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
               {/* Title with accent */}
               <div className="space-y-2 relative">
-                <div className="absolute -top-2 -right-8">
-                  <Sparkles className="w-5 h-5 text-[#FFD43B]" />
-                </div>
                 <CardTitle
                   className="text-[#0047BA] tracking-tight"
                   style={{ fontSize: '32px', fontWeight: 600 }}

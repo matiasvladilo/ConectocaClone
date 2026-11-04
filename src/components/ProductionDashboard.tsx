@@ -288,7 +288,7 @@ export function ProductionDashboard({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 pb-24">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 pb-24" style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}>
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
