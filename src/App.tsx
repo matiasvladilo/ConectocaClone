@@ -1710,6 +1710,7 @@ export default function App() {
             orders={orders}
             onBack={() => setCurrentScreen("home")}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            userRole={currentUser.role}
             accessToken={accessToken}
             lastSync={lastSync}
             pagination={ordersPagination}

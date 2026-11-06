@@ -14,8 +14,12 @@ interface SwipeableOrderCardProps {
   orderId: string;
   status: string;
   userRole?: string;
-  /** Abre el detalle. Solo se dispara en un toque real, no al arrastrar. */
-  onTap: () => void;
+  /**
+   * Abre el detalle. Solo se dispara en un toque real, no al arrastrar.
+   * Opcional: en pantallas cuya tarjeta ya tiene botones de acción (despacho,
+   * producción) no se pasa, para que tocar un botón no abra además el detalle.
+   */
+  onTap?: () => void;
   /**
    * Confirmó un cambio de estado deslizando. El padre hace la llamada a la API,
    * el toast y el "deshacer" (necesita `previo` para volver atrás).
@@ -89,7 +93,7 @@ export function SwipeableOrderCard({
           <div className="absolute inset-0" style={{ background: '#EAF3DE' }} />
           <span className="relative flex items-center gap-2 text-sm font-medium" style={{ color: '#2A5B0E' }}>
             <ChevronRight className="w-5 h-5" />
-            Avanzar → {destinoAvanzar.label}
+            {destinoAvanzar.label}
           </span>
         </motion.div>
       )}
@@ -103,7 +107,7 @@ export function SwipeableOrderCard({
         >
           <div className="absolute inset-0" style={{ background: '#FAEEDA' }} />
           <span className="relative flex items-center gap-2 text-sm font-medium" style={{ color: '#854F0B' }}>
-            {destinoRetroceder.label} ← Retroceder
+            {destinoRetroceder.label}
             <ChevronLeft className="w-5 h-5" />
           </span>
         </motion.div>
@@ -119,7 +123,7 @@ export function SwipeableOrderCard({
         onDragEnd={alSoltar}
         // onTap solo se dispara en un toque real; si hubo arrastre, no. El guard
         // extra evita el caso de un micro-drag que suelta justo sobre el toque.
-        onTap={() => { if (!arrastrando) onTap(); }}
+        onTap={() => { if (!arrastrando && onTap) onTap(); }}
       >
         {children}
       </motion.div>

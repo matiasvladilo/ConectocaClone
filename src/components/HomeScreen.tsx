@@ -9,9 +9,9 @@ import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '.
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import logo from '../assets/logo-icon.png';
 import { motion } from 'motion/react';
-import { toast } from 'sonner';
 import { SwipeableOrderCard } from './SwipeableOrderCard';
 import { type FlowStep } from '../utils/orderStatusFlow';
+import { aplicarCambioEstado } from '../utils/cambioEstadoDeslizando';
 
 interface HomeScreenProps {
   user: User;
@@ -102,26 +102,10 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
     });
   };
 
-  // Confirmó un cambio de estado deslizando una tarjeta. Aplica el cambio
-  // (optimista, igual que el resto de la app) y muestra un aviso con "Deshacer"
-  // que vuelve al estado previo. Si la API falla, el handler de App ya revierte
-  // el estado local y acá se avisa del error.
-  const cambiarEstadoPedido = async (orderId: string, destino: FlowStep, previo: FlowStep) => {
-    if (!onUpdateOrderStatus) return;
-    try {
-      await onUpdateOrderStatus(orderId, destino.key, destino.progress);
-      const flecha = destino.progress > previo.progress ? '→' : '←';
-      toast.success(`Pedido #${orderId.slice(0, 8).toUpperCase()}  ${flecha}  ${destino.label}`, {
-        action: {
-          label: 'Deshacer',
-          onClick: () => { onUpdateOrderStatus(orderId, previo.key, previo.progress).catch(() => {}); },
-        },
-        duration: 4000,
-      });
-    } catch {
-      toast.error('No se pudo cambiar el estado del pedido');
-    }
-  };
+  // Confirmó un cambio de estado deslizando una tarjeta. La lógica (aviso +
+  // "Deshacer" + error) se comparte con despacho y producción en el helper.
+  const cambiarEstadoPedido = (orderId: string, destino: FlowStep, previo: FlowStep) =>
+    aplicarCambioEstado(onUpdateOrderStatus, orderId, destino, previo);
 
   React.useEffect(() => {
     (async () => {
@@ -928,15 +912,16 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                         minute: '2-digit',
                                         hour12: false
                                       });
-                                      // Un pedido anticipado se hizo otro día que el de entrega:
-                                      // además de la hora se muestra la fecha en que se hizo,
-                                      // si no "14:32" se leería como hora de hoy.
+                                      // Si el pedido se hizo otro día que el de entrega, se
+                                      // antepone la fecha para que "14:32" no se lea como hora
+                                      // de hoy. Antes esto llevaba el rótulo "Pedido anticipado",
+                                      // que aparecía en casi todos los pedidos y sumaba ruido.
                                       if (deadlineDay && createdDay && deadlineDay !== createdDay) {
                                         const fecha = new Date(createdAt).toLocaleDateString('es-CL', {
                                           day: 'numeric',
                                           month: 'short'
                                         });
-                                        return `Pedido anticipado · ${fecha}, ${hora}`;
+                                        return `${fecha}, ${hora}`;
                                       }
                                       return hora;
                                     })()}

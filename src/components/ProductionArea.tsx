@@ -10,6 +10,8 @@ import { Input } from './ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
+import { SwipeableOrderCard } from './SwipeableOrderCard';
+import { aplicarCambioEstado } from '../utils/cambioEstadoDeslizando';
 import {
   ArrowLeft,
   Package,
@@ -69,13 +71,17 @@ interface ProductionAreaProps {
   onPageChange?: (page: number) => void;
   onGoToKDS?: () => void;
   isLoading?: boolean;
+  // Rol del usuario, para los permisos del deslizado de estado. La pantalla ya
+  // está limitada a dispatch/admin/production, así que siempre es un rol que
+  // mueve el flujo completo.
+  userRole?: string;
 }
 
 type FilterStatus = 'all' | 'pending' | 'in_progress' | 'completed' | 'dispatched' | 'delivered' | 'cancelled';
 type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'customer-asc' | 'customer-desc';
 type ViewMode = 'grid' | 'list';
 
-export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToken, lastSync, pagination, onPageChange, onGoToKDS, isLoading = false }: ProductionAreaProps) {
+export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToken, lastSync, pagination, onPageChange, onGoToKDS, isLoading = false, userRole }: ProductionAreaProps) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [showDeliveryGuide, setShowDeliveryGuide] = useState(false);
@@ -1035,16 +1041,22 @@ export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToke
                       <Star className={`w-4 h-4 ${priorityOrders.has(order.id) ? 'fill-current' : ''}`} />
                     </motion.button>
 
+                    <SwipeableOrderCard
+                      orderId={order.id}
+                      status={order.status}
+                      userRole={userRole}
+                      onTap={() => setSelectedOrder(order)}
+                      onCambiarEstado={(id, destino, previo) => aplicarCambioEstado(onUpdateOrderStatus, id, destino, previo)}
+                    >
                     <Card
                       className={`
                         cursor-pointer
-                        border-l-8 ${getStatusColor(order.status)} 
-                        bg-gray-800 border-gray-700 text-white 
-                        hover:shadow-2xl hover:scale-105 transition-all
+                        border-l-8 ${getStatusColor(order.status)}
+                        bg-gray-800 border-gray-700 text-white
+                        hover:shadow-2xl transition-all
                         ${order.status === 'pending' ? 'animate-pulse' : ''}
                         ${priorityOrders.has(order.id) ? 'ring-2 ring-yellow-500' : ''}
                       `}
-                      onClick={() => setSelectedOrder(order)}
                     >
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
@@ -1151,6 +1163,7 @@ export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToke
                         )}
                       </CardContent>
                     </Card>
+                    </SwipeableOrderCard>
                   </motion.div>
                 ))}
               </AnimatePresence>

@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
+import { SwipeableOrderCard } from './SwipeableOrderCard';
+import { aplicarCambioEstado } from '../utils/cambioEstadoDeslizando';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { StandardDeliveryGuideContent } from './StandardDeliveryGuide';
@@ -362,6 +364,12 @@ export function DispatchOrders({
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ duration: 0.2 }}
                     >
+                      <SwipeableOrderCard
+                        orderId={order.id}
+                        status={order.status}
+                        userRole={userRole}
+                        onCambiarEstado={(id, destino, previo) => aplicarCambioEstado(onUpdateOrderStatus, id, destino, previo)}
+                      >
                       <Card className={`hover:shadow-xl transition-shadow duration-300 border-2 ${isFutureGroup ? 'border-dashed bg-slate-50 border-purple-200 hover:shadow-md' : ''}`}>
                         <CardHeader className="pb-3">
                           <div className="flex items-start justify-between gap-2">
@@ -538,6 +546,7 @@ export function DispatchOrders({
                           </div>
                         </CardContent>
                       </Card>
+                      </SwipeableOrderCard>
                     </motion.div>
                   ));
                 };
