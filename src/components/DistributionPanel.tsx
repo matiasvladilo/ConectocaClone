@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
+import { Card, CardContent } from './ui/card';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw, Download } from 'lucide-react';
+import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw, Download, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
 import type { Product, Category, StockEvent } from '../utils/api';
@@ -264,7 +264,10 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+      <div
+        className="max-w-7xl mx-auto px-4 py-6 space-y-6"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 1.5rem)' }}
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={onBack} aria-label="Volver">
@@ -302,51 +305,46 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
         {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
             "—" en vez de 0. Un "0 agotados" con los datos rotos se lee como
             "está todo bien", que es la conclusión más cara de equivocar acá. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-red-500 shadow-md">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <PackageX className="w-4 h-4" />
-                Agotados
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-semibold text-red-600">{errorCarga ? '—' : stats.agotados}</div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-2xl p-3.5 bg-red-50 border border-red-100">
+            <div className="flex items-center gap-1.5 text-red-700/80 text-[13px] font-medium">
+              <PackageX className="w-4 h-4 flex-shrink-0" />
+              Agotados
+            </div>
+            <div className="mt-1 text-2xl font-bold text-red-600 tabular-nums leading-none">
+              {errorCarga ? '—' : stats.agotados}
+            </div>
+          </div>
 
-          <Card className="border-l-4 border-l-yellow-500 shadow-md">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <AlertTriangle className="w-4 h-4" />
-                Stock bajo
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-semibold text-amber-600">{errorCarga ? '—' : stats.bajos}</div>
-            </CardContent>
-          </Card>
+          <div className="rounded-2xl p-3.5 bg-amber-50 border border-amber-100">
+            <div className="flex items-center gap-1.5 text-amber-700/80 text-[13px] font-medium">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              Stock bajo
+            </div>
+            <div className="mt-1 text-2xl font-bold text-amber-600 tabular-nums leading-none">
+              {errorCarga ? '—' : stats.bajos}
+            </div>
+          </div>
 
-          <Card className="border-l-4 border-l-blue-500 shadow-md">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <Boxes className="w-4 h-4" />
-                Productos
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-semibold text-gray-900">{errorCarga ? '—' : stats.total}</div>
-            </CardContent>
-          </Card>
+          <div className="rounded-2xl p-3.5 bg-white border border-gray-200">
+            <div className="flex items-center gap-1.5 text-gray-500 text-[13px] font-medium">
+              <Boxes className="w-4 h-4 flex-shrink-0" />
+              Productos
+            </div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums leading-none">
+              {errorCarga ? '—' : stats.total}
+            </div>
+          </div>
 
-          <Card className="border-l-4 border-l-green-500 shadow-md">
-            <CardHeader className="pb-3">
-              <CardDescription className="text-gray-600">Valor del inventario</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold text-green-600">{errorCarga ? '—' : formatCLP(stats.valor)}</div>
-            </CardContent>
-          </Card>
+          <div className="rounded-2xl p-3.5 bg-green-50 border border-green-100">
+            <div className="flex items-center gap-1.5 text-green-700/80 text-[13px] font-medium">
+              <DollarSign className="w-4 h-4 flex-shrink-0" />
+              Inventario
+            </div>
+            <div className="mt-1 text-xl font-bold text-green-600 tabular-nums leading-none truncate">
+              {errorCarga ? '—' : formatCLP(stats.valor)}
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
