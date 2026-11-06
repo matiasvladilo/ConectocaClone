@@ -9,6 +9,9 @@ import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '.
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import logo from '../assets/logo-icon.png';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
+import { SwipeableOrderCard } from './SwipeableOrderCard';
+import { type FlowStep } from '../utils/orderStatusFlow';
 
 interface HomeScreenProps {
   user: User;
@@ -21,6 +24,9 @@ interface HomeScreenProps {
   onGoToDashboard?: () => void;
   onManageProducts?: () => void;
   onGoToBakeryKDS?: () => void;
+  // Cambiar el estado de un pedido deslizando la tarjeta. Mismo handler que usa
+  // OrderDetail; si no se pasa, el deslizado queda desactivado.
+  onUpdateOrderStatus?: (orderId: string, newStatus: any, progress: number) => Promise<void>;
   pagination?: PaginationInfo;
   onPageChange?: (page: number) => void;
   isLoading?: boolean;
@@ -68,7 +74,7 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 
 const SCROLL_KEY = 'ordersScrollPosition';
 
-export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
+export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, onUpdateOrderStatus, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
   // Control segmentado de la lista de pedidos (estilo iOS). Reemplaza al
   // botón "Mostrar/Ocultar Futuros", que mezclaba los pedidos de días
   // siguientes arriba de los de hoy.
@@ -94,6 +100,27 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
       try { localStorage.setItem('conectoca_home_stats_expanded', String(next)); } catch { /* storage no disponible */ }
       return next;
     });
+  };
+
+  // Confirmó un cambio de estado deslizando una tarjeta. Aplica el cambio
+  // (optimista, igual que el resto de la app) y muestra un aviso con "Deshacer"
+  // que vuelve al estado previo. Si la API falla, el handler de App ya revierte
+  // el estado local y acá se avisa del error.
+  const cambiarEstadoPedido = async (orderId: string, destino: FlowStep, previo: FlowStep) => {
+    if (!onUpdateOrderStatus) return;
+    try {
+      await onUpdateOrderStatus(orderId, destino.key, destino.progress);
+      const flecha = destino.progress > previo.progress ? '→' : '←';
+      toast.success(`Pedido #${orderId.slice(0, 8).toUpperCase()}  ${flecha}  ${destino.label}`, {
+        action: {
+          label: 'Deshacer',
+          onClick: () => { onUpdateOrderStatus(orderId, previo.key, previo.progress).catch(() => {}); },
+        },
+        duration: 4000,
+      });
+    } catch {
+      toast.error('No se pudo cambiar el estado del pedido');
+    }
   };
 
   React.useEffect(() => {
@@ -830,9 +857,15 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.4 + (groupIndex * 0.1) + (index * 0.05) }}
                           >
+                            <SwipeableOrderCard
+                              orderId={order.id}
+                              status={order.status}
+                              userRole={user.role}
+                              onTap={() => handleViewOrder(order)}
+                              onCambiarEstado={cambiarEstadoPedido}
+                            >
                             <Card
                               className="cursor-pointer transition-all duration-300 border-2 group hover:shadow-xl"
-                              onClick={() => handleViewOrder(order)}
                               style={{
                                 borderRadius: '16px',
                                 borderLeftWidth: order.status === 'pending' || order.status === 'in_progress' || order.status === 'completed' ? '4px' : '2px',
@@ -841,12 +874,12 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                     order.status === 'completed' ? '#10B981' : undefined
                               }}
                             >
-                              <CardHeader className="pb-3">
-                                <div className="flex justify-between items-start gap-3">
+                              <CardHeader className="pb-2 pt-3">
+                                <div className="flex justify-between items-center gap-2">
                                   <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <CardTitle
                                       className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors truncate"
-                                      style={{ fontSize: '16px', fontWeight: 600 }}
+                                      style={{ fontSize: '14px', fontWeight: 600 }}
                                     >
                                       Pedido #{order.id.slice(0, 8).toUpperCase()}
                                     </CardTitle>
@@ -871,15 +904,12 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                     {config.label}
                                   </Badge>
                                 </div>
-                                {categoriasDePedido(order).length > 0 && (
-                                  <Badge
-                                    className="bg-blue-50 text-blue-700 border-blue-200 border mt-2"
-                                    style={{ fontSize: '11px', fontWeight: 600 }}
-                                  >
-                                    {categoriasDePedido(order).join(', ')}
-                                  </Badge>
-                                )}
-                                <CardDescription className="flex items-center gap-3 text-xs mt-2 flex-wrap">
+                                <CardDescription className="flex items-center gap-x-2 gap-y-1 text-xs mt-1.5 flex-wrap">
+                                  {categoriasDePedido(order).length > 0 && (
+                                    <span className="bg-blue-50 text-blue-700 border-blue-200 border rounded px-1.5 py-0.5" style={{ fontSize: '10px', fontWeight: 600 }}>
+                                      {categoriasDePedido(order).join(', ')}
+                                    </span>
+                                  )}
                                   <span className="flex items-center gap-1">
                                     <Package className="w-3.5 h-3.5" />
                                     {order.quantity} unid.
@@ -922,39 +952,34 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                   )}
                                 </CardDescription>
                               </CardHeader>
-                              <CardContent className="pt-0">
-                                <div
-                                  className="w-full rounded-full h-2.5 overflow-hidden"
-                                  style={{ background: 'rgba(0, 71, 186, 0.1)' }}
-                                >
-                                  <motion.div
-                                    className="h-2.5 rounded-full"
-                                    style={{
-                                      background: order.status === 'completed'
-                                        ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)'
-                                        : order.status === 'in_progress'
-                                          ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
-                                          : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
-                                      width: `${order.progress}%`
-                                    }}
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${order.progress}%` }}
-                                    transition={{ duration: 0.8, delay: 0.5 + (groupIndex * 0.1) + (index * 0.05) }}
-                                  />
-                                </div>
-                                <div className="flex items-center justify-between mt-2">
-                                  <p className="text-xs text-gray-600" style={{ fontWeight: 500 }}>
-                                    {order.progress}% completado
-                                  </p>
-                                  {order.progress === 100 && (
-                                    <span className="text-xs text-green-600 flex items-center gap-1">
-                                      <CheckCircle2 className="w-3.5 h-3.5" />
-                                      Completado
-                                    </span>
-                                  )}
+                              <CardContent className="pt-0 pb-3">
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="flex-1 rounded-full h-1.5 overflow-hidden"
+                                    style={{ background: 'rgba(0, 71, 186, 0.1)' }}
+                                  >
+                                    <motion.div
+                                      className="h-1.5 rounded-full"
+                                      style={{
+                                        background: order.status === 'completed'
+                                          ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)'
+                                          : order.status === 'in_progress'
+                                            ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
+                                            : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
+                                        width: `${order.progress}%`
+                                      }}
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${order.progress}%` }}
+                                      transition={{ duration: 0.8, delay: 0.5 + (groupIndex * 0.1) + (index * 0.05) }}
+                                    />
+                                  </div>
+                                  <span className="text-[11px] text-gray-500 tabular-nums" style={{ fontWeight: 500 }}>
+                                    {order.progress}%
+                                  </span>
                                 </div>
                               </CardContent>
                             </Card>
+                            </SwipeableOrderCard>
                           </motion.div>
                         );
                       })}

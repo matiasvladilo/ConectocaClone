@@ -1680,6 +1680,7 @@ export default function App() {
               ? () => setCurrentScreen('products')
               : undefined
           }
+          onUpdateOrderStatus={handleUpdateOrderStatus}
           pagination={ordersPagination}
           onPageChange={handlePageChange}
           isLoading={isPaginationLoading || isInitialOrdersLoading}
