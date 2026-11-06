@@ -13,7 +13,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       position="top-center"
       visibleToasts={3}
       duration={3000}
-      offset="75px"
+      // En pantallas angostas (la app nativa) sonner usa `mobileOffset`, no
+      // `offset`; sin esto el toast caía sobre el notch. El top suma el
+      // safe-area-inset-top para despejar la barra de estado del iPhone.
+      offset={{ top: 'calc(env(safe-area-inset-top) + 16px)' }}
+      mobileOffset={{ top: 'calc(env(safe-area-inset-top) + 12px)' }}
       style={
         {
           "--normal-bg": "var(--popover)",
