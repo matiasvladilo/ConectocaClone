@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Firma de release: las credenciales NO viven en el repo. Se leen de
+// `android/keystore.properties` (gitignored), que cada quien crea a partir de
+// `keystore.properties.example`. Si el archivo no existe —CI sin secretos, un
+// clon recién hecho— la app sigue compilando en debug y `assembleRelease`
+// simplemente queda sin firmar, en vez de romper el build.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace "cl.conectoca.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,8 +27,25 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            // Solo se completa si keystore.properties existe; así el bloque no
+            // falla al evaluar en entornos sin la keystore.
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            // Firma con la config release solo si hay keystore; si no, queda
+            // sin firmar (hay que firmarla antes de subir a Play).
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

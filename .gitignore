@@ -150,6 +150,10 @@ android/local.properties
 android/app/release/
 *.keystore
 !android/app/debug.keystore
+# Firma de release Android: credenciales y keystore fuera del repo
+# (el .example sí se versiona como plantilla).
+*.jks
+android/keystore.properties
 
 # iOS
 ios/App/build/
