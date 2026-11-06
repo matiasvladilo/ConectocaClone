@@ -6,6 +6,7 @@ import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw, Download, DollarSign } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
 import type { Product, Category, StockEvent } from '../utils/api';
@@ -76,6 +77,9 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   // espera, sin tapar la tabla que ya está mostrando datos.
   const [refrescando, setRefrescando] = useState(false);
   const [exportando, setExportando] = useState(false);
+  // Banner de confirmación antes de descargar: el usuario pidió aceptar la
+  // descarga en vez de que el Excel baje solo al tocar el botón.
+  const [confirmandoDescarga, setConfirmandoDescarga] = useState(false);
 
   // `silent` evita el spinner y el toast de error en los refrescos de fondo:
   // el usuario no pidió recargar, así que un refresco automático no debería
@@ -215,6 +219,16 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   // Exporta lo que está viendo en la tabla, no todo el ámbito: si filtró por
   // "Agotados" o buscó algo puntual, el Excel tiene que coincidir con lo que
   // tiene en pantalla, no sorprenderlo con filas que no pidió.
+  // El botón del header solo abre el banner de confirmación; la descarga real
+  // ocurre cuando el usuario toca "Descargar" en el banner.
+  const handlePedirDescarga = () => {
+    if (filas.length === 0) {
+      toast.error('No hay productos para exportar con estos filtros');
+      return;
+    }
+    setConfirmandoDescarga(true);
+  };
+
   const handleExportarExcel = async () => {
     if (filas.length === 0) {
       toast.error('No hay productos para exportar con estos filtros');
@@ -238,6 +252,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
       // XLSX.write(...,{type:'array'}) + helper en vez de XLSX.writeFile: este
       // último hace el <a download> que no funciona en el WebView de Capacitor.
       await exportarLibroExcel(libro, `Distribuidora_${fecha}.xlsx`);
+      setConfirmandoDescarga(false);
     } catch (error) {
       console.error('Error exportando a Excel:', error);
       toast.error('No se pudo generar el Excel');
@@ -291,7 +306,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
             </Button>
             <Button
               variant="outline"
-              onClick={handleExportarExcel}
+              onClick={handlePedirDescarga}
               disabled={exportando || loading}
               className="gap-2"
               aria-label="Descargar Excel"
@@ -301,6 +316,47 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
             </Button>
           </div>
         </div>
+
+        {/* Banner de confirmación de descarga: aparece al tocar "Excel" y la
+            descarga real solo ocurre si el usuario la acepta acá. */}
+        <AnimatePresence>
+          {confirmandoDescarga && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+              className="rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+            >
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <Download className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900">Descargar inventario en Excel</p>
+                  <p className="text-sm text-gray-600">
+                    {filas.length} {filas.length === 1 ? 'producto' : 'productos'} · archivo .xlsx
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmandoDescarga(false)}
+                  disabled={exportando}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleExportarExcel}
+                  disabled={exportando}
+                  className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <Download className="w-4 h-4" />
+                  {exportando ? 'Generando…' : 'Descargar'}
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
             "—" en vez de 0. Un "0 agotados" con los datos rotos se lee como
