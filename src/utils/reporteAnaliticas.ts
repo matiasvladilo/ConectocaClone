@@ -198,3 +198,70 @@ export function construirMatrizPorLocal(orders: PedidoParaReporte[], mapa: MapaC
 
   return matriz;
 }
+
+/** Etiquetas de estado tal como las muestra hoy la planilla. */
+function etiquetaEstado(status: string | undefined): string {
+  if (status === 'pending') return 'Pendiente';
+  if (status === 'in_progress') return 'En Preparación';
+  if (status === 'completed') return 'Completado';
+  return 'Despachado';
+}
+
+/** Todas las categorías que aparecen en el período, para que todas las filas tengan las mismas columnas. */
+function categoriasPresentes(orders: PedidoParaReporte[], mapa: MapaCategorias): string[] {
+  const vistas = new Set<string>();
+  for (const order of orders) {
+    for (const item of order.products ?? []) {
+      vistas.add(datosDeProducto(mapa, item).raiz);
+    }
+  }
+  return Array.from(vistas).sort(compararCategorias);
+}
+
+export function construirDetalleVentas(
+  orders: PedidoParaReporte[],
+  mapa: MapaCategorias
+): Record<string, unknown>[] {
+  const categorias = categoriasPresentes(orders, mapa);
+
+  return orders.map(order => {
+    const createDate = new Date(order.createdAt || order.date || order.deadline || new Date());
+    const deadlineDate = order.deadline ? new Date(`${order.deadline}T12:00:00`) : createDate;
+
+    const montoPorCategoria = new Map<string, number>();
+    let totalItems = 0;
+    for (const item of order.products ?? []) {
+      const { raiz } = datosDeProducto(mapa, item);
+      const monto = item.price * item.quantity;
+      montoPorCategoria.set(raiz, (montoPorCategoria.get(raiz) || 0) + monto);
+      totalItems += monto;
+    }
+
+    const fila: Record<string, unknown> = {
+      'Fecha Creación': createDate.toLocaleDateString('es-CL'),
+      'Hora Creación': createDate.toLocaleTimeString('es-CL'),
+      'Fecha Entrega (Deadline)': deadlineDate.toLocaleDateString('es-CL'),
+      'ID Pedido': order.id.slice(0, 8),
+      'Cliente/Local': order.customerName || 'N/A',
+      'Estado': etiquetaEstado(order.status),
+      'Total ($)': order.total || 0,
+      'Productos': order.products?.map(p => `${p.name} (x${p.quantity})`).join('; ') || '',
+      'Notas': order.notes || '',
+    };
+
+    // Todas las filas llevan todas las categorías, con 0 donde no aplica: si una
+    // fila omitiera una clave, json_to_sheet desalinearía las columnas y la
+    // planilla quedaría corrida sin ningún aviso.
+    for (const cat of categorias) {
+      // Una categoría que se llame igual que una columna fija (p. ej. "Notas")
+      // la sobreescribiría. Se renombra la columna de categoría, no la original.
+      const clave = cat in fila ? `${cat} (categoría)` : cat;
+      fila[clave] = montoPorCategoria.get(cat) || 0;
+    }
+
+    fila['Total Ítems ($)'] = totalItems;
+    fila['Diferencia ($)'] = (order.total || 0) - totalItems;
+
+    return fila;
+  });
+}

@@ -169,3 +169,69 @@ test('un pedido sin customerName se agrupa bajo Desconocido', () => {
   const matriz = construirMatrizPorLocal(anonimo, mapa);
   assert.deepEqual(matriz[0], ['Categoría', 'Subcategoría', 'Producto', 'Desconocido', 'Total Unidades']);
 });
+
+import { construirDetalleVentas } from './reporteAnaliticas.ts';
+
+test('conserva las columnas actuales, en el mismo orden, y agrega las nuevas al final', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  assert.deepEqual(Object.keys(filas[0]), [
+    'Fecha Creación', 'Hora Creación', 'Fecha Entrega (Deadline)', 'ID Pedido',
+    'Cliente/Local', 'Estado', 'Total ($)', 'Productos', 'Notas',
+    'Distribuidora', 'Panadería', 'Total Ítems ($)', 'Diferencia ($)',
+  ]);
+});
+
+test('reparte el monto del pedido entre las columnas de categoría', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  assert.equal(filas[0]['Distribuidora'], 24500);
+  assert.equal(filas[0]['Panadería'], 50000);
+  assert.equal(filas[0]['Total Ítems ($)'], 74500);
+});
+
+test('las columnas de categoría de una fila suman su Total Ítems', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  for (const f of filas) {
+    const suma = (f['Distribuidora'] as number) + (f['Panadería'] as number);
+    assert.equal(suma, f['Total Ítems ($)']);
+  }
+});
+
+test('Diferencia es el total del pedido menos la suma de ítems, y 0 cuando coinciden', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  assert.equal(filas[0]['Total ($)'], 75200);
+  assert.equal(filas[0]['Diferencia ($)'], 700);
+  assert.equal(filas[1]['Diferencia ($)'], 0);
+});
+
+test('toda fila trae todas las columnas de categoría, con 0 donde no aplica', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  // El segundo pedido solo tiene panadería: Distribuidora tiene que existir en 0.
+  assert.equal(filas[1]['Distribuidora'], 0);
+  assert.deepEqual(Object.keys(filas[0]), Object.keys(filas[1]));
+});
+
+test('un pedido sin ítems deja las categorías en 0 y Diferencia igual al total del pedido', () => {
+  const vacio: PedidoParaReporte[] = [{ id: 'x3', customerName: 'LA OCA PV', total: 9999 }];
+  const filas = construirDetalleVentas(vacio, mapa);
+  assert.equal(filas[0]['Total Ítems ($)'], 0);
+  assert.equal(filas[0]['Diferencia ($)'], 9999);
+  assert.equal(filas[0]['Productos'], '');
+});
+
+test('una categoría que choca con una columna existente se renombra en vez de sobreescribirla', () => {
+  const mapaChocado: MapaCategorias = new Map([
+    ['raro', { raiz: 'Notas', sub: '', nombre: 'Producto raro' }],
+  ]);
+  const unPedido: PedidoParaReporte[] = [{
+    id: 'x5', customerName: 'LA OCA PV', total: 100, notes: 'la nota original',
+    products: [{ productId: 'raro', name: 'Producto raro', quantity: 1, price: 100 }],
+  }];
+  const filas = construirDetalleVentas(unPedido, mapaChocado);
+  assert.equal(filas[0]['Notas'], 'la nota original');
+  assert.equal(filas[0]['Notas (categoría)'], 100);
+});
+
+test('el ID del pedido se corta a 8 caracteres, como hoy', () => {
+  const filas = construirDetalleVentas(pedidos, mapa);
+  assert.equal(filas[0]['ID Pedido'], 'a1b2c3d4');
+});
