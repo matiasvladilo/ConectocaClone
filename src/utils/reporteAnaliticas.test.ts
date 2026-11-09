@@ -235,3 +235,19 @@ test('el ID del pedido se corta a 8 caracteres, como hoy', () => {
   const filas = construirDetalleVentas(pedidos, mapa);
   assert.equal(filas[0]['ID Pedido'], 'a1b2c3d4');
 });
+
+test('cada estado tiene su etiqueta: un pedido anulado no dice Despachado', () => {
+  const estados: PedidoParaReporte[] = [
+    { id: 'p', status: 'pending', total: 0 },
+    { id: 'i', status: 'in_progress', total: 0 },
+    { id: 'c', status: 'completed', total: 0 },
+    { id: 'd', status: 'dispatched', total: 0 },
+    { id: 'e', status: 'delivered', total: 0 },
+    { id: 'x', status: 'cancelled', total: 0 },
+    { id: 'z', total: 0 },
+  ];
+  const filas = construirDetalleVentas(estados, mapa);
+  assert.deepEqual(filas.map(f => f['Estado']), [
+    'Pendiente', 'En Preparación', 'Completado', 'Despachado', 'Entregado', 'Anulado', 'Sin estado',
+  ]);
+});

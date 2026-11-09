@@ -199,12 +199,23 @@ export function construirMatrizPorLocal(orders: PedidoParaReporte[], mapa: MapaC
   return matriz;
 }
 
-/** Etiquetas de estado tal como las muestra hoy la planilla. */
+/**
+ * Etiquetas de estado para la planilla. Antes todo lo que no fuera
+ * pending/in_progress/completed caía en 'Despachado', así que un pedido anulado
+ * se leía como despachado y su monto parecía una venta buena.
+ */
+const ETIQUETAS_ESTADO: Record<string, string> = {
+  pending: 'Pendiente',
+  in_progress: 'En Preparación',
+  completed: 'Completado',
+  dispatched: 'Despachado',
+  delivered: 'Entregado',
+  cancelled: 'Anulado',
+};
+
 function etiquetaEstado(status: string | undefined): string {
-  if (status === 'pending') return 'Pendiente';
-  if (status === 'in_progress') return 'En Preparación';
-  if (status === 'completed') return 'Completado';
-  return 'Despachado';
+  if (!status) return 'Sin estado';
+  return ETIQUETAS_ESTADO[status] ?? status;
 }
 
 /** Todas las categorías que aparecen en el período, para que todas las filas tengan las mismas columnas. */
