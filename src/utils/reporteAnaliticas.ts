@@ -218,6 +218,23 @@ function etiquetaEstado(status: string | undefined): string {
   return ETIQUETAS_ESTADO[status] ?? status;
 }
 
+/**
+ * Columnas de resumen que se agregan después de las columnas de categoría. Una
+ * categoría que se llame igual que cualquiera de estas también tiene que
+ * renombrarse, aunque el choque recién exista una vez agregadas (ver el guard
+ * en construirDetalleVentas).
+ */
+const COLUMNAS_RESERVADAS = new Set(['Total Ítems ($)', 'Diferencia ($)']);
+
+/**
+ * Redondeo a centavos: evita que la suma/resta de floats deje basura como
+ * 4.5e-13 en la columna que el usuario filtra por "≠ 0". El `|| 0` normaliza
+ * -0 a 0 (de otro modo una diferencia real de cero podría salir como "-0").
+ */
+function redondearCentavos(valor: number): number {
+  return Math.round(valor * 100) / 100 || 0;
+}
+
 /** Todas las categorías que aparecen en el período, para que todas las filas tengan las mismas columnas. */
 function categoriasPresentes(orders: PedidoParaReporte[], mapa: MapaCategorias): string[] {
   const vistas = new Set<string>();
@@ -260,18 +277,20 @@ export function construirDetalleVentas(
       'Notas': order.notes || '',
     };
 
-    // Todas las filas llevan todas las categorías, con 0 donde no aplica: si una
-    // fila omitiera una clave, json_to_sheet desalinearía las columnas y la
-    // planilla quedaría corrida sin ningún aviso.
+    // Todas las filas llevan todas las categorías, con 0 donde no aplica: json_to_sheet
+    // construye el encabezado como la unión de claves de todas las filas, así que a una
+    // fila a la que le faltara una clave no se le correrían las columnas, le quedaría la
+    // celda en blanco — y una celda en blanco no es lo mismo que 0 para SUM ni al filtrar.
     for (const cat of categorias) {
-      // Una categoría que se llame igual que una columna fija (p. ej. "Notas")
+      // Una categoría que se llame igual que una columna fija (p. ej. "Notas") o que
+      // una de las columnas de resumen agregadas más abajo (Total Ítems, Diferencia)
       // la sobreescribiría. Se renombra la columna de categoría, no la original.
-      const clave = cat in fila ? `${cat} (categoría)` : cat;
+      const clave = cat in fila || COLUMNAS_RESERVADAS.has(cat) ? `${cat} (categoría)` : cat;
       fila[clave] = montoPorCategoria.get(cat) || 0;
     }
 
     fila['Total Ítems ($)'] = totalItems;
-    fila['Diferencia ($)'] = (order.total || 0) - totalItems;
+    fila['Diferencia ($)'] = redondearCentavos((order.total || 0) - totalItems);
 
     return fila;
   });

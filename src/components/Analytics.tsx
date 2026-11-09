@@ -112,6 +112,11 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // de producción falla, la planilla igual sale categorizada.
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<Category[]>([]);
+  // Señal explícita de si el catálogo cargó: sin esto, una carga que falla o que
+  // todavía no resolvió es indistinguible de un catálogo vacío, y el export sale
+  // sin agrupar por categoría sin ningún aviso (grave en el build nativo, donde
+  // el usuario nunca ve el console.error).
+  const [catalogoListo, setCatalogoListo] = useState(false);
 
   // Fetch all orders for comprehensive analytics processing
   useEffect(() => {
@@ -146,8 +151,10 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         ]);
         setCatalogProducts(productos);
         setCatalogCategories(categorias);
+        setCatalogoListo(true);
       } catch (error) {
         console.error('Error cargando catálogo para categorizar el reporte:', error);
+        setCatalogoListo(false);
       }
     };
 
@@ -651,6 +658,10 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // Export data as Excel
   const handleExport = async () => {
     try {
+      if (!catalogoListo) {
+        toast.warning('No se pudo cargar el catálogo: la planilla sale sin agrupar por categoría');
+      }
+
       // Import the xlsx library dynamically
       const XLSX = await import('xlsx');
 
@@ -739,6 +750,10 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // Exportar formato Google Drive (XLSX completo)
   const handleExportDrive = async () => {
     try {
+      if (!catalogoListo) {
+        toast.warning('No se pudo cargar el catálogo: la planilla sale sin agrupar por categoría');
+      }
+
       // Import the xlsx library dynamically
       const XLSX = await import('xlsx');
 

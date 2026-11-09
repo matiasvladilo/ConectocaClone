@@ -170,6 +170,39 @@ test('un pedido sin customerName se agrupa bajo Desconocido', () => {
   assert.deepEqual(matriz[0], ['Categoría', 'Subcategoría', 'Producto', 'Desconocido', 'Total Unidades']);
 });
 
+test('toda fila no vacía de la matriz tiene el mismo largo que el encabezado (aoa_to_sheet es posicional)', () => {
+  const matriz = construirMatrizPorLocal(pedidos, mapa);
+  const largoEncabezado = matriz[0].length;
+  // Las filas espaciadoras ([]) son intencionales y quedan afuera del chequeo.
+  for (const f of matriz) {
+    if (f.length === 0) continue;
+    assert.equal(f.length, largoEncabezado, `fila "${f[0]}" tiene ${f.length} columnas, se esperaban ${largoEncabezado}`);
+  }
+});
+
+test('invariante: la suma de los subtotales de unidades por categoría coincide con Total Unidades por local', () => {
+  const matriz = construirMatrizPorLocal(pedidos, mapa);
+  const header = matriz[0] as unknown[];
+  const filaTotalUnidades = fila(matriz, 'Total Unidades');
+  const filasSubtotal = matriz.filter(f => typeof f[0] === 'string' && (f[0] as string).endsWith('— unidades'));
+  // Columnas de local: después de Categoría/Subcategoría/Producto y antes de Total Unidades.
+  for (let col = 3; col < header.length - 1; col++) {
+    const sumaSubtotales = filasSubtotal.reduce((s, f) => s + (Number(f[col]) || 0), 0);
+    assert.equal(sumaSubtotales, filaTotalUnidades[col], `columna ${col} (${header[col]})`);
+  }
+});
+
+test('invariante: la suma de los subtotales de monto por categoría coincide con Venta Total (ítems) por local', () => {
+  const matriz = construirMatrizPorLocal(pedidos, mapa);
+  const header = matriz[0] as unknown[];
+  const filaVentaItems = fila(matriz, 'Venta Total (ítems)');
+  const filasSubtotal = matriz.filter(f => typeof f[0] === 'string' && (f[0] as string).endsWith('— monto $'));
+  for (let col = 3; col < header.length - 1; col++) {
+    const sumaSubtotales = filasSubtotal.reduce((s, f) => s + (Number(f[col]) || 0), 0);
+    assert.equal(sumaSubtotales, filaVentaItems[col], `columna ${col} (${header[col]})`);
+  }
+});
+
 import { construirDetalleVentas } from './reporteAnaliticas.ts';
 
 test('conserva las columnas actuales, en el mismo orden, y agrega las nuevas al final', () => {
@@ -234,6 +267,35 @@ test('una categoría que choca con una columna existente se renombra en vez de s
 test('el ID del pedido se corta a 8 caracteres, como hoy', () => {
   const filas = construirDetalleVentas(pedidos, mapa);
   assert.equal(filas[0]['ID Pedido'], 'a1b2c3d4');
+});
+
+test('una categoría llamada igual que una columna de resumen se renombra, no la sobreescribe', () => {
+  const mapaChocado: MapaCategorias = new Map([
+    ['raro', { raiz: 'Diferencia ($)', sub: '', nombre: 'Producto raro' }],
+  ]);
+  const unPedido: PedidoParaReporte[] = [{
+    id: 'x6', customerName: 'LA OCA PV', total: 150,
+    products: [{ productId: 'raro', name: 'Producto raro', quantity: 1, price: 100 }],
+  }];
+  const filas = construirDetalleVentas(unPedido, mapaChocado);
+  // La columna de categoría se renombra...
+  assert.equal(filas[0]['Diferencia ($) (categoría)'], 100);
+  // ...y 'Diferencia ($)' sigue siendo la diferencia real: 150 - 100 = 50.
+  assert.equal(filas[0]['Diferencia ($)'], 50);
+});
+
+test('Diferencia se redondea a centavos y no deja basura de floats', () => {
+  // 0.1 + 0.2 = 0.30000000000000004 en floats. Precio y cantidad elegidos para
+  // que el producto no sea exactamente representable.
+  const unPedido: PedidoParaReporte[] = [{
+    id: 'x7', customerName: 'LA OCA PV', total: 0.3,
+    products: [
+      { productId: 'fideos', name: 'Fideos 500g', quantity: 1, price: 0.1 },
+      { productId: 'coca', name: 'Coca 500ml', quantity: 1, price: 0.2 },
+    ],
+  }];
+  const filas = construirDetalleVentas(unPedido, mapa);
+  assert.equal(filas[0]['Diferencia ($)'], 0);
 });
 
 test('cada estado tiene su etiqueta: un pedido anulado no dice Despachado', () => {
