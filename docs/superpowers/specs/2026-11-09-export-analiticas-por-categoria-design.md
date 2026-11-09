@@ -52,12 +52,30 @@ Fuera de alcance en esta vuelta:
   `categoriesAPI.getAll`, igual que hace Historial de Pedidos.
 - La jerarquía de categorías es de **un solo nivel**: una raíz puede tener subcategorías, una
   subcategoría no ([`src/utils/categoryTree.ts:4`](../../../src/utils/categoryTree.ts)).
-- `order.total` **no siempre** es Σ(precio × cantidad) de los ítems: cuando el producto es de
+- ~~`order.total` **no siempre** es Σ(precio × cantidad) de los ítems: cuando el producto es de
   Distribuidora sin receta, el total sale del costeo por lotes FIFO, mientras que el ítem
-  guarda el precio de catálogo
-  ([`src/components/NewOrderForm.tsx:580`](../../../src/components/NewOrderForm.tsx) y
-  [`src/components/NewOrderForm.tsx:613`](../../../src/components/NewOrderForm.tsx)). Esta
-  diferencia es la razón de ser de las filas y columnas de control.
+  guarda el precio de catálogo.~~
+
+  **CORRECCIÓN (2026-11-09, post-implementación).** Esta premisa estaba vieja y es el error
+  central de este spec. El cliente efectivamente calcula el total con precios de lote
+  ([`NewOrderForm.tsx:580`](../../../src/components/NewOrderForm.tsx)), pero el servidor lo
+  descarta: las RPC de crear y actualizar pedido terminan sincronizando el total desde los
+  ítems ya repreciados —
+  `UPDATE orders SET total = (SELECT SUM(price * quantity) FROM order_items ...)` en
+  `20261103_b_create_order_with_stock_autorizacion.sql:181` y sus pares `_h` / `_j`. El
+  encabezado de `20261004_e3` lo dice con todas las letras: eso es lo que vuelve irrelevante
+  el `total` que manda el cliente.
+
+  Medido contra producción: de **6.177** pedidos, solo **4** tienen `total ≠ Σ(precio ×
+  cantidad)`, y ninguno por la divergencia FIFO (tres son pedidos sin ítems de octubre 2025,
+  uno de marzo 2026).
+
+  Consecuencia práctica: **`Diferencia ($)` va a dar 0 en toda la planilla**, y el paso de
+  verificación manual "filtrar `Diferencia ≠ 0` devuelve solo pedidos con productos de
+  Distribuidora por lotes" no va a devolver filas. Las columnas y filas de control se
+  mantienen igual, pero su valor real es otro, más modesto: detectan pedidos sin ítems y
+  cualquier futura desincronización entre `orders.total` y sus `order_items`. No son el
+  detector de diferencias de lote que este spec prometía.
 - Las dos hojas están **duplicadas** entre `handleExport`
   ([`Analytics.tsx:655`](../../../src/components/Analytics.tsx)) y `handleExportDrive`
   ([`Analytics.tsx:830`](../../../src/components/Analytics.tsx)): unas 140 líneas repetidas.
@@ -211,4 +229,7 @@ Con el código listo, exportar un rango real y confirmar en el archivo:
 - La suma de los subtotales de monto coincide con `Venta Total (ítems)`.
 - En "Detalle Ventas", la suma de las columnas de categoría de una fila coincide con el
   `Total Ítems ($)` de esa fila.
-- Filtrar `Diferencia ($) ≠ 0` devuelve solo pedidos con productos de Distribuidora por lotes.
+- ~~Filtrar `Diferencia ($) ≠ 0` devuelve solo pedidos con productos de Distribuidora por
+  lotes.~~ **No va a devolver filas** — ver la corrección en "Contexto técnico verificado".
+  Lo que corresponde verificar es lo contrario: que la columna dé 0 en todos los pedidos que
+  tengan ítems cargados.
