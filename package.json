@@ -1,6 +1,6 @@
 {
       "name": "CONECTOCA",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "private": true,
       "dependencies": {
             "@capacitor/android": "7.6.10",
@@ -91,6 +91,8 @@
             "cap:android": "npm run cap:sync && npx cap open android",
             "cap:update": "npx cap update",
             "cap:doctor": "npx cap doctor",
-            "generate:assets": "capacitor-assets generate --ios --android --iconBackgroundColor '#0c3c84' --iconBackgroundColorDark '#0c3c84' --splashBackgroundColor '#0c3c84' --splashBackgroundColorDark '#0c3c84'"
+            "generate:assets": "capacitor-assets generate --ios --android --iconBackgroundColor '#0c3c84' --iconBackgroundColorDark '#0c3c84' --splashBackgroundColor '#0c3c84' --splashBackgroundColorDark '#0c3c84'",
+            "version:sync": "node scripts/sync-version.mjs",
+            "version:release": "node scripts/sync-version.mjs --bump-build"
       }
 }
