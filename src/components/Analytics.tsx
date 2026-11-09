@@ -40,7 +40,8 @@ import { toast } from 'sonner';
 import type { User, Order } from '../App';
 import { ingredientsAPI, productIngredientsAPI, ordersAPI, type Ingredient, type ProductIngredient } from '../utils/api';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
-import { productsAPI, type Product } from '../utils/api';
+import { productsAPI, categoriesAPI, type Product, type Category } from '../utils/api';
+import { indexarCategorias, construirMatrizPorLocal, construirDetalleVentas } from '../utils/reporteAnaliticas';
 import { createClient } from '../utils/supabase/client';
 import { Calendar } from './ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
@@ -107,6 +108,11 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   const [loadingProduction, setLoadingProduction] = useState(false);
   const [allOrders, setAllOrders] = useState<Order[]>(orders);
 
+  // Catálogo propio del export, independiente de loadProductionData: si la carga
+  // de producción falla, la planilla igual sale categorizada.
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<Category[]>([]);
+
   // Fetch all orders for comprehensive analytics processing
   useEffect(() => {
     const fetchAllOrders = async () => {
@@ -126,6 +132,26 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
     };
 
     fetchAllOrders();
+  }, [accessToken]);
+
+  // Catálogo para agrupar la planilla por categoría. Si falla, el export sigue
+  // funcionando: indexarCategorias con listas vacías manda todo a "Sin categoría".
+  useEffect(() => {
+    const fetchCatalogo = async () => {
+      if (!accessToken) return;
+      try {
+        const [productos, categorias] = await Promise.all([
+          productsAPI.getAll(accessToken),
+          categoriesAPI.getAll(accessToken),
+        ]);
+        setCatalogProducts(productos);
+        setCatalogCategories(categorias);
+      } catch (error) {
+        console.error('Error cargando catálogo para categorizar el reporte:', error);
+      }
+    };
+
+    fetchCatalogo();
   }, [accessToken]);
 
   // Color palette matching La Oca brand
@@ -192,6 +218,11 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       }))
     }));
   }, [allOrders, startDate, timeRange, dateRange]);
+
+  const mapaCategorias = useMemo(
+    () => indexarCategorias(catalogProducts, catalogCategories),
+    [catalogProducts, catalogCategories]
+  );
 
   // Calculate KPIs
   const kpis = useMemo(() => {
@@ -652,25 +683,7 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
 
       // 2. Sheet: Detalle Ventas
-      const ventasData = filteredOrders.map(order => {
-        const createDate = new Date(order.createdAt || order.date || order.deadline || new Date());
-        const deadlineDate = order.deadline ? new Date(`${order.deadline}T12:00:00`) : createDate;
-
-        return {
-          'Fecha Creación': createDate.toLocaleDateString('es-CL'),
-          'Hora Creación': createDate.toLocaleTimeString('es-CL'),
-          'Fecha Entrega (Deadline)': deadlineDate.toLocaleDateString('es-CL'),
-          'ID Pedido': order.id.slice(0, 8),
-          'Cliente/Local': order.customerName || 'N/A',
-          'Estado': order.status === 'pending' ? 'Pendiente' :
-            order.status === 'in_progress' ? 'En Preparación' :
-              order.status === 'completed' ? 'Completado' : 'Despachado',
-          'Total ($)': order.total || 0,
-          'Productos': order.products?.map(p => `${p.name} (x${p.quantity})`).join('; ') || '',
-          'Notas': order.notes || ''
-        };
-      });
-      const wsVentas = XLSX.utils.json_to_sheet(ventasData);
+      const wsVentas = XLSX.utils.json_to_sheet(construirDetalleVentas(filteredOrders, mapaCategorias));
 
       // 3. Sheet: Productos (Aggregated, All products)
       const productosData = allProductStats.map(p => {
@@ -696,80 +709,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
 
       const wsProductos = XLSX.utils.json_to_sheet(productosData);
 
-      // 4. Sheet: Por Local (Matrix)
-      // Group products by Local
-      const localProductsMap = new Map<string, Map<string, number>>();
-      const allProductNames = new Set<string>();
-
-      filteredOrders.forEach(order => {
-        const localName = order.customerName || 'Desconocido';
-        if (!localProductsMap.has(localName)) {
-          localProductsMap.set(localName, new Map());
-        }
-        const productMap = localProductsMap.get(localName)!;
-
-        order.products?.forEach(p => {
-          productMap.set(p.name, (productMap.get(p.name) || 0) + p.quantity);
-          allProductNames.add(p.name);
-        });
-      });
-
-      const sortedProductNames = Array.from(allProductNames).sort();
-      const sortedLocalNames = Array.from(localProductsMap.keys()).sort();
-
-      const matrizLocales = [];
-
-      // Header row
-      matrizLocales.push(['Producto', ...sortedLocalNames, 'Total Unidades']);
-
-      // Data rows (Products)
-      let totalGlobalUnits = 0;
-
-      sortedProductNames.forEach(pName => {
-        const row: any[] = [pName];
-        let totalUnitsProduct = 0;
-
-        sortedLocalNames.forEach(localName => {
-          const productMap = localProductsMap.get(localName);
-          const qty = productMap?.get(pName) || 0;
-          row.push(qty > 0 ? qty : '');
-          totalUnitsProduct += qty;
-        });
-
-        row.push(totalUnitsProduct);
-        totalGlobalUnits += totalUnitsProduct;
-        matrizLocales.push(row);
-      });
-
-      // Totals rows at the bottom
-      const totalUnitsRow: any[] = ['Total Unidades'];
-      const gastoTotalRow: any[] = ['Venta Total'];
-      let gastoGlobal = 0;
-
-      sortedLocalNames.forEach(localName => {
-        // Calculate units
-        let localUnits = 0;
-        const productMap = localProductsMap.get(localName);
-        if (productMap) {
-          productMap.forEach(qty => localUnits += qty);
-        }
-        totalUnitsRow.push(localUnits);
-
-        // Calculate total spent
-        const localOrders = filteredOrders.filter(o => (o.customerName || 'Desconocido') === localName);
-        const totalSpent = localOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-        gastoTotalRow.push(totalSpent);
-        gastoGlobal += totalSpent;
-      });
-
-      totalUnitsRow.push(totalGlobalUnits);
-      gastoTotalRow.push(gastoGlobal);
-
-      matrizLocales.push([]); // Empty row
-      matrizLocales.push(totalUnitsRow);
-      matrizLocales.push(gastoTotalRow);
-
-      const wsLocales = XLSX.utils.aoa_to_sheet(matrizLocales);
+      // 4. Sheet: Por Local (agrupada por categoría)
+      const wsLocales = XLSX.utils.aoa_to_sheet(construirMatrizPorLocal(filteredOrders, mapaCategorias));
 
       // Create workbook
       const workbook = XLSX.utils.book_new();
@@ -826,26 +767,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       }
       const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
 
-      // 2. Sheet: Detalle Ventas (Con fecha de entrega vs creación para aclarar filtrado)
-      const ventasData = filteredOrders.map(order => {
-        const createDate = new Date(order.createdAt || order.date || order.deadline || new Date());
-        const deadlineDate = order.deadline ? new Date(`${order.deadline}T12:00:00`) : createDate;
-
-        return {
-          'Fecha Creación': createDate.toLocaleDateString('es-CL'),
-          'Hora Creación': createDate.toLocaleTimeString('es-CL'),
-          'Fecha Entrega (Deadline)': deadlineDate.toLocaleDateString('es-CL'),
-          'ID Pedido': order.id.slice(0, 8),
-          'Cliente/Local': order.customerName || 'N/A',
-          'Estado': order.status === 'pending' ? 'Pendiente' :
-            order.status === 'in_progress' ? 'En Preparación' :
-              order.status === 'completed' ? 'Completado' : 'Despachado',
-          'Total ($)': order.total || 0,
-          'Productos': order.products?.map(p => `${p.name} (x${p.quantity})`).join('; ') || '',
-          'Notas': order.notes || ''
-        };
-      });
-      const wsVentas = XLSX.utils.json_to_sheet(ventasData);
+      // 2. Sheet: Detalle Ventas
+      const wsVentas = XLSX.utils.json_to_sheet(construirDetalleVentas(filteredOrders, mapaCategorias));
 
       // 3. Sheet: Productos
       const productosData = allProductStats.map(p => {
@@ -867,72 +790,8 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
       });
       const wsProductos = XLSX.utils.json_to_sheet(productosData);
 
-      // 4. Sheet: Por Local (Matrix)
-      const localProductsMap = new Map<string, Map<string, number>>();
-      const allProductNames = new Set<string>();
-
-      filteredOrders.forEach(order => {
-        const localName = order.customerName || 'Desconocido';
-        if (!localProductsMap.has(localName)) {
-          localProductsMap.set(localName, new Map());
-        }
-        const productMap = localProductsMap.get(localName)!;
-
-        order.products?.forEach(p => {
-          productMap.set(p.name, (productMap.get(p.name) || 0) + p.quantity);
-          allProductNames.add(p.name);
-        });
-      });
-
-      const sortedProductNames = Array.from(allProductNames).sort();
-      const sortedLocalNames = Array.from(localProductsMap.keys()).sort();
-
-      const matrizLocales = [];
-      matrizLocales.push(['Producto', ...sortedLocalNames, 'Total Unidades']);
-
-      let totalGlobalUnits = 0;
-      sortedProductNames.forEach(pName => {
-        const row: any[] = [pName];
-        let totalUnitsProduct = 0;
-
-        sortedLocalNames.forEach(localName => {
-          const productMap = localProductsMap.get(localName);
-          const qty = productMap?.get(pName) || 0;
-          row.push(qty > 0 ? qty : '');
-          totalUnitsProduct += qty;
-        });
-
-        row.push(totalUnitsProduct);
-        totalGlobalUnits += totalUnitsProduct;
-        matrizLocales.push(row);
-      });
-
-      const totalUnitsRow: any[] = ['Total Unidades'];
-      const gastoTotalRow: any[] = ['Venta Total'];
-      let gastoGlobal = 0;
-
-      sortedLocalNames.forEach(localName => {
-        let localUnits = 0;
-        const productMap = localProductsMap.get(localName);
-        if (productMap) {
-          productMap.forEach(qty => localUnits += qty);
-        }
-        totalUnitsRow.push(localUnits);
-
-        const localOrders = filteredOrders.filter(o => (o.customerName || 'Desconocido') === localName);
-        const totalSpent = localOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-        gastoTotalRow.push(totalSpent);
-        gastoGlobal += totalSpent;
-      });
-
-      totalUnitsRow.push(totalGlobalUnits);
-      gastoTotalRow.push(gastoGlobal);
-
-      matrizLocales.push([]);
-      matrizLocales.push(totalUnitsRow);
-      matrizLocales.push(gastoTotalRow);
-
-      const wsLocales = XLSX.utils.aoa_to_sheet(matrizLocales);
+      // 4. Sheet: Por Local (agrupada por categoría)
+      const wsLocales = XLSX.utils.aoa_to_sheet(construirMatrizPorLocal(filteredOrders, mapaCategorias));
 
       // Create workbook
       const workbook = XLSX.utils.book_new();
