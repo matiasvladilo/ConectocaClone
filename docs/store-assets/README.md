@@ -55,9 +55,9 @@ Se derivan del ícono de marca (pato sobre `#0c3c84`). Para regenerarlos, primer
 Falta (diseño, no automatizable acá):
 - **Google Play — gráfico de funciones**: 1024×500 PNG/JPG.
 
-## Capturas (`screenshots/`)
+## Capturas
 
-Tomadas en iPhone 17 (1206×2622, 6.3"):
+Mismas 4 pantallas en dos tamaños:
 
 | Archivo | Pantalla |
 |---------|----------|
@@ -65,6 +65,13 @@ Tomadas en iPhone 17 (1206×2622, 6.3"):
 | `02-distribuidora.png` | Distribuidora — stock y reposición |
 | `03-analiticas.png` | Dashboard de analíticas |
 | `04-despacho.png` | Panel de despacho (vista KDS) |
+
+- **`screenshots/`** — nativas de iPhone 17 (**1206×2622**, 6.3"). Para Google Play.
+- **`screenshots-appstore-6.9/`** — **1320×2868** (6.9"), el tamaño que exige App
+  Store. Se generaron reescalando las nativas de 6.3" (los aspect ratios difieren
+  <0,1 %, así que el upscale es imperceptible). **Dimensionalmente válidas para
+  App Store Connect.** Si querés nitidez 100 % nativa, re-capturá en un simulador
+  iPhone 17 Pro Max (ver abajo); para eso hay que loguearse en ese simulador.
 
 ### Tamaños que exige cada tienda
 
