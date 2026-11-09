@@ -128,6 +128,21 @@ Reglas:
     categoría, y por eso reemplaza a la fila `Venta Total` actual.
   - `Venta Total (del pedido)`: Σ `order.total` por local. Fila de control: si difiere de la
     anterior, hubo costeo por lotes y se ve de inmediato en vez de quedar escondido.
+  - `Anulados (excluidos) $`: Σ precio × cantidad de los pedidos **anulados** por local.
+
+- **Pedidos anulados** (añadido 2026-11-09, post-implementación): quedan fuera de las filas de
+  producto, de los subtotales por categoría y de los tres totales globales — un pedido anulado
+  no es una venta, y sumarlo descuadra la conciliación contra la planilla manual. En los
+  últimos 90 días eran 10 pedidos por $236.110 escondidos dentro de los subtotales.
+
+  La fila `Anulados (excluidos) $` dice explícitamente cuánto se dejó afuera, para que el monto
+  no desaparezca sin explicación. Las columnas de local se siguen armando con **todos** los
+  pedidos, así un local que solo tuvo anulados igual tiene su columna.
+
+  En **"Detalle Ventas" el pedido anulado se conserva**, con su etiqueta `Anulado`: ahí está el
+  rastro. Las dos hojas reconcilian con una resta —
+  `Σ Detalle!Total Ítems ($) − Anulados (excluidos) $ = Venta Total (ítems)` — y hay un test
+  que lo verifica.
 
 ## Hoja 2 — "Detalle Ventas"
 

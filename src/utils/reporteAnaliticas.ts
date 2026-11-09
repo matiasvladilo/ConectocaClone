@@ -91,14 +91,33 @@ interface FilaProducto {
   monto: Map<string, number>;
 }
 
+/** Un pedido anulado no es una venta: queda fuera de todos los totales de la planilla. */
+function esAnulado(order: PedidoParaReporte): boolean {
+  return order.status === 'cancelled';
+}
+
+/** Σ precio × cantidad de los ítems de un pedido. */
+function montoDeItems(order: PedidoParaReporte): number {
+  return (order.products ?? []).reduce((s, item) => s + item.price * item.quantity, 0);
+}
+
 export function construirMatrizPorLocal(orders: PedidoParaReporte[], mapa: MapaCategorias): unknown[][] {
+  // Las columnas salen de TODOS los pedidos, anulados incluidos: un local que
+  // solo tuvo pedidos anulados igual tiene que tener su columna, o la fila de
+  // excluidos no tendría dónde mostrar su monto.
   const locales = Array.from(
     new Set(orders.map(o => o.customerName || LOCAL_SIN_NOMBRE))
   ).sort((a, b) => a.localeCompare(b, 'es'));
 
+  // Todo lo demás —filas de producto, subtotales y totales— se calcula solo
+  // sobre los vigentes. Lo excluido se reporta aparte al final, así la planilla
+  // dice cuánto dejó afuera en vez de que el monto desaparezca sin explicación.
+  const vigentes = orders.filter(o => !esAnulado(o));
+  const anulados = orders.filter(esAnulado);
+
   const filas = new Map<string, FilaProducto>();
 
-  for (const order of orders) {
+  for (const order of vigentes) {
     const local = order.customerName || LOCAL_SIN_NOMBRE;
     for (const item of order.products ?? []) {
       const clave = claveProducto(item);
@@ -179,7 +198,7 @@ export function construirMatrizPorLocal(orders: PedidoParaReporte[], mapa: MapaC
   for (const local of locales) {
     const unidades = totalUnidadesPorLocal.get(local) || 0;
     const items = totalItemsPorLocal.get(local) || 0;
-    const pedido = orders
+    const pedido = vigentes
       .filter(o => (o.customerName || LOCAL_SIN_NOMBRE) === local)
       .reduce((s, o) => s + (o.total || 0), 0);
 
@@ -195,6 +214,23 @@ export function construirMatrizPorLocal(orders: PedidoParaReporte[], mapa: MapaC
   ventaItems.push(globalItems);
   ventaPedido.push(globalPedido);
   matriz.push(totalUnidades, ventaItems, ventaPedido);
+
+  // Lo que se dejó afuera, sobre la misma base que `Venta Total (ítems)`
+  // (precio × cantidad), para que la resta contra "Detalle Ventas" —donde los
+  // anulados siguen apareciendo— dé exacta.
+  const filaAnulados: unknown[] = ['Anulados (excluidos) $', '', ''];
+  let globalAnulado = 0;
+
+  for (const local of locales) {
+    const monto = anulados
+      .filter(o => (o.customerName || LOCAL_SIN_NOMBRE) === local)
+      .reduce((s, o) => s + montoDeItems(o), 0);
+    filaAnulados.push(monto);
+    globalAnulado += monto;
+  }
+
+  filaAnulados.push(globalAnulado);
+  matriz.push(filaAnulados);
 
   return matriz;
 }

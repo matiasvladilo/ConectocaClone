@@ -313,3 +313,82 @@ test('cada estado tiene su etiqueta: un pedido anulado no dice Despachado', () =
     'Pendiente', 'En Preparación', 'Completado', 'Despachado', 'Entregado', 'Anulado', 'Sin estado',
   ]);
 });
+
+// --- Pedidos anulados: fuera de los totales, visibles en una fila aparte ---
+
+// Mismos dos pedidos vigentes de arriba, más uno anulado de LA OCA PV
+// (10 panes = $5.000) y un local que SOLO tiene un pedido anulado.
+const conAnulados: PedidoParaReporte[] = [
+  ...pedidos,
+  {
+    id: 'anul1', customerName: 'LA OCA PV', total: 5000, status: 'cancelled',
+    products: [{ productId: 'pan', name: 'Pan francés', quantity: 10, price: 500 }],
+  },
+  {
+    id: 'anul2', customerName: 'Solo Anulados', total: 2000, status: 'cancelled',
+    products: [{ productId: 'fideos', name: 'Fideos 500g', quantity: 20, price: 100 }],
+  },
+];
+
+test('un pedido anulado no aporta unidades ni monto a los subtotales por categoría', () => {
+  const matriz = construirMatrizPorLocal(conAnulados, mapa);
+  // Panadería en LA OCA PV sigue en 100 unidades / $50.000: los 10 panes
+  // anulados no entran. Las columnas ahora son LA OCA PV, Pedro Torres, Solo Anulados.
+  assert.deepEqual(fila(matriz, '>> Panadería — unidades'), [
+    '>> Panadería — unidades', '', '', 100, 50, 0, 150,
+  ]);
+  assert.deepEqual(fila(matriz, '>> Panadería — monto $'), [
+    '>> Panadería — monto $', '', '', 50000, 25000, 0, 75000,
+  ]);
+});
+
+test('un pedido anulado no entra en ninguno de los totales globales', () => {
+  const matriz = construirMatrizPorLocal(conAnulados, mapa);
+  assert.deepEqual(fila(matriz, 'Total Unidades'), ['Total Unidades', '', '', 129, 50, 0, 179]);
+  assert.deepEqual(fila(matriz, 'Venta Total (ítems)'), ['Venta Total (ítems)', '', '', 74500, 25000, 0, 99500]);
+  assert.deepEqual(fila(matriz, 'Venta Total (del pedido)'), ['Venta Total (del pedido)', '', '', 75200, 25000, 0, 100200]);
+});
+
+test('la fila de anulados muestra por local lo que se excluyó', () => {
+  const matriz = construirMatrizPorLocal(conAnulados, mapa);
+  // LA OCA PV: 10 panes = $5.000. Solo Anulados: 20 fideos = $2.000.
+  assert.deepEqual(fila(matriz, 'Anulados (excluidos) $'), [
+    'Anulados (excluidos) $', '', '', 5000, 0, 2000, 7000,
+  ]);
+});
+
+test('un local con solo pedidos anulados igual aparece como columna', () => {
+  const matriz = construirMatrizPorLocal(conAnulados, mapa);
+  assert.deepEqual(matriz[0], [
+    'Categoría', 'Subcategoría', 'Producto', 'LA OCA PV', 'Pedro Torres', 'Solo Anulados', 'Total Unidades',
+  ]);
+});
+
+test('sin pedidos anulados la fila de excluidos sigue estando, en cero', () => {
+  const matriz = construirMatrizPorLocal(pedidos, mapa);
+  assert.deepEqual(fila(matriz, 'Anulados (excluidos) $'), [
+    'Anulados (excluidos) $', '', '', 0, 0, 0,
+  ]);
+});
+
+test('Detalle Ventas conserva la fila del pedido anulado, etiquetada Anulado', () => {
+  const filas = construirDetalleVentas(conAnulados, mapa);
+  assert.equal(filas.length, 4);
+  const anulado = filas.find(f => f['ID Pedido'] === 'anul1');
+  assert.ok(anulado, 'el pedido anulado tiene que seguir en Detalle Ventas');
+  assert.equal(anulado['Estado'], 'Anulado');
+  assert.equal(anulado['Panadería'], 5000);
+});
+
+test('las dos hojas reconcilian: Detalle menos los excluidos da Venta Total (ítems)', () => {
+  const matriz = construirMatrizPorLocal(conAnulados, mapa);
+  const detalle = construirDetalleVentas(conAnulados, mapa);
+
+  const totalDetalle = detalle.reduce((s, f) => s + (f['Total Ítems ($)'] as number), 0);
+  const filaExcluidos = fila(matriz, 'Anulados (excluidos) $');
+  const filaVentaItems = fila(matriz, 'Venta Total (ítems)');
+  const excluidos = filaExcluidos[filaExcluidos.length - 1] as number;
+  const ventaItems = filaVentaItems[filaVentaItems.length - 1] as number;
+
+  assert.equal(totalDetalle - excluidos, ventaItems);
+});
