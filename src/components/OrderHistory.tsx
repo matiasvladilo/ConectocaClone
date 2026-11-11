@@ -1,10 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Order } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Badge } from './ui/badge';
-import { Input } from './ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Separator } from './ui/separator';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCLP } from '../utils/format';
@@ -15,19 +10,15 @@ import {
   CheckCircle2,
   Truck,
   Search,
-  Filter,
-  Calendar,
   FileText,
   Grid3x3,
   List,
   X,
-  DollarSign,
-  User,
   ChevronRight,
-  Edit
+  Edit,
+  SlidersHorizontal
 } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
-import logo from '../assets/logo-icon.png';
 import { EditOrderDialog } from './EditOrderDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { productsAPI, Product, categoriesAPI, Category } from '../utils/api';
@@ -87,6 +78,33 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
     icon: X
   }
 };
+
+// Paleta de sistema de iOS (la misma familia que el panel "Mi cuenta").
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+};
+
+// Color por estado (colores de sistema de iOS) y orden de las píldoras.
+const ESTADOS: { key: FilterStatus; label: string; color: string }[] = [
+  { key: 'all', label: 'Todos', color: IOS.azul },
+  { key: 'pending', label: 'Pendientes', color: '#FF9500' },
+  { key: 'in_progress', label: 'En preparación', color: '#007AFF' },
+  { key: 'completed', label: 'Listos', color: '#34C759' },
+  { key: 'dispatched', label: 'Despachados', color: '#5856D6' },
+  { key: 'delivered', label: 'Recibidos', color: '#30B0C7' },
+  { key: 'cancelled', label: 'Cancelados', color: '#FF3B30' },
+];
+const colorEstado = (status: string) =>
+  ESTADOS.find(e => e.key === status)?.color || IOS.secundario;
+
+const fechaCorta = (d: Date) =>
+  d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }).replace('.', '');
 
 function truncateProducts(productName: string, max = 2): string {
   const parts = productName.split(', ');
@@ -160,14 +178,11 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
 
   const itemsPerPage = 10;
 
-  // Filter and search orders
-  const filteredOrders = useMemo(() => {
+  // Búsqueda + fechas, SIN el filtro de estado. Los conteos de las píldoras de
+  // estado salen de acá: si salieran de la lista ya filtrada por estado, al
+  // elegir "Despachados" todas las demás píldoras pasarían a mostrar 0.
+  const baseOrders = useMemo(() => {
     let filtered = [...orders];
-
-    // Filter by status
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(order => order.status === filterStatus);
-    }
 
     // Filter by search query
     if (searchQuery) {
@@ -211,6 +226,15 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
       });
     }
 
+    return filtered;
+  }, [orders, searchQuery, dateFrom, dateTo, dateFilterType]);
+
+  // Lo que se lista: la base + filtro de estado, ordenado.
+  const filteredOrders = useMemo(() => {
+    const filtered = filterStatus === 'all'
+      ? [...baseOrders]
+      : baseOrders.filter(order => order.status === filterStatus);
+
     // Sort
     filtered.sort((a, b) => {
       let dateA, dateB;
@@ -236,7 +260,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
     });
 
     return filtered;
-  }, [orders, filterStatus, searchQuery, sortBy, dateFrom, dateTo, dateFilterType]);
+  }, [baseOrders, filterStatus, sortBy]);
 
   // Pagination
   const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
@@ -246,18 +270,14 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
   );
 
   // Statistics
+  // total y totalAmount describen lo que se ve (con el estado elegido);
+  // porEstado cuenta sobre la base, para las píldoras.
   const stats = useMemo(() => {
-    const total = filteredOrders.length;
-    const pending = filteredOrders.filter((o: Order) => o.status === 'pending').length;
-    const inProgress = filteredOrders.filter((o: Order) => o.status === 'in_progress').length;
-    const completed = filteredOrders.filter((o: Order) => o.status === 'completed').length;
-    const dispatched = filteredOrders.filter((o: Order) => o.status === 'dispatched').length;
-    const delivered = filteredOrders.filter((o: Order) => o.status === 'delivered').length;
-    const cancelled = filteredOrders.filter((o: Order) => o.status === 'cancelled').length;
+    const porEstado: Record<string, number> = { all: baseOrders.length };
+    for (const o of baseOrders) porEstado[o.status] = (porEstado[o.status] || 0) + 1;
     const totalAmount = filteredOrders.reduce((sum: number, o: Order) => sum + (o.total || 0), 0);
-
-    return { total, pending, inProgress, completed, dispatched, delivered, cancelled, totalAmount };
-  }, [filteredOrders]);
+    return { total: filteredOrders.length, porEstado, totalAmount };
+  }, [baseOrders, filteredOrders]);
 
   // Desglosa stats.totalAmount por categoría PADRE. Se arma sobre los mismos
   // filteredOrders que ya usa el Total (mismos filtros de búsqueda/estado/fecha
@@ -294,796 +314,383 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
 
   const hasActiveFilters = searchQuery || filterStatus !== 'all' || dateFrom || dateTo || sortBy !== 'date-desc';
 
-  return (
-    <div
-      className="min-h-screen relative overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
-    >
-      {/* Decorative background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-        <motion.div
-          className="absolute bottom-0 left-0 w-96 h-96 bg-yellow-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1.2, 1, 1.2],
-            opacity: [0.2, 0.4, 0.2]
-          }}
-          transition={{ duration: 10, repeat: Infinity }}
-        />
-      </div>
+  const filtrosAvanzadosActivos = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
 
-      {/* Header */}
-      <div
-        className="relative z-10 shadow-2xl"
+  const elegirEstado = (estado: FilterStatus) => {
+    setFilterStatus(estado);
+    setCurrentPage(1);
+  };
+
+  // Una fila/tarjeta de pedido. Lista: fila agrupada estilo iOS. Grilla: misma
+  // información en una tarjeta blanca.
+  const renderEditar = (order: Order, compacto: boolean) =>
+    canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) ? (
+      <button
+        type="button"
+        aria-label="Editar pedido"
+        onClick={(e) => { e.stopPropagation(); setEditingOrder(order); }}
         style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          minWidth: 36, height: 36, padding: compacto ? 0 : '0 12px',
+          borderRadius: 18, border: 'none', cursor: 'pointer',
+          background: IOS.relleno, color: IOS.azul, fontSize: 15, fontWeight: 500,
+          flexShrink: 0,
         }}
       >
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1, x: -4 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-11 h-11 flex items-center justify-center rounded-full"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <ArrowLeft className="w-5 h-5 text-white" />
-              </motion.button>
+        <Edit style={{ width: 16, height: 16 }} />
+        {!compacto && 'Editar'}
+      </button>
+    ) : null;
 
-              <div className="flex items-center gap-3">
-                <motion.div
-                  whileHover={{ rotate: [0, -10, 10, -10, 0] }}
-                  transition={{ duration: 0.5 }}
-                >
-                  <img
-                    src={logo}
-                    alt="La Oca Logo"
-                    className="w-12 h-12 object-contain relative z-10"
-                    style={{ imageRendering: 'crisp-edges' }}
-                  />
-                </motion.div>
-                <div>
-                  <h1 className="text-white tracking-wide flex items-center gap-2" style={{ fontSize: '24px', fontWeight: 600 }}>
-                    <FileText className="w-6 h-6" />
-                    Historial de Pedidos
-                  </h1>
-                  <p className="text-blue-100 text-sm">
-                    Consulta todos tus pedidos de {userName}
-                  </p>
-                </div>
-              </div>
+  // "Local · Entrega 11 nov · Categoría". El local se omite cuando es el propio
+  // usuario (cuenta de un local): ya figura en el encabezado y se repetía en
+  // cada fila.
+  const subtitulo = (order: Order) => {
+    const partes: string[] = [];
+    if (order.customerName && order.customerName !== userName) partes.push(order.customerName);
+    if (order.deadline) partes.push(`Entrega ${fechaCorta(new Date(order.deadline + 'T00:00:00'))}`);
+    else partes.push(fechaCorta(new Date(order.createdAt || order.date)));
+    const categorias = categoriasDePedido(order);
+    if (categorias.length > 0) partes.push(categorias.join(', '));
+    return partes.join(' · ');
+  };
+
+  return (
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado compacto: atrás, título y resumen en una sola tarjeta */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
+          paddingTop: 'max(env(safe-area-inset-top), 16px)',
+        }}
+      >
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Volver"
+              style={{
+                width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+              }}
+            >
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>
+                Historial de pedidos
+              </h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {userName}
+              </p>
             </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-2">
-              <motion.button
-                onClick={() => setViewMode('list')}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${viewMode === 'list'
-                  ? 'bg-white text-[#0047BA]'
-                  : 'bg-white/20 text-white hover:bg-white/30'
-                  }`}
-              >
-                <List className="w-5 h-5" />
-              </motion.button>
-              <motion.button
-                onClick={() => setViewMode('grid')}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${viewMode === 'grid'
-                  ? 'bg-white text-[#0047BA]'
-                  : 'bg-white/20 text-white hover:bg-white/30'
-                  }`}
-              >
-                <Grid3x3 className="w-5 h-5" />
-              </motion.button>
+            {/* Lista / grilla: control segmentado */}
+            <div
+              role="group"
+              aria-label="Vista"
+              style={{ display: 'flex', padding: 2, borderRadius: 9, background: 'rgba(255,255,255,0.18)', flexShrink: 0 }}
+            >
+              {([['list', List], ['grid', Grid3x3]] as const).map(([modo, Icono]) => (
+                <button
+                  key={modo}
+                  type="button"
+                  aria-label={modo === 'list' ? 'Vista de lista' : 'Vista de grilla'}
+                  aria-pressed={viewMode === modo}
+                  onClick={() => setViewMode(modo)}
+                  style={{
+                    width: 34, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: viewMode === modo ? '#fff' : 'transparent',
+                    color: viewMode === modo ? '#0047BA' : '#fff',
+                  }}
+                >
+                  <Icono style={{ width: 16, height: 16 }} />
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Package className="w-4 h-4 text-blue-100" />
-                <span className="text-xs text-blue-100">Total</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.total}
+          {/* Resumen: monto + cantidad, y acceso al desglose por categoría */}
+          <button
+            type="button"
+            onClick={() => setShowBreakdown(true)}
+            className="w-full"
+            style={{
+              marginTop: 14, padding: '12px 14px', borderRadius: 14,
+              display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+              background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.18)',
+              cursor: 'pointer',
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {stats.total} {stats.total === 1 ? 'pedido' : 'pedidos'}
+                {filterStatus !== 'all' ? ` · ${ESTADOS.find(e => e.key === filterStatus)?.label.toLowerCase()}` : ''}
               </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(255, 212, 59, 0.2)',
-                border: '1px solid rgba(255, 212, 59, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="w-4 h-4 text-yellow-200" />
-                <span className="text-xs text-yellow-100">Pendientes</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.pending}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Package className="w-4 h-4 text-blue-100" />
-                <span className="text-xs text-blue-100">En Proceso</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.inProgress}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(16, 185, 129, 0.2)',
-                border: '1px solid rgba(16, 185, 129, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.25 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle2 className="w-4 h-4 text-green-200" />
-                <span className="text-xs text-green-100">Listos</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.completed}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(99, 102, 241, 0.2)',
-                border: '1px solid rgba(99, 102, 241, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Truck className="w-4 h-4 text-indigo-100" />
-                <span className="text-xs text-indigo-100">Despachados</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.dispatched}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(20, 184, 166, 0.2)',
-                border: '1px solid rgba(20, 184, 166, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.35 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle2 className="w-4 h-4 text-teal-100" />
-                <span className="text-xs text-teal-100">Recibidos</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.delivered}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(239, 68, 68, 0.2)',
-                border: '1px solid rgba(239, 68, 68, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <X className="w-4 h-4 text-red-100" />
-                <span className="text-xs text-red-100">Cancelados</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.cancelled}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md cursor-pointer hover:bg-white/5 transition-colors"
-              style={{
-                background: 'rgba(255, 212, 59, 0.2)',
-                border: '1px solid rgba(255, 212, 59, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.45 }}
-              role="button"
-              tabIndex={0}
-              onClick={() => setShowBreakdown(true)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBreakdown(true); } }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-yellow-200" />
-                <span className="text-xs text-yellow-100">Total</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
+              <p style={{ color: '#fff', fontSize: 26, fontWeight: 700, letterSpacing: -0.3, lineHeight: 1.15 }}>
                 {formatCLP(stats.totalAmount)}
               </p>
-              <span className="text-xs text-yellow-100 flex items-center gap-1">
-                Ver por categoría <ChevronRight className="w-3 h-3" />
-              </span>
-            </motion.div>
-          </div>
+            </div>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: '#fff', fontSize: 14, fontWeight: 500, flexShrink: 0 }}>
+              Por categoría
+              <ChevronRight style={{ width: 16, height: 16 }} />
+            </span>
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5 relative z-10">
-        {/* Filters Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <Card
-            className="border-2 shadow-lg"
-            style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
+      <div className="max-w-7xl mx-auto" style={{ padding: '12px 16px 32px' }}>
+        {/* Búsqueda + botón de filtros */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="flex-1" style={{ position: 'relative' }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 17, height: 17, color: IOS.secundario }} />
+            <input
+              type="search"
+              placeholder="Buscar producto, local o ID"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              style={{
+                width: '100%', height: 38, borderRadius: 10, border: 'none', outline: 'none',
+                background: IOS.relleno, padding: '0 34px 0 34px', fontSize: 16, color: IOS.texto,
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                aria-label="Borrar búsqueda"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  width: 20, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+                  background: '#AEAEB2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <X style={{ width: 12, height: 12, color: '#fff' }} />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFilters(!showFilters)}
+            aria-expanded={showFilters}
+            aria-label="Ordenar y filtrar por fecha"
+            style={{
+              position: 'relative', width: 38, height: 38, borderRadius: 10, border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              background: showFilters ? IOS.azul : IOS.relleno,
+              color: showFilters ? '#fff' : IOS.azul,
+            }}
           >
-            <CardContent className="p-5">
-              <div className="space-y-4">
-                {/* Search and Quick Filters */}
-                <div className="flex flex-col md:flex-row gap-3">
-                  {/* Search */}
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <Input
-                      placeholder="Buscar por producto, cliente o ID..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-11 h-11 bg-white border-[#CBD5E1] focus:border-[#2563EB]"
-                      style={{ borderRadius: '10px' }}
-                    />
-                    {searchQuery && (
-                      <motion.button
-                        onClick={() => setSearchQuery('')}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
-                      >
-                        <X className="w-4 h-4 text-gray-600" />
-                      </motion.button>
-                    )}
-                  </div>
-
-                  {/* Status Filter */}
-                  <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as FilterStatus)}>
-                    <SelectTrigger
-                      className="w-full md:w-48 h-11 bg-white border-[#CBD5E1]"
-                      style={{ borderRadius: '10px' }}
-                    >
-                      <SelectValue placeholder="Estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos los estados</SelectItem>
-                      <SelectItem value="pending">Pendientes</SelectItem>
-                      <SelectItem value="in_progress">En Preparación</SelectItem>
-                      <SelectItem value="completed">Listos</SelectItem>
-                      <SelectItem value="dispatched">Despachados</SelectItem>
-                      <SelectItem value="delivered">Recibidos</SelectItem>
-                      <SelectItem value="cancelled">Cancelados</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Sort */}
-                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                    <SelectTrigger
-                      className="w-full md:w-48 h-11 bg-white border-[#CBD5E1]"
-                      style={{ borderRadius: '10px' }}
-                    >
-                      <SelectValue placeholder="Ordenar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="date-desc">Más recientes</SelectItem>
-                      <SelectItem value="date-asc">Más antiguos</SelectItem>
-                      <SelectItem value="amount-desc">Mayor monto</SelectItem>
-                      <SelectItem value="amount-asc">Menor monto</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Advanced Filters Toggle */}
-                  <motion.button
-                    onClick={() => setShowFilters(!showFilters)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="w-full md:w-11 h-11 rounded-lg flex items-center justify-center gap-2 transition-all"
-                    style={{
-                      background: showFilters ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' : 'rgba(0, 89, 255, 0.1)',
-                      color: showFilters ? 'white' : '#0059FF'
-                    }}
-                  >
-                    <Filter className="w-5 h-5" />
-                    <span className="md:hidden">Filtros avanzados</span>
-                  </motion.button>
-                </div>
-
-                {/* Advanced Filters */}
-                <AnimatePresence>
-                  {showFilters && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="overflow-hidden"
-                    >
-                      <Separator className="my-4" />
-                      <div className="mb-3">
-                        <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
-                          Filtrar por
-                        </label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => { setDateFilterType('createdAt'); setCurrentPage(1); }}
-                            className="flex-1 h-10 rounded-lg text-sm font-medium transition-all border"
-                            style={{
-                              background: dateFilterType === 'createdAt' ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' : 'white',
-                              color: dateFilterType === 'createdAt' ? 'white' : '#374151',
-                              borderColor: dateFilterType === 'createdAt' ? '#0059FF' : '#CBD5E1'
-                            }}
-                          >
-                            Fecha de pedido
-                          </button>
-                          <button
-                            onClick={() => { setDateFilterType('deadline'); setCurrentPage(1); }}
-                            className="flex-1 h-10 rounded-lg text-sm font-medium transition-all border"
-                            style={{
-                              background: dateFilterType === 'deadline' ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' : 'white',
-                              color: dateFilterType === 'deadline' ? 'white' : '#374151',
-                              borderColor: dateFilterType === 'deadline' ? '#0059FF' : '#CBD5E1'
-                            }}
-                          >
-                            Fecha de despacho
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
-                            Desde
-                          </label>
-                          <div className="relative h-10">
-                            <div className="h-10 bg-white border border-[#CBD5E1] flex items-center px-3 pointer-events-none" style={{ borderRadius: '10px' }}>
-                              <span className="text-sm" style={{ color: dateFrom ? '#111827' : '#9CA3AF' }}>
-                                {dateFrom ? dateFrom.split('-').reverse().join('/') : 'DD/MM/AAAA'}
-                              </span>
-                              <Calendar className="w-4 h-4 ml-auto text-gray-400" />
-                            </div>
-                            <input
-                              type="date"
-                              value={dateFrom}
-                              onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-sm text-gray-700 mb-2 block" style={{ fontWeight: 500 }}>
-                            Hasta
-                          </label>
-                          <div className="relative h-10">
-                            <div className="h-10 bg-white border border-[#CBD5E1] flex items-center px-3 pointer-events-none" style={{ borderRadius: '10px' }}>
-                              <span className="text-sm" style={{ color: dateTo ? '#111827' : '#9CA3AF' }}>
-                                {dateTo ? dateTo.split('-').reverse().join('/') : 'DD/MM/AAAA'}
-                              </span>
-                              <Calendar className="w-4 h-4 ml-auto text-gray-400" />
-                            </div>
-                            <input
-                              type="date"
-                              value={dateTo}
-                              onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Active Filters */}
-                {hasActiveFilters && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-gray-600" style={{ fontWeight: 500 }}>Filtros activos:</span>
-                    {searchQuery && (
-                      <Badge className="bg-blue-100 text-blue-700 border-blue-200">
-                        Búsqueda: {searchQuery}
-                      </Badge>
-                    )}
-                    {filterStatus !== 'all' && (
-                      <Badge className="bg-blue-100 text-blue-700 border-blue-200">
-                        Estado: {statusConfig[filterStatus]?.label}
-                      </Badge>
-                    )}
-                    {(dateFrom || dateTo) && (
-                      <Badge className="bg-blue-100 text-blue-700 border-blue-200">
-                        {dateFilterType === 'deadline' ? 'Despacho' : 'Pedido'}: {dateFrom || '...'} - {dateTo || '...'}
-                      </Badge>
-                    )}
-                    <motion.button
-                      onClick={clearFilters}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="text-xs text-[#0059FF] hover:text-[#0047BA] flex items-center gap-1"
-                      style={{ fontWeight: 500 }}
-                    >
-                      <X className="w-3 h-3" />
-                      Limpiar todo
-                    </motion.button>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Results Summary */}
-        <div className="flex items-center justify-between">
-          <p className="text-gray-700" style={{ fontSize: '14px', fontWeight: 500 }}>
-            Mostrando {paginatedOrders.length} de {filteredOrders.length} pedidos
-          </p>
+            <SlidersHorizontal style={{ width: 18, height: 18 }} />
+            {filtrosAvanzadosActivos > 0 && !showFilters && (
+              <span
+                style={{
+                  position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9,
+                  background: '#FF3B30', color: '#fff', fontSize: 11, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
+                }}
+              >
+                {filtrosAvanzadosActivos}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Orders List/Grid */}
-        {paginatedOrders.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card
-              className="border-2 border-dashed"
-              style={{ borderRadius: '16px', borderColor: '#CBD5E1' }}
+        {/* Píldoras de estado (reemplazan las 8 tarjetas de KPIs y el select de estado) */}
+        <div
+          className="sin-scrollbar"
+          style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '12px -16px 0', padding: '0 16px 2px' }}
+        >
+          {ESTADOS.filter(e => e.key === 'all' || e.key === filterStatus || (stats.porEstado[e.key] || 0) > 0).map(e => {
+            const activo = filterStatus === e.key;
+            return (
+              <button
+                key={e.key}
+                type="button"
+                aria-pressed={activo}
+                onClick={() => elegirEstado(e.key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                  height: 32, padding: '0 12px', borderRadius: 16, cursor: 'pointer',
+                  border: 'none', fontSize: 14, fontWeight: activo ? 600 : 500, whiteSpace: 'nowrap',
+                  background: activo ? e.color : IOS.tarjeta,
+                  color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}
+              >
+                {e.key !== 'all' && !activo && (
+                  <span style={{ width: 7, height: 7, borderRadius: 4, background: e.color }} />
+                )}
+                {e.label}
+                <span style={{ opacity: activo ? 0.85 : 1, color: activo ? '#fff' : IOS.secundario, fontWeight: 500 }}>
+                  {stats.porEstado[e.key] || 0}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Ordenar y fechas (desplegable) */}
+        <AnimatePresence initial={false}>
+          {showFilters && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              style={{ overflow: 'hidden' }}
             >
-              <CardContent className="p-16 text-center">
-                <div
-                  className="w-20 h-20 mx-auto mb-5 rounded-full flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)' }}
-                >
-                  <FileText className="w-10 h-10 text-blue-300" />
+              <div style={{ marginTop: 12, background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+                {/* Ordenar */}
+                <div style={{ padding: '10px 16px' }}>
+                  <p style={{ fontSize: 13, color: IOS.secundario, marginBottom: 6 }}>Ordenar por</p>
+                  <SegmentoIOS
+                    opciones={[
+                      ['date-desc', 'Recientes'],
+                      ['date-asc', 'Antiguos'],
+                      ['amount-desc', 'Mayor $'],
+                      ['amount-asc', 'Menor $'],
+                    ]}
+                    valor={sortBy}
+                    onCambio={(v) => { setSortBy(v as SortOption); setCurrentPage(1); }}
+                  />
                 </div>
-                <p className="text-gray-600 mb-2" style={{ fontSize: '16px', fontWeight: 500 }}>
-                  No se encontraron pedidos
-                </p>
-                <p className="text-gray-400 text-sm">
-                  Intenta ajustar los filtros de búsqueda
-                </p>
-              </CardContent>
-            </Card>
-          </motion.div>
+                <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+                {/* Tipo de fecha */}
+                <div style={{ padding: '10px 16px' }}>
+                  <p style={{ fontSize: 13, color: IOS.secundario, marginBottom: 6 }}>Filtrar por fecha de</p>
+                  <SegmentoIOS
+                    opciones={[['createdAt', 'Pedido'], ['deadline', 'Despacho']]}
+                    valor={dateFilterType}
+                    onCambio={(v) => { setDateFilterType(v as DateFilterType); setCurrentPage(1); }}
+                  />
+                </div>
+                <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+                <FilaFecha etiqueta="Desde" valor={dateFrom} onCambio={(v) => { setDateFrom(v); setCurrentPage(1); }} />
+                <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+                <FilaFecha etiqueta="Hasta" valor={dateTo} onCambio={(v) => { setDateTo(v); setCurrentPage(1); }} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Encabezado de sección */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '20px 16px 6px' }}>
+          <p style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2 }}>
+            {filteredOrders.length > paginatedOrders.length
+              ? `${(currentPage - 1) * itemsPerPage + 1}–${(currentPage - 1) * itemsPerPage + paginatedOrders.length} de ${filteredOrders.length} pedidos`
+              : `${filteredOrders.length} ${filteredOrders.length === 1 ? 'pedido' : 'pedidos'}`}
+          </p>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              style={{ fontSize: 15, color: IOS.azul, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+
+        {/* Lista / grilla */}
+        {paginatedOrders.length === 0 ? (
+          <div style={{ background: IOS.tarjeta, borderRadius: 12, padding: '40px 24px', textAlign: 'center' }}>
+            <FileText style={{ width: 36, height: 36, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Sin pedidos</p>
+            <p style={{ fontSize: 15, color: IOS.secundario, marginTop: 4 }}>
+              {hasActiveFilters ? 'Probá con otros filtros.' : 'Todavía no hay pedidos.'}
+            </p>
+          </div>
         ) : viewMode === 'list' ? (
-          // List View
-          <div className="space-y-3">
+          <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
             {paginatedOrders.map((order, index) => {
               const config = statusConfig[order.status] || statusConfig.pending;
               const StatusIcon = config.icon;
-
+              const color = colorEstado(order.status);
               return (
-                <motion.div
-                  key={order.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 + (index * 0.05) }}
-                >
-                  <Card
-                    className="cursor-pointer hover:shadow-xl transition-all duration-300 border-2 group"
+                <div key={order.id}>
+                  {index > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 60 }} />}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="fila-ios"
                     onClick={() => onViewOrder(order)}
-                    style={{
-                      borderRadius: '16px',
-                      borderLeftWidth: '4px',
-                      borderLeftColor: order.status === 'pending' ? '#F59E0B' :
-                        order.status === 'in_progress' ? '#0059FF' :
-                          order.status === 'completed' ? '#10B981' : '#6B7280',
-                      borderTopColor: '#E0EDFF',
-                      borderRightColor: '#E0EDFF',
-                      borderBottomColor: '#E0EDFF'
-                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') onViewOrder(order); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px 10px 16px', cursor: 'pointer' }}
                   >
-                    <CardContent className="p-5">
-                      <div className="flex items-center gap-4">
-                        {/* Icon */}
-                        <div
-                          className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style={{
-                            background: order.status === 'pending' ? 'rgba(245, 158, 11, 0.1)' :
-                              order.status === 'in_progress' ? 'rgba(0, 89, 255, 0.1)' :
-                                order.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(107, 114, 128, 0.1)'
-                          }}
-                        >
-                          <StatusIcon
-                            className="w-7 h-7"
-                            style={{
-                              color: order.status === 'pending' ? '#F59E0B' :
-                                order.status === 'in_progress' ? '#0059FF' :
-                                  order.status === 'completed' ? '#10B981' : '#6B7280'
-                            }}
-                          />
-                        </div>
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-3 mb-2">
-                            <div className="min-w-0">
-                              <h3
-                                className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors"
-                                style={{ fontSize: '16px', fontWeight: 600 }}
-                              >
-                                {truncateProducts(order.productName)}
-                              </h3>
-                              {categoriasDePedido(order).length > 0 && (
-                                <Badge
-                                  className="bg-blue-50 text-blue-700 border-blue-200 border mt-1"
-                                  style={{ fontSize: '10px', fontWeight: 600 }}
-                                >
-                                  {categoriasDePedido(order).join(', ')}
-                                </Badge>
-                              )}
-                            </div>
-                            <Badge
-                              className={`${config.bgColor} ${config.color} border px-2.5 py-1 flex items-center gap-1.5`}
-                              style={{ fontSize: '11px', fontWeight: 500 }}
-                            >
-                              <StatusIcon className="w-3.5 h-3.5" />
-                              {config.label}
-                            </Badge>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
-                            <span className="flex items-center gap-1.5">
-                              <User className="w-3.5 h-3.5" />
-                              {order.customerName}
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                              <Package className="w-3.5 h-3.5" />
-                              {order.quantity} unid.
-                            </span>
-                            <span className="flex items-center gap-1.5" title="Fecha de Creación">
-                              <Calendar className="w-3.5 h-3.5" />
-                              Creado: {new Date(order.createdAt || order.date).toLocaleDateString('es-CL')}
-                            </span>
-                            <span className="flex items-center gap-1.5 text-green-600" style={{ fontWeight: 500 }} title="Fecha de Entrega">
-                              <Clock className="w-3.5 h-3.5" />
-                              Entrega: {order.deadline ? new Date(order.deadline + 'T00:00:00').toLocaleDateString('es-CL') : '?'}
-                            </span>
-                            <span className="flex items-center gap-1.5 text-[#0047BA]" style={{ fontWeight: 600 }}>
-                              <DollarSign className="w-3.5 h-3.5" />
-                              {formatCLP(order.total || 0)}
-                            </span>
-                          </div>
-
-                          {/* Progress */}
-                          <div className="mt-3">
-                            <div
-                              className="w-full rounded-full h-1.5 overflow-hidden"
-                              style={{ background: 'rgba(0, 71, 186, 0.1)' }}
-                            >
-                              <div
-                                className="h-1.5 rounded-full transition-all duration-500"
-                                style={{
-                                  background: order.status === 'completed' || order.status === 'cancelled'
-                                    ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)'
-                                    : order.status === 'in_progress'
-                                      ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
-                                      : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
-                                  width: `${order.progress}%`
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Edit Button */}
-                        {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
-                          <div className="mx-4">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-yellow-600 hover:text-yellow-800 hover:bg-yellow-50"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingOrder(order);
-                              }}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        )}
-
-                        {/* Arrow */}
-                        <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0059FF] transition-colors" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                    <div
+                      style={{
+                        width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: color,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <StatusIcon style={{ width: 18, height: 18, color: '#fff' }} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate" style={{ fontSize: 16, fontWeight: 600, color: IOS.texto }}>
+                        {truncateProducts(order.productName)}
+                      </p>
+                      <p className="truncate" style={{ fontSize: 13, color: IOS.secundario, marginTop: 1 }}>
+                        {subtitulo(order)}
+                      </p>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: IOS.texto }}>{formatCLP(order.total || 0)}</p>
+                      <p style={{ fontSize: 12, fontWeight: 500, color, marginTop: 1 }}>{config.label}</p>
+                    </div>
+                    {renderEditar(order, true)}
+                    <ChevronRight style={{ width: 16, height: 16, color: '#C7C7CC', flexShrink: 0 }} />
+                  </div>
+                </div>
               );
             })}
           </div>
         ) : (
-          // Grid View
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {paginatedOrders.map((order, index) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
+            {paginatedOrders.map((order) => {
               const config = statusConfig[order.status] || statusConfig.pending;
               const StatusIcon = config.icon;
-
+              const color = colorEstado(order.status);
               return (
-                <motion.div
+                <div
                   key={order.id}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.3 + (index * 0.05) }}
+                  role="button"
+                  tabIndex={0}
+                  className="fila-ios"
+                  onClick={() => onViewOrder(order)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') onViewOrder(order); }}
+                  style={{ borderRadius: 12, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10 }}
                 >
-                  <Card
-                    className="cursor-pointer hover:shadow-xl transition-all duration-300 border-2 group h-full"
-                    onClick={() => onViewOrder(order)}
-                    style={{
-                      borderRadius: '16px',
-                      borderTopWidth: '4px',
-                      borderTopColor: order.status === 'pending' ? '#F59E0B' :
-                        order.status === 'in_progress' ? '#0059FF' :
-                          order.status === 'completed' ? '#10B981' : '#6B7280',
-                      borderLeftColor: '#E0EDFF',
-                      borderRightColor: '#E0EDFF',
-                      borderBottomColor: '#E0EDFF'
-                    }}
-                  >
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between mb-4">
-                        <div
-                          className="w-12 h-12 rounded-xl flex items-center justify-center"
-                          style={{
-                            background: order.status === 'pending' ? 'rgba(245, 158, 11, 0.1)' :
-                              order.status === 'in_progress' ? 'rgba(0, 89, 255, 0.1)' :
-                                order.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(107, 114, 128, 0.1)'
-                          }}
-                        >
-                          <StatusIcon
-                            className="w-6 h-6"
-                            style={{
-                              color: order.status === 'pending' ? '#F59E0B' :
-                                order.status === 'in_progress' ? '#0059FF' :
-                                  order.status === 'completed' ? '#10B981' : '#6B7280'
-                            }}
-                          />
-                        </div>
-                        <Badge
-                          className={`${config.bgColor} ${config.color} border px-2 py-1`}
-                          style={{ fontSize: '10px', fontWeight: 500 }}
-                        >
-                          {config.label}
-                        </Badge>
-                      </div>
-
-                      <h3
-                        className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors mb-1 line-clamp-2"
-                        style={{ fontSize: '15px', fontWeight: 600 }}
-                      >
-                        {truncateProducts(order.productName)}
-                      </h3>
-                      {categoriasDePedido(order).length > 0 && (
-                        <Badge
-                          className="bg-blue-50 text-blue-700 border-blue-200 border mb-3"
-                          style={{ fontSize: '10px', fontWeight: 600 }}
-                        >
-                          {categoriasDePedido(order).join(', ')}
-                        </Badge>
-                      )}
-
-                      <div className="space-y-2 mb-4">
-                        <div className="flex items-center gap-2 text-xs text-gray-600">
-                          <User className="w-3.5 h-3.5" />
-                          <span className="truncate">{order.customerName}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs text-gray-600">
-                          <span className="flex items-center gap-1.5">
-                            <Package className="w-3.5 h-3.5" />
-                            {order.quantity} unid.
-                          </span>
-                          <span className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5" />
-                            {new Date(order.createdAt || order.date).toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit' })}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div
-                        className="w-full rounded-full h-1.5 overflow-hidden mb-3"
-                        style={{ background: 'rgba(0, 71, 186, 0.1)' }}
-                      >
-                        <div
-                          className="h-1.5 rounded-full transition-all duration-500"
-                          style={{
-                            background: order.status === 'completed' || order.status === 'cancelled'
-                              ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)'
-                              : order.status === 'in_progress'
-                                ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
-                                : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
-                            width: `${order.progress}%`
-                          }}
-                        />
-                      </div>
-
-                      <div
-                        className="flex items-center justify-between p-3 rounded-xl"
-                        style={{ background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)' }}
-                      >
-                        <span className="text-xs text-gray-600" style={{ fontWeight: 500 }}>Total</span>
-                        <span className="text-[#0047BA]" style={{ fontSize: '16px', fontWeight: 600 }}>
-                          {formatCLP(order.total || 0)}
-                        </span>
-                      </div>
-
-                      {/* Edit Button */}
-                      {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
-                        <div className="mt-3">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full text-yellow-600 border-yellow-200 hover:bg-yellow-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingOrder(order);
-                            }}
-                          >
-                            <Edit className="w-4 h-4 mr-2" />
-                            Editar
-                          </Button>
-                        </div>
-                      )}
-
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      style={{
+                        width: 28, height: 28, borderRadius: 7, background: color,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <StatusIcon style={{ width: 16, height: 16, color: '#fff' }} />
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 600, color }}>{config.label}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 13, color: IOS.secundario }}>
+                      {fechaCorta(new Date(order.createdAt || order.date))}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="line-clamp-2" style={{ fontSize: 16, fontWeight: 600, color: IOS.texto }}>
+                      {truncateProducts(order.productName)}
+                    </p>
+                    <p className="truncate" style={{ fontSize: 13, color: IOS.secundario, marginTop: 2 }}>
+                      {subtitulo(order)}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 'auto' }}>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: IOS.texto }}>{formatCLP(order.total || 0)}</span>
+                    <span style={{ fontSize: 13, color: IOS.secundario }}>· {new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(order.quantity || 0)} unid.</span>
+                    <span style={{ marginLeft: 'auto' }}>{renderEditar(order, false)}</span>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -1095,7 +702,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
             <PaginationControls
               pagination={{
                 page: currentPage,
-                limit: 9, // Hardcoded as itemsPerPage is 9 in the component
+                limit: itemsPerPage,
                 total: filteredOrders.length,
                 totalPages: totalPages,
                 hasNext: currentPage < totalPages,
@@ -1157,6 +764,77 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
           </DialogContent>
         </Dialog>
       </div>
+    </div>
+  );
+}
+
+// Control segmentado de iOS (UISegmentedControl).
+function SegmentoIOS({ opciones, valor, onCambio }: {
+  opciones: [string, string][];
+  valor: string;
+  onCambio: (v: string) => void;
+}) {
+  return (
+    <div role="group" style={{ display: 'flex', padding: 2, borderRadius: 9, background: IOS.relleno }}>
+      {opciones.map(([v, etiqueta]) => {
+        const activo = v === valor;
+        return (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={activo}
+            onClick={() => onCambio(v)}
+            className="flex-1"
+            style={{
+              height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13,
+              fontWeight: activo ? 600 : 500, color: IOS.texto,
+              background: activo ? '#fff' : 'transparent',
+              boxShadow: activo ? '0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.04)' : 'none',
+            }}
+          >
+            {etiqueta}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Fila "Desde"/"Hasta" con el selector de fecha nativo superpuesto (invisible)
+// para que en iOS se abra la rueda del sistema.
+function FilaFecha({ etiqueta, valor, onCambio }: { etiqueta: string; valor: string; onCambio: (v: string) => void }) {
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 16px' }}>
+      <span style={{ fontSize: 16, color: IOS.texto }}>{etiqueta}</span>
+      <span
+        style={{
+          marginLeft: 'auto', fontSize: 15, padding: '5px 10px', borderRadius: 7,
+          background: IOS.relleno, color: valor ? IOS.azul : IOS.secundario,
+        }}
+      >
+        {valor ? valor.split('-').reverse().join('/') : 'Cualquiera'}
+      </span>
+      {valor && (
+        <button
+          type="button"
+          aria-label={`Quitar fecha ${etiqueta.toLowerCase()}`}
+          onClick={() => onCambio('')}
+          style={{
+            position: 'relative', zIndex: 2, marginLeft: 8, width: 22, height: 22, borderRadius: 11,
+            border: 'none', background: '#AEAEB2', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <X style={{ width: 12, height: 12, color: '#fff' }} />
+        </button>
+      )}
+      <input
+        type="date"
+        aria-label={etiqueta}
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 1 }}
+      />
     </div>
   );
 }

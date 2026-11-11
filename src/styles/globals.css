@@ -842,3 +842,20 @@ body {
   background: #e5e5ea;
   transition: none;
 }
+
+/* Carriles con scroll horizontal (p. ej. píldoras de estado) sin barra visible. */
+.sin-scrollbar {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.sin-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Buscador sobre el encabezado azul (Nuevo pedido). */
+.buscador-sobre-azul::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+.buscador-sobre-azul::-webkit-search-cancel-button {
+  display: none;
+}
