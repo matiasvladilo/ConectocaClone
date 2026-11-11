@@ -1,65 +1,40 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Order } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { DeliveryGuide } from './DeliveryGuide';
-import { Separator } from './ui/separator';
-import { Input } from './ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { motion, AnimatePresence } from 'motion/react';
 import { SwipeableOrderCard } from './SwipeableOrderCard';
 import { aplicarCambioEstado } from '../utils/cambioEstadoDeslizando';
+import { puedeAvanzar, ORDER_FLOW } from '../utils/orderStatusFlow';
 import {
   ArrowLeft,
-  Package,
-  Clock,
-  User,
-  CheckCircle2,
-  PlayCircle,
-  XCircle,
-  Printer,
-  MapPin,
-  Calendar,
-  Hash,
-  AlertCircle,
   Search,
-  Filter,
   SlidersHorizontal,
-  ArrowUpDown,
+  Package,
   Star,
-  Grid3x3,
-  List,
-  X as XIcon,
-  DollarSign,
   MessageSquare,
-  Factory,
-  Layers,
-  ChefHat,
-  Cake,
-  Utensils,
-  Coffee,
-  Pizza,
-  IceCream,
-  Soup,
-  Salad,
-  Sandwich,
-  Wine,
-  CookingPot,
-  Beef,
-  Fish,
-  Apple,
-  Truck
+  Printer,
+  ChevronRight,
+  X,
+  Grid3x3,
 } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, ProductionArea as ProductionAreaType, productionAreasAPI } from '../utils/api';
-import logo from '../assets/logo-icon.png';
-const logoFull = logo;
 import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';
 import { parseDate } from '../utils/dateUtils';
+
+/**
+ * Panel de despacho / producción (roles dispatch, production y admin).
+ *
+ * Estilo iOS como Historial y Detalle del pedido: encabezado azul compacto con
+ * buscador, píldoras de estado con conteo, filtros en una tarjeta plegable y
+ * pedidos como tarjetas blancas. Deslizar una tarjeta sigue cambiando el
+ * estado (SwipeableOrderCard); tocarla abre una hoja con el detalle y el
+ * siguiente paso como botón principal.
+ *
+ * Nota: Tailwind está precompilado (src/index.css); el estilo va inline.
+ */
 
 interface ProductionAreaProps {
   orders: Order[];
@@ -77,1317 +52,742 @@ interface ProductionAreaProps {
   userRole?: string;
 }
 
-type FilterStatus = 'all' | 'pending' | 'in_progress' | 'completed' | 'dispatched' | 'delivered' | 'cancelled';
-type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'customer-asc' | 'customer-desc';
-type ViewMode = 'grid' | 'list';
+type FilterStatus = 'all' | Order['status'];
+type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'customer-asc';
+
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  amarillo: '#FFCC00',
+};
+
+// Mismos colores de estado que Historial, Detalle y Analíticas.
+const ESTADOS: { key: FilterStatus; label: string; color: string }[] = [
+  { key: 'all', label: 'Todos', color: IOS.azul },
+  { key: 'pending', label: 'Pendientes', color: '#FF9500' },
+  { key: 'in_progress', label: 'En preparación', color: '#007AFF' },
+  { key: 'completed', label: 'Listos', color: '#34C759' },
+  { key: 'dispatched', label: 'Despachados', color: '#5856D6' },
+  { key: 'delivered', label: 'Recibidos', color: '#30B0C7' },
+  { key: 'cancelled', label: 'Cancelados', color: '#FF3B30' },
+];
+
+const ETIQUETA_ESTADO: Record<string, string> = {
+  pending: 'Pendiente',
+  in_progress: 'En preparación',
+  completed: 'Listo',
+  dispatched: 'Despachado',
+  delivered: 'Recibido',
+  cancelled: 'Cancelado',
+};
+
+const colorEstado = (status: string) => ESTADOS.find((e) => e.key === status)?.color ?? IOS.secundario;
+
+// Verbo del botón principal según el estado al que se pasa.
+const VERBO_PASO: Record<string, string> = {
+  in_progress: 'Empezar preparación',
+  completed: 'Marcar como listo',
+  dispatched: 'Despachar',
+  delivered: 'Marcar como recibido',
+};
+
+const ORDEN: [SortOption, string][] = [
+  ['date-desc', 'Recientes'],
+  ['date-asc', 'Antiguos'],
+  ['amount-desc', 'Monto'],
+  ['customer-asc', 'Local'],
+];
+
+const fmtCantidad = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+
+const hora = (s: string) => new Date(s).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+/** "Hoy", "Mañana", "Ayer" o "lun 3 nov" para la fecha de entrega (YYYY-MM-DD). */
+function entregaCorta(deadline?: string): string | null {
+  if (!deadline) return null;
+  const d = /^\d{4}-\d{2}-\d{2}/.test(deadline) ? parseDate(deadline) : new Date(deadline);
+  if (isNaN(d.getTime())) return null;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const dia = new Date(d);
+  dia.setHours(0, 0, 0, 0);
+  const diff = Math.round((dia.getTime() - hoy.getTime()) / 86_400_000);
+  if (diff === 0) return 'Hoy';
+  if (diff === 1) return 'Mañana';
+  if (diff === -1) return 'Ayer';
+  return d.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 
 export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToken, lastSync, pagination, onPageChange, onGoToKDS, isLoading = false, userRole }: ProductionAreaProps) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [showDeliveryGuide, setShowDeliveryGuide] = useState(false);
 
-  // Production Areas state
   const [productionAreas, setProductionAreas] = useState<ProductionAreaType[]>([]);
-  const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all'); // 'all' or area ID
+  const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
 
-  // New advanced filters
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  // Prioritarios: marca local de la sesión (no se guarda en el servidor).
   const [priorityOrders, setPriorityOrders] = useState<Set<string>>(new Set());
-
-  // Advanced filter states
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [minAmount, setMinAmount] = useState('');
-  const [maxAmount, setMaxAmount] = useState('');
-  const [customerFilter, setCustomerFilter] = useState('');
 
-  // Load production areas on mount
+  const titulo = userRole === 'production' ? 'Producción' : 'Despacho';
+
   useEffect(() => {
-    if (accessToken) {
-      loadProductionAreas();
-    }
+    if (!accessToken) return;
+    productionAreasAPI
+      .getAll(accessToken)
+      .then(setProductionAreas)
+      .catch((error) => console.error('Error loading production areas:', error));
   }, [accessToken]);
 
-  const loadProductionAreas = async () => {
-    if (!accessToken) return;
+  // El detalle abierto sigue al pedido actualizado (p. ej. tras cambiar estado).
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const fresco = orders.find((o) => o.id === selectedOrder.id);
+    if (fresco && fresco !== selectedOrder) setSelectedOrder(fresco);
+  }, [orders, selectedOrder]);
 
-    try {
-      const areas = await productionAreasAPI.getAll(accessToken);
-      setProductionAreas(areas);
-    } catch (error: any) {
-      console.error('Error loading production areas:', error);
-    }
+  const areaPorId = useMemo(() => new Map(productionAreas.map((a) => [a.id, a])), [productionAreas]);
+
+  const areasDePedido = (order: Order) => {
+    const ids = new Set<string>();
+    order.products?.forEach((p) => { if (p.productionAreaId) ids.add(p.productionAreaId); });
+    return Array.from(ids).map((id) => areaPorId.get(id)).filter((a): a is ProductionAreaType => !!a);
   };
 
-  // Filter options array for navigation
-  const filterStatusOptions: FilterStatus[] = ['all', 'pending', 'in_progress', 'completed', 'dispatched', 'delivered', 'cancelled'];
-  const filterStatusIndex = filterStatusOptions.indexOf(filterStatus);
+  const conteo = useMemo(() => {
+    const c: Record<string, number> = { all: orders.length };
+    orders.forEach((o) => { c[o.status] = (c[o.status] || 0) + 1; });
+    return c;
+  }, [orders]);
 
-  // Navigation handlers
-  const handlePreviousFilter = () => {
-    if (filterStatusIndex > 0) {
-      setFilterStatus(filterStatusOptions[filterStatusIndex - 1]);
-    }
-  };
+  const filtrosActivos = [dateFrom, dateTo, selectedAreaFilter !== 'all' ? 'x' : ''].filter(Boolean).length + (sortBy !== 'date-desc' ? 1 : 0);
 
-  const handleNextFilter = () => {
-    if (filterStatusIndex < filterStatusOptions.length - 1) {
-      setFilterStatus(filterStatusOptions[filterStatusIndex + 1]);
-    }
-  };
-
-  const getFilterStatusLabel = (status: FilterStatus) => {
-    switch (status) {
-      case 'all':
-        return 'Todos los Pedidos';
-      case 'pending':
-        return 'Pendientes';
-      case 'in_progress':
-        return 'En Preparación';
-      case 'completed':
-        return 'Listos para Despacho';
-      case 'dispatched':
-        return 'Despachados';
-      case 'delivered':
-        return 'Entregados/Recibidos';
-      case 'cancelled':
-        return 'Cancelados';
-      default:
-        return 'Todos';
-    }
-  };
-
-  const getFilterStatusColor = (status: FilterStatus) => {
-    switch (status) {
-      case 'all':
-        return 'bg-white text-blue-900';
-      case 'pending':
-        return 'bg-yellow-500 text-yellow-900';
-      case 'in_progress':
-        return 'bg-blue-500 text-blue-900';
-      case 'completed':
-        return 'bg-green-500 text-green-900';
-      case 'dispatched':
-        return 'bg-indigo-500 text-indigo-900';
-      case 'delivered':
-        return 'bg-teal-500 text-teal-900';
-      case 'cancelled':
-        return 'bg-red-500 text-red-900';
-      default:
-        return 'bg-white text-blue-900';
-    }
-  };
-
-  const getFilterStatusIcon = (status: FilterStatus) => {
-    switch (status) {
-      case 'all':
-        return <Package className="w-5 h-5" />;
-      case 'pending':
-        return <Clock className="w-5 h-5" />;
-      case 'in_progress':
-        return <PlayCircle className="w-5 h-5" />;
-      case 'completed':
-        return <CheckCircle2 className="w-5 h-5" />;
-      case 'dispatched':
-        return <Truck className="w-5 h-5" />;
-      case 'delivered':
-        return <CheckCircle2 className="w-5 h-5" />;
-      case 'cancelled':
-        return <XCircle className="w-5 h-5" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusColor = (status: Order['status']) => {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-500';
-      case 'in_progress':
-        return 'bg-blue-500';
-      case 'completed':
-        return 'bg-green-500';
-      case 'dispatched':
-        return 'bg-indigo-500';
-      case 'delivered':
-        return 'bg-teal-500';
-      case 'cancelled':
-        return 'bg-red-500';
-      default:
-        return 'bg-gray-300';
-    }
-  };
-
-  const getStatusLabel = (status: Order['status']) => {
-    switch (status) {
-      case 'pending':
-        return 'Pendiente';
-      case 'in_progress':
-        return 'En Preparación';
-      case 'completed':
-        return 'Listo para Despacho';
-      case 'dispatched':
-        return 'Despachado';
-      case 'delivered':
-        return 'Recibido';
-      case 'cancelled':
-        return 'Cancelado';
-      default:
-        return status;
-    }
-  };
-
-  const getStatusIcon = (status: Order['status']) => {
-    switch (status) {
-      case 'pending':
-        return <Clock className="w-4 h-4" />;
-      case 'in_progress':
-        return <PlayCircle className="w-4 h-4" />;
-      case 'completed':
-        return <CheckCircle2 className="w-4 h-4" />;
-      case 'dispatched':
-        return <Truck className="w-4 h-4" />;
-      case 'delivered':
-        return <CheckCircle2 className="w-4 h-4" />;
-      case 'cancelled':
-        return <XCircle className="w-4 h-4" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusCount = (status: FilterStatus) => {
-    if (status === 'all') return orders.length;
-    return orders.filter(o => o.status === status).length;
-  };
-
-  // Get icon component for production area
-  const getAreaIcon = (iconName?: string) => {
-    const icons: Record<string, any> = {
-      ChefHat,
-      Cake,
-      Utensils,
-      Coffee,
-      Pizza,
-      IceCream,
-      Soup,
-      Salad,
-      Sandwich,
-      Wine,
-      CookingPot,
-      Beef,
-      Fish,
-      Apple
-    };
-    const IconComponent = (iconName && icons[iconName]) || Factory;
-    return <IconComponent className="w-4 h-4" />;
-  };
-
-  // Get unique production areas from order
-  const getOrderAreas = (order: Order) => {
-    if (!order.products) return [];
-
-    const areaIds = new Set<string>();
-    order.products.forEach(product => {
-      if (product.productionAreaId) {
-        areaIds.add(product.productionAreaId);
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    let lista = orders.filter((order) => {
+      if (filterStatus !== 'all' && order.status !== filterStatus) return false;
+      if (selectedAreaFilter !== 'all' && !order.products?.some((p) => p.productionAreaId === selectedAreaFilter)) return false;
+      if (q) {
+        const enProductos = order.products?.some((p) => p.name.toLowerCase().includes(q));
+        const coincide =
+          order.id.toLowerCase().includes(q) ||
+          order.customerName.toLowerCase().includes(q) ||
+          order.productName.toLowerCase().includes(q) ||
+          !!enProductos ||
+          (order.deliveryAddress && order.deliveryAddress.toLowerCase().includes(q));
+        if (!coincide) return false;
       }
+      if ((dateFrom || dateTo) && order.createdAt) {
+        // Fecha local (no toISOString, que en Chile corre el día después de las 21:00).
+        const d = new Date(order.createdAt);
+        const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (dateFrom && dia < dateFrom) return false;
+        if (dateTo && dia > dateTo) return false;
+      }
+      return true;
     });
 
-    return Array.from(areaIds)
-      .map(id => productionAreas.find(a => a.id === id))
-      .filter((area): area is ProductionAreaType => area !== undefined);
-  };
+    const fecha = (o: Order) => new Date(o.createdAt || o.date).getTime();
+    lista = [...lista].sort((a, b) => {
+      const prio = (priorityOrders.has(b.id) ? 1 : 0) - (priorityOrders.has(a.id) ? 1 : 0);
+      if (prio !== 0) return prio;
+      switch (sortBy) {
+        case 'date-asc': return fecha(a) - fecha(b);
+        case 'amount-desc': return (b.total || 0) - (a.total || 0);
+        case 'customer-asc': return a.customerName.localeCompare(b.customerName, 'es');
+        default: return fecha(b) - fecha(a);
+      }
+    });
+    return lista;
+  }, [orders, filterStatus, selectedAreaFilter, searchQuery, dateFrom, dateTo, sortBy, priorityOrders]);
 
-  // Toggle priority
   const togglePriority = (orderId: string) => {
-    setPriorityOrders(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(orderId)) {
-        newSet.delete(orderId);
-        toast.success('Pedido removido de prioritarios');
-      } else {
-        newSet.add(orderId);
-        toast.success('Pedido marcado como prioritario');
-      }
-      return newSet;
+    setPriorityOrders((prev) => {
+      const s = new Set(prev);
+      if (s.has(orderId)) s.delete(orderId);
+      else s.add(orderId);
+      return s;
     });
   };
 
-  // Clear all filters
-  const clearAllFilters = () => {
-    setSearchQuery('');
+  const limpiarFiltros = () => {
     setDateFrom('');
     setDateTo('');
-    setMinAmount('');
-    setMaxAmount('');
-    setCustomerFilter('');
+    setSelectedAreaFilter('all');
     setSortBy('date-desc');
-    toast.success('Filtros limpiados');
   };
-
-  // Apply search filter
-  const applySearchFilter = (order: Order) => {
-    if (!searchQuery) return true;
-
-    const query = searchQuery.toLowerCase();
-    return (
-      order.id.toLowerCase().includes(query) ||
-      order.customerName.toLowerCase().includes(query) ||
-      order.productName.toLowerCase().includes(query) ||
-      (order.deliveryAddress && order.deliveryAddress.toLowerCase().includes(query))
-    );
-  };
-
-  // Apply advanced filters
-  const applyAdvancedFilters = (order: Order) => {
-    // Date range filter
-    if (dateFrom && order.createdAt) {
-      const orderDate = new Date(order.createdAt).toISOString().split('T')[0];
-      if (orderDate < dateFrom) return false;
-    }
-    if (dateTo && order.createdAt) {
-      const orderDate = new Date(order.createdAt).toISOString().split('T')[0];
-      if (orderDate > dateTo) return false;
-    }
-
-    // Amount filter
-    if (minAmount && order.total) {
-      if (order.total < parseFloat(minAmount)) return false;
-    }
-    if (maxAmount && order.total) {
-      if (order.total > parseFloat(maxAmount)) return false;
-    }
-
-    // Customer filter
-    if (customerFilter && !order.customerName.toLowerCase().includes(customerFilter.toLowerCase())) {
-      return false;
-    }
-
-    return true;
-  };
-
-  // Sort orders
-  const sortOrders = (ordersToSort: Order[]) => {
-    const sorted = [...ordersToSort];
-
-    switch (sortBy) {
-      case 'date-desc':
-        return sorted.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
-      case 'date-asc':
-        return sorted.sort((a, b) => new Date(a.createdAt || a.date).getTime() - new Date(b.createdAt || b.date).getTime());
-      case 'amount-desc':
-        return sorted.sort((a, b) => (b.total || 0) - (a.total || 0));
-      case 'amount-asc':
-        return sorted.sort((a, b) => (a.total || 0) - (b.total || 0));
-      case 'customer-asc':
-        return sorted.sort((a, b) => a.customerName.localeCompare(b.customerName));
-      case 'customer-desc':
-        return sorted.sort((a, b) => b.customerName.localeCompare(a.customerName));
-      default:
-        return sorted;
-    }
-  };
-
-  // Get filtered and sorted orders
-  const getFilteredOrders = () => {
-    let filtered = orders;
-
-    // Apply status filter
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(o => o.status === filterStatus);
-    }
-
-    // Apply production area filter
-    if (selectedAreaFilter !== 'all') {
-      console.log('🔍 Filtrando por área:', selectedAreaFilter);
-      console.log('📦 Total de pedidos antes del filtro:', filtered.length);
-
-      filtered = filtered.filter(order => {
-        // Check if any product in the order belongs to the selected area
-        const hasProductInArea = order.products?.some(product => {
-          console.log(`  - Producto "${product.name}": areaId=${product.productionAreaId}`);
-          return product.productionAreaId === selectedAreaFilter;
-        });
-
-        console.log(`  Pedido ${order.id.substring(0, 8)}: ${hasProductInArea ? '✅ INCLUIDO' : '❌ EXCLUIDO'}`);
-        return hasProductInArea;
-      });
-
-      console.log('📦 Total de pedidos después del filtro:', filtered.length);
-    }
-
-    // Apply search filter
-    filtered = filtered.filter(applySearchFilter);
-
-    // Apply advanced filters
-    filtered = filtered.filter(applyAdvancedFilters);
-
-    // Sort orders
-    filtered = sortOrders(filtered);
-
-    // Priority orders first
-    filtered.sort((a, b) => {
-      const aPriority = priorityOrders.has(a.id) ? 1 : 0;
-      const bPriority = priorityOrders.has(b.id) ? 1 : 0;
-      return bPriority - aPriority;
-    });
-
-    return filtered;
-  };
-
-  const filteredOrders = getFilteredOrders();
-  const hasActiveFilters = searchQuery || dateFrom || dateTo || minAmount || maxAmount || customerFilter;
 
   const handleStatusChange = (orderId: string, newStatus: Order['status']) => {
-    const progress = (newStatus === 'completed' || newStatus === 'dispatched' || newStatus === 'delivered' || newStatus === 'cancelled')
-      ? 100
-      : newStatus === 'in_progress' ? 50 : 0;
+    const paso = ORDER_FLOW.find((p) => p.key === newStatus);
+    const progress = paso ? paso.progress : newStatus === 'cancelled' ? 100 : 0;
     onUpdateOrderStatus(orderId, newStatus, progress);
-    toast.success(`Estado actualizado a: ${getStatusLabel(newStatus)}`);
-    setSelectedOrder(null);
+    toast.success(`Pedido ${ETIQUETA_ESTADO[newStatus]?.toLowerCase() ?? newStatus}`);
   };
 
-  // Touch/Swipe handling for filter navigation
-  const handleSwipe = (direction: number) => {
-    if (direction > 0) {
-      handleNextFilter();
-    } else {
-      handlePreviousFilter();
-    }
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return '';
-    const date = /^\d{4}-\d{2}-\d{2}/.test(dateString) ? parseDate(dateString) : new Date(dateString);
-    return date.toLocaleDateString('es-CL', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric'
-    });
-  };
-
-  const handlePrintGuide = () => {
-    if (!selectedOrder) return;
-
-    // Create printable content
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('No se pudo abrir la ventana de impresión');
-      return;
-    }
-
-    const guideContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Guía de Despacho - Pedido #${selectedOrder.id.slice(0, 8)}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 40px;
-              max-width: 800px;
-              margin: 0 auto;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 3px solid #1e40af;
-              padding-bottom: 20px;
-              margin-bottom: 30px;
-            }
-            .header-logo {
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              margin-bottom: 15px;
-            }
-            .header-logo img {
-              width: 180px;
-              height: auto;
-              object-fit: contain;
-            }
-            .header h1 {
-              color: #1e40af;
-              margin: 10px 0 0 0;
-              font-size: 1.8em;
-              letter-spacing: 2px;
-            }
-            .header h2 {
-              color: #1e40af;
-              margin: 10px 0 0 0;
-              font-size: 1.3em;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 10px;
-            }
-            .label {
-              font-weight: bold;
-            }
-            .products-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin: 20px 0;
-            }
-            .products-table th,
-            .products-table td {
-              border: 1px solid #ddd;
-              padding: 12px;
-              text-align: left;
-            }
-            .products-table th {
-              background-color: #1e40af;
-              color: white;
-            }
-            .total {
-              text-align: right;
-              font-size: 1.2em;
-              font-weight: bold;
-              margin-top: 20px;
-            }
-            .signature {
-              margin-top: 60px;
-              border-top: 2px solid #000;
-              padding-top: 10px;
-              width: 300px;
-            }
-            @media print {
-              body {
-                padding: 20px;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="header-logo">
-              <img src="${logoFull}" alt="Logo La Oca" onload="console.log('Logo loaded')" onerror="console.error('Logo failed to load'); this.style.display='none';" />
-            </div>
-            <h1>CONECTOCA</h1>
-            <h2>Guía de Despacho</h2>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Pedido #:</span> ${selectedOrder.id.slice(0, 8).toUpperCase()}</span>
-            <span><span class="label">Fecha:</span> ${formatDate(selectedOrder.createdAt || selectedOrder.date)}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Cliente:</span> ${selectedOrder.customerName || 'Cliente'}</span>
-            <span><span class="label">Hora:</span> ${formatTime(selectedOrder.createdAt || selectedOrder.date)}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Dirección de Despacho:</span> ${selectedOrder.deliveryAddress || 'Sin dirección registrada'}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Fecha límite:</span> ${formatDate(selectedOrder.deadline)}</span>
-          </div>
-          
-          <table class="products-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Cantidad</th>
-                <th>Precio Unit.</th>
-                <th>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${selectedOrder.products?.map(p => `
-                <tr>
-                  <td>${p.name}</td>
-                  <td>${p.quantity}</td>
-                  <td>$${p.price.toLocaleString('es-CL', { minimumFractionDigits: 2 })}</td>
-                  <td>$${(p.price * p.quantity).toLocaleString('es-CL', { minimumFractionDigits: 2 })}</td>
-                </tr>
-              `).join('') || ''}
-            </tbody>
-          </table>
-          
-          <div class="total">
-            Total: $${(selectedOrder.total || 0).toLocaleString('es-CL', { minimumFractionDigits: 2 })}
-          </div>
-          
-          <div style="margin-top: 40px;">
-            <p><span class="label">Despachado por:</span> _______________________</p>
-          </div>
-          
-          <div class="signature">
-            <p style="margin: 0;">Firma del receptor</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(guideContent);
-    printWindow.document.close();
-    printWindow.print();
-
-    toast.success('Guía de despacho generada');
-    setShowDeliveryGuide(false);
+  const cambiarEstadoManual = (order: Order, nuevo: Order['status']) => {
+    if (nuevo === order.status) return;
+    if (nuevo === 'cancelled' && !window.confirm('¿Cancelar este pedido?')) return;
+    handleStatusChange(order.id, nuevo);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-900 shadow-2xl" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-3">
-          {/* Top row with logo and controls */}
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors flex-shrink-0"
-              >
-                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-              </motion.button>
-
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <motion.img
-                  src={logo}
-                  alt="La Oca Logo"
-                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain flex-shrink-0"
-                  style={{ imageRendering: 'crisp-edges' }}
-                  whileHover={{ rotate: [0, -10, 10, -10, 0], transition: { duration: 0.5 } }}
-                />
-                <div className="min-w-0">
-                  <h1 className="text-base sm:text-xl tracking-wider truncate">CONECTOCA - Despacho</h1>
-                  <p className="text-[10px] sm:text-xs text-blue-200 opacity-80 truncate">Panel de Despacho</p>
-                </div>
-              </div>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
+          paddingTop: 'max(env(safe-area-inset-top), 16px)',
+        }}
+      >
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>{titulo}</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {lastSync ? `Actualizado ${lastSync.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : 'Pedidos de los locales'}
+              </p>
             </div>
-
-            {/* KDS Button */}
             {onGoToKDS && (
-              <Button
-                onClick={onGoToKDS}
-                className="bg-yellow-500 hover:bg-yellow-600 text-yellow-900 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 h-9 sm:h-10 flex-shrink-0"
-              >
-                <Grid3x3 className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Vista KDS</span>
-                <span className="sm:hidden">KDS</span>
-              </Button>
+              <button type="button" onClick={onGoToKDS} aria-label="Vista cocina" style={botonRedondo}>
+                <Grid3x3 style={{ width: 18, height: 18, color: '#fff' }} />
+              </button>
             )}
           </div>
 
-          {/* Triangular Navigation Buttons */}
-          <motion.div
-            className="flex items-center justify-between gap-2"
-            drag="x"
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.2}
-            onDragEnd={(event, info) => {
-              if (Math.abs(info.offset.x) > 50) {
-                handleSwipe(info.offset.x);
-              }
-            }}
-          >
-            {/* Left Triangle Button */}
-            <motion.button
-              onClick={handlePreviousFilter}
-              disabled={filterStatusIndex === 0}
-              whileHover={{ scale: filterStatusIndex === 0 ? 1 : 1.15 }}
-              whileTap={{ scale: filterStatusIndex === 0 ? 1 : 0.9 }}
-              className={`
-                flex-shrink-0 touch-manipulation
-                ${filterStatusIndex === 0
-                  ? 'opacity-30 cursor-not-allowed'
-                  : 'cursor-pointer opacity-80 hover:opacity-100'
-                }
-              `}
-              style={{
-                clipPath: 'polygon(100% 0%, 100% 100%, 0% 50%)',
-                backgroundColor: filterStatusIndex === 0 ? '#1e3a8a' : '#60a5fa',
-                width: '32px',
-                height: '32px',
-                minWidth: '32px',
-                minHeight: '32px'
-              }}
-              aria-label="Filtro anterior"
-            />
-
-            {/* Current Status Display */}
-            <motion.div
-              key={filterStatus}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{
-                type: "spring",
-                stiffness: 300,
-                damping: 25
-              }}
-              className={`
-                flex-1 px-4 py-2 rounded-lg text-center
-                ${getFilterStatusColor(filterStatus)}
-                shadow-md
-              `}
-            >
-              <div className="flex items-center justify-center gap-2">
-                {getFilterStatusIcon(filterStatus)}
-                <div>
-                  <p className="text-xs opacity-60 leading-tight">Mostrando</p>
-                  <p className="text-sm leading-tight">{getFilterStatusLabel(filterStatus)}</p>
-                </div>
-                <span className={`
-                  px-2 py-0.5 rounded-full text-xs
-                  ${filterStatus === 'all' ? 'bg-white/20' : 'bg-black/20'}
-                `}>
-                  {getStatusCount(filterStatus)}
-                </span>
-              </div>
-            </motion.div>
-
-            {/* Right Triangle Button */}
-            <motion.button
-              onClick={handleNextFilter}
-              disabled={filterStatusIndex === filterStatusOptions.length - 1}
-              whileHover={{ scale: filterStatusIndex === filterStatusOptions.length - 1 ? 1 : 1.15 }}
-              whileTap={{ scale: filterStatusIndex === filterStatusOptions.length - 1 ? 1 : 0.9 }}
-              className={`
-                flex-shrink-0 touch-manipulation
-                ${filterStatusIndex === filterStatusOptions.length - 1
-                  ? 'opacity-30 cursor-not-allowed'
-                  : 'cursor-pointer opacity-80 hover:opacity-100'
-                }
-              `}
-              style={{
-                clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                backgroundColor: filterStatusIndex === filterStatusOptions.length - 1 ? '#1e3a8a' : '#60a5fa',
-                width: '32px',
-                height: '32px',
-                minWidth: '32px',
-                minHeight: '32px'
-              }}
-              aria-label="Filtro siguiente"
-            />
-          </motion.div>
-
-          {/* Search and Advanced Filters */}
-          <div className="mt-3 space-y-2">
-            {/* Search Bar and Quick Actions */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Buscar por ID, cliente, producto, dirección..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-gray-300"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-white"
-                  >
-                    <XIcon className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-
-              {/* Sort Selector */}
-              <Select value={sortBy} onValueChange={(value: string) => setSortBy(value as SortOption)}>
-                <SelectTrigger className="w-[200px] bg-white/10 border-white/20 text-white">
-                  <ArrowUpDown className="w-4 h-4 mr-2" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="date-desc">Más reciente</SelectItem>
-                  <SelectItem value="date-asc">Más antiguo</SelectItem>
-                  <SelectItem value="amount-desc">Mayor monto</SelectItem>
-                  <SelectItem value="amount-asc">Menor monto</SelectItem>
-                  <SelectItem value="customer-asc">Cliente A-Z</SelectItem>
-                  <SelectItem value="customer-desc">Cliente Z-A</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* View Mode Toggle */}
-              <div className="flex gap-1 bg-white/10 rounded-lg p-1">
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'rgba(255,255,255,0.75)' }} />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar local, pedido o producto"
+                className="buscador-sobre-azul"
+                style={{
+                  width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none',
+                  background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 16,
+                  padding: searchQuery ? '0 34px 0 34px' : '0 12px 0 34px',
+                }}
+              />
+              {searchQuery && (
                 <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded transition-colors ${viewMode === 'grid' ? 'bg-white/20' : 'hover:bg-white/10'
-                    }`}
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Borrar búsqueda"
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <Grid3x3 className="w-4 h-4" />
+                  <X style={{ width: 14, height: 14, color: '#fff' }} />
                 </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded transition-colors ${viewMode === 'list' ? 'bg-white/20' : 'hover:bg-white/10'
-                    }`}
-                >
-                  <List className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Advanced Filters Toggle */}
-              <Popover open={showAdvancedFilters} onOpenChange={setShowAdvancedFilters}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-                  >
-                    <SlidersHorizontal className="w-4 h-4 mr-2" />
-                    Filtros
-                    {hasActiveFilters && (
-                      <Badge className="ml-2 bg-yellow-500 text-blue-900">
-                        {[dateFrom, dateTo, minAmount, maxAmount, customerFilter].filter(Boolean).length}
-                      </Badge>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 bg-gray-800 border-gray-700 text-white">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-medium">Filtros Avanzados</h4>
-                      {hasActiveFilters && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={clearAllFilters}
-                          className="text-yellow-400 hover:text-yellow-300 h-auto p-1"
-                        >
-                          Limpiar
-                        </Button>
-                      )}
-                    </div>
-
-                    <Separator className="bg-gray-700" />
-
-                    {/* Date Range */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Rango de Fechas</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Desde"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            type="date"
-                            value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Hasta"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Amount Range */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Rango de Monto</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Input
-                            type="number"
-                            value={minAmount}
-                            onChange={(e) => setMinAmount(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Mínimo"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            type="number"
-                            value={maxAmount}
-                            onChange={(e) => setMaxAmount(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Máximo"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Customer Filter */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Cliente</label>
-                      <Input
-                        type="text"
-                        value={customerFilter}
-                        onChange={(e) => setCustomerFilter(e.target.value)}
-                        className="bg-gray-700 border-gray-600 text-white"
-                        placeholder="Nombre del cliente..."
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              )}
             </div>
-
-            {/* Production Areas Filter - Only show if areas exist */}
-            {productionAreas.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className="flex items-center gap-2"
-              >
-                <Factory className="w-4 h-4 text-blue-300" />
-                <span className="text-sm text-blue-200">Área:</span>
-                <Select value={selectedAreaFilter} onValueChange={(value: string) => {
-                  setSelectedAreaFilter(value);
-                  toast.success(value === 'all' ? 'Mostrando todas las áreas' : `Filtrando por: ${productionAreas.find(a => a.id === value)?.name}`);
-                }}>
-                  <SelectTrigger className="w-[220px] bg-white/10 border-white/20 text-white">
-                    <Layers className="w-4 h-4 mr-2" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700">
-                    <SelectItem value="all" className="text-white hover:bg-white/10">
-                      <div className="flex items-center gap-2">
-                        <Layers className="w-4 h-4" />
-                        <span>Todas las áreas</span>
-                      </div>
-                    </SelectItem>
-                    {productionAreas.map((area) => (
-                      <SelectItem
-                        key={area.id}
-                        value={area.id}
-                        className="text-white hover:bg-white/10"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: area.color }}
-                          />
-                          {getAreaIcon(area.icon)}
-                          <span>{area.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </motion.div>
-            )}
-
-            {/* Filter Summary */}
-            {(searchQuery || hasActiveFilters || selectedAreaFilter !== 'all') && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 text-xs text-blue-200"
-              >
-                <Filter className="w-3 h-3" />
-                <span>
-                  Mostrando {filteredOrders.length} de {orders.length} pedidos
+            <button
+              type="button"
+              onClick={() => setFiltrosAbiertos((v) => !v)}
+              aria-label="Filtros"
+              aria-expanded={filtrosAbiertos}
+              style={{
+                ...botonRedondo, borderRadius: 10, position: 'relative',
+                background: filtrosAbiertos ? '#fff' : 'rgba(255,255,255,0.18)',
+              }}
+            >
+              <SlidersHorizontal style={{ width: 17, height: 17, color: filtrosAbiertos ? '#0047BA' : '#fff' }} />
+              {filtrosActivos > 0 && (
+                <span style={{ position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, background: IOS.rojo, color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>
+                  {filtrosActivos}
                 </span>
-                {priorityOrders.size > 0 && (
-                  <span className="flex items-center gap-1 text-yellow-400">
-                    <Star className="w-3 h-3 fill-current" />
-                    {priorityOrders.size} prioritario{priorityOrders.size !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </motion.div>
-            )}
+              )}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Orders Grid */}
-      <div className="max-w-7xl mx-auto px-6 pt-4">
+      <div className="max-w-7xl mx-auto" style={{ padding: '12px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Estados */}
+        <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 12px', padding: '0 16px' }}>
+          {ESTADOS.map((e) => {
+            const activo = filterStatus === e.key;
+            const n = conteo[e.key] || 0;
+            return (
+              <button
+                key={e.key}
+                type="button"
+                aria-pressed={activo}
+                onClick={() => setFilterStatus(e.key)}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? e.color : IOS.tarjeta,
+                  color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}
+              >
+                {!activo && e.key !== 'all' && <span style={{ width: 8, height: 8, borderRadius: 4, background: e.color }} />}
+                {e.label}
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Filtros */}
+        <AnimatePresence initial={false}>
+          {filtrosAbiertos && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div style={{ ...tarjeta, padding: 14, marginBottom: 12 }}>
+                <p style={etiquetaFiltro}>Ordenar</p>
+                <div role="group" style={{ display: 'flex', padding: 2, borderRadius: 9, background: IOS.relleno, marginBottom: 14 }}>
+                  {ORDEN.map(([v, t]) => {
+                    const activo = sortBy === v;
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        aria-pressed={activo}
+                        onClick={() => setSortBy(v)}
+                        style={{
+                          flex: 1, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13,
+                          fontWeight: activo ? 600 : 500, color: IOS.texto,
+                          background: activo ? '#fff' : 'transparent',
+                          boxShadow: activo ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                        }}
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <p style={etiquetaFiltro}>Ingresados entre</p>
+                <div style={{ display: 'flex', gap: 8, marginBottom: productionAreas.length > 0 ? 14 : 0 }}>
+                  <CampoFecha etiqueta="Desde" valor={dateFrom} onCambio={setDateFrom} />
+                  <CampoFecha etiqueta="Hasta" valor={dateTo} onCambio={setDateTo} />
+                </div>
+
+                {productionAreas.length > 0 && (
+                  <>
+                    <p style={etiquetaFiltro}>Área de producción</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {[{ id: 'all', name: 'Todas', color: undefined as string | undefined }, ...productionAreas].map((a) => {
+                        const activo = selectedAreaFilter === a.id;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            aria-pressed={activo}
+                            onClick={() => setSelectedAreaFilter(a.id)}
+                            style={{
+                              height: 30, padding: '0 12px', borderRadius: 15, cursor: 'pointer', fontSize: 13,
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              border: 'none', fontWeight: activo ? 600 : 500,
+                              background: activo ? IOS.azul : IOS.relleno,
+                              color: activo ? '#fff' : IOS.texto,
+                            }}
+                          >
+                            {a.color && <span style={{ width: 8, height: 8, borderRadius: 4, background: a.color }} />}
+                            {a.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {filtrosActivos > 0 && (
+                  <button type="button" onClick={limpiarFiltros} style={{ marginTop: 14, color: IOS.azul, fontSize: 15, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Encabezado de la lista */}
+        <p style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px' }}>
+          {filteredOrders.length === orders.length
+            ? `${filteredOrders.length} pedidos`
+            : `${filteredOrders.length} de ${orders.length} pedidos`}
+          {priorityOrders.size > 0 ? ` · ${priorityOrders.size} prioritario${priorityOrders.size !== 1 ? 's' : ''}` : ''}
+        </p>
+
         {filteredOrders.length === 0 ? (
-          <div className="text-center py-20">
-            <Package className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-            <p className="text-gray-400 text-xl">No hay pedidos en esta categoría</p>
+          <div style={{ ...tarjeta, padding: '40px 16px', textAlign: 'center' }}>
+            <Package style={{ width: 36, height: 36, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 15, color: IOS.secundario }}>No hay pedidos con estos filtros</p>
           </div>
         ) : (
-          <>
-            <div className={`${viewMode === 'grid'
-              ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              : "space-y-3"
-              } ${isLoading ? 'opacity-50 transition-opacity duration-300' : ''}`}>
-              <AnimatePresence>
-                {filteredOrders.map((order) => (
-                  <motion.div
-                    key={order.id}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    layout
-                    className="relative"
+          <div
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+            style={{ gap: 10, opacity: isLoading ? 0.5 : 1, transition: 'opacity 0.3s' }}
+          >
+            {filteredOrders.map((order) => {
+              const areas = areasDePedido(order);
+              const productos = order.products || [];
+              const resumen = productos.length
+                ? productos.slice(0, 3).map((p) => `${p.name} ×${fmtCantidad(p.quantity)}`).join(', ') +
+                  (productos.length > 3 ? ` y ${productos.length - 3} más` : '')
+                : order.productName;
+              const entrega = entregaCorta(order.deadline);
+              const prioritario = priorityOrders.has(order.id);
+              const color = colorEstado(order.status);
+              return (
+                <SwipeableOrderCard
+                  key={order.id}
+                  orderId={order.id}
+                  status={order.status}
+                  userRole={userRole}
+                  onTap={() => setSelectedOrder(order)}
+                  onCambiarEstado={(id, destino, previo) => aplicarCambioEstado(onUpdateOrderStatus, id, destino, previo)}
+                >
+                  <div
+                    className="fila-ios"
+                    style={{
+                      background: IOS.tarjeta, borderRadius: 16, padding: '12px 14px 12px 16px', cursor: 'pointer',
+                      boxShadow: prioritario ? `inset 0 0 0 2px ${IOS.amarillo}` : undefined,
+                      position: 'relative',
+                    }}
                   >
-                    {/* Priority Star Button */}
-                    <motion.button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        togglePriority(order.id);
-                      }}
-                      whileHover={{ scale: 1.2 }}
-                      whileTap={{ scale: 0.9 }}
-                      className={`absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all ${priorityOrders.has(order.id)
-                        ? 'bg-yellow-500 text-yellow-900 shadow-lg'
-                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                        }`}
-                    >
-                      <Star className={`w-4 h-4 ${priorityOrders.has(order.id) ? 'fill-current' : ''}`} />
-                    </motion.button>
+                    {/* Franja de estado */}
+                    <span style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 4, borderRadius: '0 3px 3px 0', background: color }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {prioritario && <Star style={{ width: 15, height: 15, color: IOS.amarillo, fill: IOS.amarillo, flexShrink: 0 }} />}
+                      <span className="truncate" style={{ flex: 1, fontSize: 17, fontWeight: 600, color: IOS.texto }}>{order.customerName}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 600, color, flexShrink: 0 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: 4, background: color }} />
+                        {ETIQUETA_ESTADO[order.status] ?? order.status}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: IOS.secundario, marginTop: 2 }}>
+                      <span>#{order.id.slice(0, 8).toUpperCase()}</span>
+                      <span>·</span>
+                      <span>{hora(order.createdAt || order.date)}</span>
+                      {entrega && (
+                        <>
+                          <span>·</span>
+                          <span style={{ color: entrega === 'Hoy' ? IOS.texto : IOS.secundario, fontWeight: entrega === 'Hoy' ? 600 : 400 }}>
+                            Entrega {['Hoy', 'Mañana', 'Ayer'].includes(entrega) ? entrega.toLowerCase() : entrega}
+                          </span>
+                        </>
+                      )}
+                      {order.notes?.trim() && (
+                        <MessageSquare aria-label="Tiene observaciones" style={{ width: 14, height: 14, color: '#FF9500', marginLeft: 2 }} />
+                      )}
+                    </div>
+                    <p style={{ fontSize: 14, color: '#3C3C43', marginTop: 8, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {resumen}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: areas.length ? 10 : 4 }}>
+                      <div style={{ flex: 1, display: 'flex', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+                        {areas.slice(0, 2).map((a) => (
+                          <span key={a.id} style={{ fontSize: 12, fontWeight: 500, padding: '2px 8px', borderRadius: 10, background: IOS.relleno, color: IOS.texto, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: 3, background: a.color || IOS.secundario }} />
+                            {a.name}
+                          </span>
+                        ))}
+                        {areas.length > 2 && <span style={{ fontSize: 12, color: IOS.secundario }}>+{areas.length - 2}</span>}
+                      </div>
+                      <span style={{ fontSize: 17, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatCLP(order.total || 0)}
+                      </span>
+                    </div>
+                  </div>
+                </SwipeableOrderCard>
+              );
+            })}
+          </div>
+        )}
 
-                    <SwipeableOrderCard
-                      orderId={order.id}
-                      status={order.status}
-                      userRole={userRole}
-                      onTap={() => setSelectedOrder(order)}
-                      onCambiarEstado={(id, destino, previo) => aplicarCambioEstado(onUpdateOrderStatus, id, destino, previo)}
-                    >
-                    <Card
-                      className={`
-                        cursor-pointer
-                        border-l-8 ${getStatusColor(order.status)}
-                        bg-gray-800 border-gray-700 text-white
-                        hover:shadow-2xl transition-all
-                        ${order.status === 'pending' ? 'animate-pulse' : ''}
-                        ${priorityOrders.has(order.id) ? 'ring-2 ring-yellow-500' : ''}
-                      `}
-                    >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2">
-                            <Hash className="w-4 h-4 text-gray-400" />
-                            <CardTitle className="text-lg">
-                              {order.id.slice(0, 8).toUpperCase()}
-                            </CardTitle>
-                            {order.notes && order.notes.trim() && (
-                              <div
-                                className="w-5 h-5 rounded-full flex items-center justify-center bg-gradient-to-br from-yellow-500 to-amber-600 shadow-lg"
-                                title="Tiene observaciones"
-                              >
-                                <MessageSquare className="w-3 h-3 text-yellow-900" />
-                              </div>
-                            )}
-                          </div>
-                          <Badge className={`${getStatusColor(order.status)} text-white border-0`}>
-                            <div className="flex items-center gap-1">
-                              {getStatusIcon(order.status)}
-                              <span className="text-xs">{getStatusLabel(order.status)}</span>
-                            </div>
-                          </Badge>
-                        </div>
-                      </CardHeader>
+        {filteredOrders.length > 0 && (
+          <p style={{ fontSize: 12, color: IOS.secundario, textAlign: 'center', marginTop: 12 }}>
+            Desliza un pedido a la derecha para avanzar su estado
+          </p>
+        )}
 
-                      <CardContent className="space-y-3">
-                        {/* Production Areas Badges - Show if order has areas */}
-                        {getOrderAreas(order).length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 -mt-1">
-                            {getOrderAreas(order).map((area) => (
-                              <Badge
-                                key={area.id}
-                                className="text-xs border-0 shadow-sm"
-                                style={{
-                                  backgroundColor: `${area.color}20`,
-                                  color: area.color,
-                                  borderLeft: `3px solid ${area.color}`
-                                }}
-                              >
-                                <div className="flex items-center gap-1">
-                                  {getAreaIcon(area.icon)}
-                                  <span>{area.name}</span>
-                                </div>
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className={`${viewMode === 'list' ? 'grid grid-cols-2 md:grid-cols-4 gap-4' : 'space-y-3'}`}>
-                          <div className="flex items-center gap-2 text-sm text-gray-300">
-                            <User className="w-4 h-4 text-blue-400" />
-                            <span>{order.customerName}</span>
-                          </div>
-
-                          <div className="flex items-center gap-2 text-sm text-gray-300">
-                            <Clock className="w-4 h-4 text-yellow-400" />
-                            <span>{formatTime(order.createdAt || order.date)}</span>
-                          </div>
-
-                          {viewMode === 'list' && (
-                            <>
-                              <div className="flex items-center gap-2 text-sm text-gray-300">
-                                <DollarSign className="w-4 h-4 text-green-400" />
-                                <span className="text-green-400">${(order.total || 0).toLocaleString('es-CL')}</span>
-                              </div>
-
-                              <div className="flex items-center gap-2 text-sm text-gray-300">
-                                <Package className="w-4 h-4 text-purple-400" />
-                                <span>{order.products?.length || 0} producto{(order.products?.length || 0) !== 1 ? 's' : ''}</span>
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        {viewMode === 'grid' && (
-                          <>
-                            <Separator className="bg-gray-700" />
-
-                            <div className="space-y-2">
-                              <p className="text-xs text-gray-400">Productos:</p>
-                              {order.products?.slice(0, 3).map((product, idx) => (
-                                <div key={idx} className="flex justify-between text-sm">
-                                  <span className="text-gray-300">{product.name}</span>
-                                  <span className="text-yellow-400">×{product.quantity}</span>
-                                </div>
-                              ))}
-                              {(order.products?.length || 0) > 3 && (
-                                <p className="text-xs text-gray-500">
-                                  +{(order.products?.length || 0) - 3} más...
-                                </p>
-                              )}
-                            </div>
-
-                            <Separator className="bg-gray-700" />
-
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-400">Total:</span>
-                              <span className="text-xl text-green-400">
-                                ${(order.total || 0).toLocaleString('es-CL')}
-                              </span>
-                            </div>
-                          </>
-                        )}
-                      </CardContent>
-                    </Card>
-                    </SwipeableOrderCard>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-
-            {/* Pagination Controls */}
-            {pagination && onPageChange && (
-              <div className="mt-6">
-                <PaginationControls
-                  pagination={pagination}
-                  onPageChange={onPageChange}
-                  isLoading={isLoading}
-                />
-              </div>
-            )}
-          </>
+        {pagination && onPageChange && (
+          <div style={{ marginTop: 16 }}>
+            <PaginationControls pagination={pagination} onPageChange={onPageChange} isLoading={isLoading} />
+          </div>
         )}
       </div>
 
-      {/* Order Detail Modal */}
-      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-gray-800 text-white border-gray-700">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-2xl">
-              <Package className="w-6 h-6 text-blue-400" />
-              Pedido #{selectedOrder?.id.slice(0, 8).toUpperCase()}
-            </DialogTitle>
-            <DialogDescription className="text-gray-400">
-              Detalles completos y opciones de gestión
-            </DialogDescription>
-          </DialogHeader>
-
+      {/* Hoja de detalle */}
+      {createPortal(
+        <AnimatePresence>
           {selectedOrder && (
-            <div className="space-y-6">
-              {/* Status Badge */}
-              <div className="flex items-center gap-3">
-                <Badge className={`${getStatusColor(selectedOrder.status)} text-white text-base px-4 py-2`}>
-                  {getStatusIcon(selectedOrder.status)}
-                  <span className="ml-2">{getStatusLabel(selectedOrder.status)}</span>
-                </Badge>
-              </div>
-
-              {/* Order Info */}
-              <div className="grid grid-cols-2 gap-4 p-4 bg-gray-900 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-blue-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Cliente</p>
-                    <p className="text-sm">{selectedOrder.customerName}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-yellow-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Fecha y hora de ingreso</p>
-                    <p className="text-sm">{new Date(selectedOrder.createdAt || selectedOrder.date).toLocaleString('es-CL', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-green-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Fecha límite</p>
-                    <p className="text-sm">{formatDate(selectedOrder.deadline)}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-orange-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Progreso</p>
-                    <p className="text-sm">{selectedOrder.progress}%</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Products List */}
-              <div>
-                <h3 className="text-sm text-gray-400 mb-3">Productos solicitados:</h3>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {selectedOrder.products?.map((product, idx) => (
-                    <div
-                      key={idx}
-                      className="flex justify-between items-center p-3 bg-gray-900 rounded-lg"
-                    >
-                      <div>
-                        <p className="text-sm">{product.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {formatCLP(product.price)} × {product.quantity}
-                        </p>
-                      </div>
-                      <p className="text-lg text-yellow-400">
-                        {formatCLP(product.price * product.quantity)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Separator className="bg-gray-700" />
-
-              {/* Total */}
-              <div className="flex justify-between items-center p-4 bg-gray-900 rounded-lg">
-                <span className="text-lg">Total del pedido:</span>
-                <span className="text-2xl text-green-400">
-                  ${(selectedOrder.total || 0).toLocaleString('es-CL', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-
-              {/* Notes Section - Always visible for debugging */}
-              <Separator className="bg-gray-700" />
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-yellow-400" />
-                  <h3 className="text-sm text-gray-400">Observaciones del Cliente:</h3>
-                </div>
-                {selectedOrder.notes && selectedOrder.notes.trim() ? (
-                  <div className="p-4 bg-gradient-to-br from-yellow-900/30 to-amber-900/20 border-2 border-yellow-600/40 rounded-lg">
-                    <p className="text-sm text-gray-200" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                      {selectedOrder.notes}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-gray-900/50 border border-gray-700 rounded-lg">
-                    <p className="text-sm text-gray-500 italic">
-                      Sin observaciones
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="space-y-3">
-                <p className="text-sm text-gray-400">Cambiar estado:</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'pending')}
-                    disabled={selectedOrder.status === 'pending'}
-                    className="bg-yellow-500 hover:bg-yellow-600 text-yellow-900"
-                  >
-                    <Clock className="w-4 h-4 mr-2" />
-                    Pendiente
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'in_progress')}
-                    disabled={selectedOrder.status === 'in_progress'}
-                    className="bg-blue-500 hover:bg-blue-600 text-blue-900"
-                  >
-                    <PlayCircle className="w-4 h-4 mr-2" />
-                    En Preparación
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'completed')}
-                    disabled={selectedOrder.status === 'completed'}
-                    className="bg-green-500 hover:bg-green-600 text-green-900"
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Listo
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'dispatched')}
-                    disabled={selectedOrder.status === 'dispatched'}
-                    className="bg-indigo-500 hover:bg-indigo-600 text-indigo-900"
-                  >
-                    <Package className="w-4 h-4 mr-2" />
-                    Despachado
-                  </Button>
-                </div>
-
-                {/* Secondary Actions Row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'delivered')}
-                    disabled={selectedOrder.status === 'delivered'}
-                    className="bg-teal-500 hover:bg-teal-600 text-teal-900"
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Recibido
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'cancelled')}
-                    disabled={selectedOrder.status === 'cancelled'}
-                    className="bg-red-500 hover:bg-red-600 text-red-900"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Cancelar
-                  </Button>
-                </div>
-
-                {/* Print Guide Button */}
-                {(selectedOrder.status === 'completed' || selectedOrder.status === 'cancelled') && (
-                  <Button
-                    onClick={() => setShowDeliveryGuide(true)}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Printer className="w-4 h-4 mr-2" />
-                    Imprimir Guía de Despacho
-                  </Button>
-                )}
-              </div>
-            </div>
+            <HojaPedido
+              key="hoja"
+              order={selectedOrder}
+              userRole={userRole}
+              prioritario={priorityOrders.has(selectedOrder.id)}
+              onPrioridad={() => togglePriority(selectedOrder.id)}
+              onClose={() => setSelectedOrder(null)}
+              onAvanzar={(destino) => handleStatusChange(selectedOrder.id, destino)}
+              onCambiarEstado={(nuevo) => cambiarEstadoManual(selectedOrder, nuevo)}
+              onImprimir={() => setShowDeliveryGuide(true)}
+              areas={areasDePedido(selectedOrder)}
+            />
           )}
-        </DialogContent>
-      </Dialog>
+        </AnimatePresence>,
+        document.body,
+      )}
 
-      {/* Delivery Guide Dialog */}
       {selectedOrder && (
-        <DeliveryGuide
-          order={selectedOrder}
-          open={showDeliveryGuide}
-          onClose={() => setShowDeliveryGuide(false)}
-        />
+        <DeliveryGuide order={selectedOrder} open={showDeliveryGuide} onClose={() => setShowDeliveryGuide(false)} />
       )}
     </div>
   );
 }
+
+function HojaPedido({
+  order, userRole, prioritario, onPrioridad, onClose, onAvanzar, onCambiarEstado, onImprimir, areas,
+}: {
+  order: Order;
+  userRole?: string;
+  prioritario: boolean;
+  onPrioridad: () => void;
+  onClose: () => void;
+  onAvanzar: (destino: Order['status']) => void;
+  onCambiarEstado: (nuevo: Order['status']) => void;
+  onImprimir: () => void;
+  areas: ProductionAreaType[];
+}) {
+  const siguiente = puedeAvanzar(order.status, userRole);
+  const color = colorEstado(order.status);
+  const productos = order.products || [];
+  const entrega = order.deadline
+    ? (/^\d{4}-\d{2}-\d{2}/.test(order.deadline) ? parseDate(order.deadline) : new Date(order.deadline))
+        .toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
+    : null;
+
+  useEffect(() => {
+    const alTeclear = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [onClose]);
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50 }}
+      />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Pedido de ${order.customerName}`}
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+        drag="y"
+        dragDirectionLock
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => { if (info.offset.y > 120 || info.velocity.y > 600) onClose(); }}
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 51, margin: '0 auto', maxWidth: 640,
+          background: IOS.fondo, borderRadius: '14px 14px 0 0', maxHeight: '92vh',
+          display: 'flex', flexDirection: 'column',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 0' }}>
+          <span style={{ width: 36, height: 5, borderRadius: 3, background: '#C7C7CC' }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px 12px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p className="truncate" style={{ fontSize: 20, fontWeight: 700, color: IOS.texto }}>{order.customerName}</p>
+            <p style={{ fontSize: 13, color: IOS.secundario }}>
+              Pedido #{order.id.slice(0, 8).toUpperCase()} · {hora(order.createdAt || order.date)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onPrioridad}
+            aria-label={prioritario ? 'Quitar prioridad' : 'Marcar prioritario'}
+            aria-pressed={prioritario}
+            style={{ ...botonGris, background: prioritario ? '#FFF4CC' : '#E3E3E8' }}
+          >
+            <Star style={{ width: 17, height: 17, color: prioritario ? '#B38F00' : '#3C3C43', fill: prioritario ? IOS.amarillo : 'none' }} />
+          </button>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={botonGris}>
+            <X style={{ width: 17, height: 17, color: '#3C3C43' }} />
+          </button>
+        </div>
+
+        <div style={{ overflowY: 'auto', padding: '0 16px max(env(safe-area-inset-bottom), 20px)' }}>
+          {/* Estado + siguiente paso */}
+          <div style={{ ...tarjeta, padding: 14, marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: siguiente ? 12 : 0 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 5, background: color }} />
+              <span style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>{ETIQUETA_ESTADO[order.status] ?? order.status}</span>
+            </div>
+            {siguiente && (
+              <button
+                type="button"
+                onClick={() => onAvanzar(siguiente.key)}
+                className="boton-ios"
+                style={{ width: '100%', height: 48, borderRadius: 12, border: 'none', background: colorEstado(siguiente.key), color: '#fff', fontSize: 17, fontWeight: 600, cursor: 'pointer' }}
+              >
+                {VERBO_PASO[siguiente.key] ?? `Pasar a ${siguiente.label}`}
+              </button>
+            )}
+          </div>
+
+          {order.notes?.trim() && (
+            <Grupo titulo="Observaciones">
+              <p style={{ padding: '12px 16px', fontSize: 15, color: IOS.texto, whiteSpace: 'pre-wrap', lineHeight: 1.45, background: '#FFF8E5' }}>
+                {order.notes}
+              </p>
+            </Grupo>
+          )}
+
+          <Grupo titulo={`${productos.length} productos`}>
+            {productos.map((p, i) => (
+              <div key={i}>
+                {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 64 }} />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                  <span style={{ minWidth: 36, height: 28, padding: '0 6px', borderRadius: 8, background: IOS.relleno, color: IOS.texto, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtCantidad(p.quantity)}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, color: IOS.texto }}>{p.name}</p>
+                    <p style={{ fontSize: 12, color: IOS.secundario }}>{formatCLP(p.price)} c/u</p>
+                  </div>
+                  <span style={{ fontSize: 15, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>{formatCLP(p.price * p.quantity)}</span>
+                </div>
+              </div>
+            ))}
+            <div style={{ height: 0.5, background: IOS.separador }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px' }}>
+              <span style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Total</span>
+              <span style={{ fontSize: 17, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>{formatCLP(order.total || 0)}</span>
+            </div>
+          </Grupo>
+
+          <Grupo titulo="Información">
+            <FilaInfo etiqueta="Entrega" valor={entrega ?? '—'} />
+            <FilaInfo etiqueta="Dirección" valor={order.deliveryAddress || 'Sin dirección'} />
+            <FilaInfo etiqueta="Ingresó" valor={new Date(order.createdAt || order.date).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })} ultima={areas.length === 0} />
+            {areas.length > 0 && <FilaInfo etiqueta="Áreas" valor={areas.map((a) => a.name).join(', ')} ultima />}
+          </Grupo>
+
+          <Grupo>
+            <label className="fila-ios" style={{ position: 'relative', display: 'flex', alignItems: 'center', minHeight: 48, padding: '0 16px', cursor: 'pointer' }}>
+              <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>Cambiar estado</span>
+              <span style={{ fontSize: 15, color: IOS.secundario }}>{ETIQUETA_ESTADO[order.status]}</span>
+              <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC', marginLeft: 4 }} />
+              <select
+                value={order.status}
+                onChange={(e) => onCambiarEstado(e.target.value as Order['status'])}
+                aria-label="Cambiar estado"
+                style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 16 }}
+              >
+                {Object.entries(ETIQUETA_ESTADO).map(([k, t]) => (
+                  <option key={k} value={k}>{t}</option>
+                ))}
+              </select>
+            </label>
+            <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+            <button
+              type="button"
+              onClick={onImprimir}
+              className="fila-ios"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, minHeight: 48, padding: '0 16px', color: IOS.azul, fontSize: 16, textAlign: 'left' }}
+            >
+              <Printer style={{ width: 18, height: 18 }} />
+              Imprimir guía de despacho
+            </button>
+          </Grupo>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
+function Grupo({ titulo, children }: { titulo?: string; children: React.ReactNode }) {
+  return (
+    <section style={{ marginBottom: 20 }}>
+      {titulo && (
+        <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>
+          {titulo}
+        </h3>
+      )}
+      <div style={tarjeta}>{children}</div>
+    </section>
+  );
+}
+
+function FilaInfo({ etiqueta, valor, ultima }: { etiqueta: string; valor: string; ultima?: boolean }) {
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, padding: '11px 16px', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 15, color: IOS.texto, flexShrink: 0 }}>{etiqueta}</span>
+        <span style={{ flex: 1, textAlign: 'right', fontSize: 15, color: IOS.secundario }}>{valor}</span>
+      </div>
+      {!ultima && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />}
+    </>
+  );
+}
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+};
+
+const botonGris: React.CSSProperties = {
+  width: 32, height: 32, borderRadius: 16, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#E3E3E8',
+};
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const etiquetaFiltro: React.CSSProperties = { fontSize: 13, color: IOS.secundario, marginBottom: 6 };
+
+/** Fecha nativa con su etiqueta visible: iOS no muestra placeholder en type=date. */
+function CampoFecha({ etiqueta, valor, onCambio }: { etiqueta: string; valor: string; onCambio: (v: string) => void }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, position: 'relative', borderRadius: 9, overflow: 'hidden', background: IOS.relleno }}>
+      {/* appearance:none + display:block: sin esto el date de iOS impone su ancho mínimo y se sale de la tarjeta. */}
+      <input
+        type="date"
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        aria-label={etiqueta}
+        style={{ ...campoFecha, display: 'block', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none', background: 'transparent', color: valor ? IOS.texto : 'transparent' }}
+      />
+      {!valor && (
+        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: IOS.secundario, pointerEvents: 'none' }}>
+          {etiqueta}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const campoFecha: React.CSSProperties = {
+  flex: 1, minWidth: 0, height: 36, borderRadius: 9, border: 'none', background: IOS.relleno,
+  padding: '0 10px', fontSize: 15, color: IOS.texto,
+};
