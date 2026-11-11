@@ -76,6 +76,11 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 
 const SCROLL_KEY = 'ordersScrollPosition';
 
+// Cantidad total del pedido: hasta 2 decimales y con coma ("2,5"), para que
+// los productos que se piden en decimales no muestren errores de redondeo.
+const formatearCantidad = (n: number) =>
+  new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(n || 0);
+
 export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onOpenNotifications, unreadNotifications, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, onUpdateOrderStatus, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
   // Control segmentado de la lista de pedidos (estilo iOS). Reemplaza al
   // botón "Mostrar/Ocultar Futuros", que mezclaba los pedidos de días
@@ -929,53 +934,80 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                                     {config.label}
                                   </Badge>
                                 </div>
-                                <CardDescription className="flex items-center gap-x-2 gap-y-1 text-xs mt-1.5 flex-wrap">
-                                  {categoriasDePedido(order).length > 0 && (
-                                    <span className="bg-blue-50 text-blue-700 border-blue-200 border rounded px-1.5 py-0.5" style={{ fontSize: '10px', fontWeight: 600 }}>
-                                      {categoriasDePedido(order).join(', ')}
+                                {/* Metadatos en dos líneas fijas en vez de una fila que se
+                                    partía en cualquier lado: con varias categorías el badge
+                                    ocupaba un renglón entero y los "•" quedaban colgando al
+                                    final de línea; las cantidades decimales salían como
+                                    "2.5000000001 unid.". */}
+                                <CardDescription className="text-xs mt-1.5">
+                                  <span className="flex items-center min-w-0" style={{ gap: 12, whiteSpace: 'nowrap' }}>
+                                    <span className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+                                      <Package className="w-3.5 h-3.5" />
+                                      {formatearCantidad(order.quantity)} unid.
                                     </span>
-                                  )}
-                                  <span className="flex items-center gap-1">
-                                    <Package className="w-3.5 h-3.5" />
-                                    {order.quantity} unid.
-                                  </span>
-                                  <span>•</span>
-                                  <span className="flex items-center gap-1">
-                                    <Clock className="w-3.5 h-3.5" />
-                                    {(() => {
-                                      const createdAt = order.createdAt || order.date;
-                                      // Compare LOCAL calendar dates (not UTC) to avoid midnight-shift false positives
-                                      const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                                      const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
-                                      const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
-                                      const hora = new Date(createdAt).toLocaleString('es-CL', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        hour12: false
-                                      });
-                                      // Si el pedido se hizo otro día que el de entrega, se
-                                      // antepone la fecha para que "14:32" no se lea como hora
-                                      // de hoy. Antes esto llevaba el rótulo "Pedido anticipado",
-                                      // que aparecía en casi todos los pedidos y sumaba ruido.
-                                      if (deadlineDay && createdDay && deadlineDay !== createdDay) {
-                                        const fecha = new Date(createdAt).toLocaleDateString('es-CL', {
-                                          day: 'numeric',
-                                          month: 'short'
+                                    <span className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+                                      <Clock className="w-3.5 h-3.5" />
+                                      {(() => {
+                                        const createdAt = order.createdAt || order.date;
+                                        // Compare LOCAL calendar dates (not UTC) to avoid midnight-shift false positives
+                                        const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                                        const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
+                                        const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
+                                        const hora = new Date(createdAt).toLocaleString('es-CL', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                          hour12: false
                                         });
-                                        return `${fecha}, ${hora}`;
-                                      }
-                                      return hora;
-                                    })()}
-                                  </span>
-                                  {order.customerName && (
-                                    <>
-                                      <span>•</span>
-                                      <span className="flex items-center gap-1 font-medium text-blue-600">
-                                        <Store className="w-3.5 h-3.5" />
-                                        {order.customerName}
+                                        // Si el pedido se hizo otro día que el de entrega, se
+                                        // antepone la fecha para que "14:32" no se lea como hora
+                                        // de hoy. Antes esto llevaba el rótulo "Pedido anticipado",
+                                        // que aparecía en casi todos los pedidos y sumaba ruido.
+                                        if (deadlineDay && createdDay && deadlineDay !== createdDay) {
+                                          const fecha = new Date(createdAt).toLocaleDateString('es-CL', {
+                                            day: 'numeric',
+                                            month: 'short'
+                                          });
+                                          return `${fecha}, ${hora}`;
+                                        }
+                                        return hora;
+                                      })()}
+                                    </span>
+                                    {/* El local se omite en la cuenta del propio local: ya
+                                        figura en el saludo y se repetía en cada tarjeta. */}
+                                    {order.customerName && order.customerName !== user.name && (
+                                      <span className="flex items-center gap-1 font-medium text-blue-600 min-w-0">
+                                        <Store className="w-3.5 h-3.5" style={{ flexShrink: 0 }} />
+                                        <span className="truncate">{order.customerName}</span>
                                       </span>
-                                    </>
-                                  )}
+                                    )}
+                                  </span>
+                                  {(() => {
+                                    const categorias = categoriasDePedido(order);
+                                    if (categorias.length === 0) return null;
+                                    const visibles = categorias.slice(0, 2);
+                                    const resto = categorias.length - visibles.length;
+                                    return (
+                                      <span className="flex items-center mt-1.5 min-w-0" style={{ gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                        {visibles.map((c) => (
+                                          <span
+                                            key={c}
+                                            className="truncate"
+                                            style={{
+                                              fontSize: 11, fontWeight: 600, color: '#1D4ED8', background: '#EFF6FF',
+                                              borderRadius: 6, padding: '2px 7px', maxWidth: '45%',
+                                            }}
+                                          >
+                                            {c}
+                                          </span>
+                                        ))}
+                                        {resto > 0 && (
+                                          <span style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', flexShrink: 0 }}>
+                                            +{resto}
+                                          </span>
+                                        )}
+                                      </span>
+                                    );
+                                  })()}
                                 </CardDescription>
                               </CardHeader>
                               <CardContent className="pt-0 pb-3">
