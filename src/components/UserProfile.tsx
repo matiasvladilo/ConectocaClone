@@ -9,8 +9,7 @@ import {
   MapPin,
   BarChart3,
   Clock,
-  Share2,
-  Copy,
+  Users,
   Volume2,
   Monitor,
   Factory,
@@ -31,6 +30,7 @@ import { version as versionApp } from '../../package.json';
 import { estiloBarraDeEstado } from '../utils/initNative';
 import { isNativePlatform } from '../utils/platform';
 import { seccionesParaRol } from '../utils/preferenciasNotificaciones';
+import { MembersPanel } from './MembersPanel';
 
 /**
  * Panel "Mi cuenta": se abre desde el botón ☰ del inicio y se desliza desde la
@@ -227,19 +227,17 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressValue, setAddressValue] = useState(user.address || '');
   const [isSaving, setIsSaving] = useState(false);
-  const [inviteCode, setInviteCode] = useState<string>('');
-  const [showInviteCode, setShowInviteCode] = useState(false);
-  const [loadingInviteCode, setLoadingInviteCode] = useState(false);
+  const [miembrosAbierto, setMiembrosAbierto] = useState(false);
 
   // Escape cierra el panel (teclado físico / web de escritorio).
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || miembrosAbierto) return;
     const alTeclear = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', alTeclear);
     return () => window.removeEventListener('keydown', alTeclear);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, miembrosAbierto]);
 
   // El panel es claro: la hora/batería pasan a texto oscuro mientras está
   // abierto y vuelven a blanco (sobre el azul de la app) al cerrarse.
@@ -250,6 +248,7 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
   // Al cerrar, descartar una edición de dirección a medio hacer.
   useEffect(() => {
     if (!isOpen) {
+      setMiembrosAbierto(false);
       setIsEditingAddress(false);
       setAddressValue(user.address || '');
     }
@@ -305,67 +304,6 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
     }
   };
 
-  const handleGenerateInviteCode = async () => {
-    if (!accessToken) {
-      toast.error('No se pudo obtener el token de acceso');
-      return;
-    }
-
-    setLoadingInviteCode(true);
-    try {
-      const { businessAPI } = await import('../utils/api');
-      const businessData = await businessAPI.get(accessToken);
-
-      if (businessData.inviteCode) {
-        setInviteCode(businessData.inviteCode);
-        setShowInviteCode(true);
-        toast.success('Código de invitación obtenido');
-      } else {
-        toast.error('No se encontró código de invitación');
-      }
-    } catch (error: any) {
-      console.error('Error getting invite code:', error);
-      toast.error('Error al obtener el código de invitación');
-    } finally {
-      setLoadingInviteCode(false);
-    }
-  };
-
-  const handleCopyInviteCode = async () => {
-    try {
-      // Try modern clipboard API first
-      await navigator.clipboard.writeText(inviteCode);
-      toast.success('Código copiado al portapapeles');
-    } catch (err) {
-      // Fallback for browsers that don't support clipboard API or have it blocked
-      try {
-        const textArea = document.createElement('textarea');
-        textArea.value = inviteCode;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-
-        const successful = document.execCommand('copy');
-        textArea.remove();
-
-        if (successful) {
-          toast.success('Código copiado al portapapeles');
-        } else {
-          // Show the code in an alert as final fallback
-          alert(`Tu código de invitación es: ${inviteCode}`);
-          toast.info('Selecciona y copia el código manualmente');
-        }
-      } catch (fallbackErr) {
-        // Last resort: show in alert
-        alert(`Tu código de invitación es: ${inviteCode}`);
-        toast.info('Copia el código manualmente');
-      }
-    }
-  };
-
   const handleTestNotification = async () => {
     const { playNotificationSound, notifyNewOrder, initializeAudio } = await import('../utils/notificationSound');
     await initializeAudio();
@@ -381,6 +319,7 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
       dispatch: 'Despacho',
       local: 'Local',
       pastry: 'Pastelería',
+      worker: 'Trabajador',
       user: 'Usuario'
     };
     return roleLabels[role] || 'Usuario';
@@ -554,6 +493,13 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                 </div>
               </Grupo>
 
+              {/* Miembros: se abre encima, sin cerrar "Mi cuenta". */}
+              {esAdmin && accessToken && (
+                <Grupo>
+                  <Fila icono={Users} color={IOS.azul} label="Miembros e invitaciones" onClick={() => setMiembrosAbierto(true)} />
+                </Grupo>
+              )}
+
               {/* Accesos */}
               {accesos.length > 0 && (
                 <Grupo titulo="Gestión">
@@ -619,32 +565,6 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                     detalle={user.address || 'Agregar'}
                     onClick={onUpdateProfile ? () => setIsEditingAddress(true) : undefined}
                   />
-                )}
-                {esAdmin && (
-                  <>
-                    <Separador />
-                    {showInviteCode ? (
-                      <Fila
-                        icono={Share2}
-                        color={IOS.morado}
-                        label="Código de invitación"
-                        detalle={
-                          <span style={{ color: IOS.texto, fontWeight: 600, letterSpacing: '0.08em' }}>{inviteCode}</span>
-                        }
-                        chevron={false}
-                        derecha={<Copy style={{ width: 17, height: 17, color: IOS.azul }} />}
-                        onClick={handleCopyInviteCode}
-                      />
-                    ) : (
-                      <Fila
-                        icono={Share2}
-                        color={IOS.morado}
-                        label="Código de invitación"
-                        detalle={loadingInviteCode ? 'Cargando…' : 'Mostrar'}
-                        onClick={loadingInviteCode ? undefined : handleGenerateInviteCode}
-                      />
-                    )}
-                  </>
                 )}
               </Grupo>
 
@@ -753,6 +673,12 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
           </motion.div>
         )}
       </AnimatePresence>
+      <MembersPanel
+        isOpen={isOpen && miembrosAbierto}
+        onClose={() => setMiembrosAbierto(false)}
+        accessToken={accessToken}
+        currentUserId={user.id}
+      />
     </>
   );
 }
