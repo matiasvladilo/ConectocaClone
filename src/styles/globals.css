@@ -859,3 +859,8 @@ body {
 .buscador-sobre-azul::-webkit-search-cancel-button {
   display: none;
 }
+
+/* Botón principal iOS: se atenúa al tocarlo, como los botones del sistema. */
+.boton-ios:active:not(:disabled) {
+  opacity: 0.7;
+}

@@ -1,53 +1,105 @@
-import React, { useState, useMemo } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Checkbox } from './ui/checkbox';
-import { Shield, UserIcon as UserCircle, KeyRound, ArrowLeft, Mail, Lock, Sparkles, Eye, EyeOff } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ChevronLeft, ChevronsUpDown, Eye, EyeOff } from 'lucide-react';
 import logo from '../assets/logo-icon.png';
 import { toast } from 'sonner';
 import { authAPI } from '../utils/api';
-import { motion } from 'motion/react';
+import { estiloBarraDeEstado } from '../utils/initNative';
 
 interface LoginScreenProps {
   onLogin: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
 }
 
-// Frases motivacionales con emojis (30 frases únicas)
-const motivationalPhrases = [
-  { emoji: '☀️', text: 'Hoy puede ser un gran día si tú decides que así sea.' },
-  { emoji: '🌿', text: 'Empieza despacio, pero empieza.' },
-  { emoji: '☕', text: 'Un buen café y la mejor actitud: la jornada ya está ganada.' },
-  { emoji: '🥑', text: 'Sigue, aunque sea a paso de palta madura, pero sigue.' },
-  { emoji: '💛', text: 'Hazlo con alegría, que el trabajo también puede brillar.' },
-  { emoji: '🌈', text: 'El día se ve mejor cuando tú decides mirarlo bonito.' },
-  { emoji: '😊', text: 'La sonrisa es la mejor herramienta de gestión.' },
-  { emoji: '✨', text: 'Hoy gestionamos sueños, no solo tareas.' },
-  { emoji: '⚙️', text: 'Tu buena vibra es parte del proceso productivo.' },
-  { emoji: '🌟', text: 'Cada día es una nueva oportunidad de sorprenderte.' },
-  { emoji: '🎯', text: 'Cada pedido es una oportunidad para brillar.' },
-  { emoji: '🚀', text: 'Despega con energía, aterriza con resultados.' },
-  { emoji: '💪', text: 'Tu esfuerzo de hoy es el éxito de mañana.' },
-  { emoji: '🎨', text: 'Crea con pasión, entrega con orgullo.' },
-  { emoji: '🌺', text: 'Florece donde estés plantado.' },
-  { emoji: '🔥', text: 'Enciende tu motivación, ilumina tu día.' },
-  { emoji: '🎵', text: 'Trabaja con ritmo, vive con armonía.' },
-  { emoji: '🌸', text: 'Pequeños pasos también hacen grandes caminos.' },
-  { emoji: '⭐', text: 'Brilla con luz propia, no con la de otros.' },
-  { emoji: '🎪', text: 'La vida es mejor cuando trabajas con alegría.' },
-  { emoji: '🌻', text: 'Gira siempre hacia el sol, como un girasol.' },
-  { emoji: '🦋', text: 'Las mejores transformaciones empiezan hoy.' },
-  { emoji: '🎁', text: 'Cada día es un regalo, ábrelo con ilusión.' },
-  { emoji: '🌙', text: 'Incluso en la oscuridad, siempre hay luz.' },
-  { emoji: '🍀', text: 'La suerte favorece a quienes trabajan con constancia.' },
-  { emoji: '🎈', text: 'Mantente elevado, mantén tu espíritu arriba.' },
-  { emoji: '🌊', text: 'Fluye con los cambios, adapta y prospera.' },
-  { emoji: '🏔️', text: 'La cima se ve mejor desde la base.' },
-  { emoji: '🎭', text: 'Elige ser protagonista de tu propia historia.' },
-  { emoji: '🌱', text: 'Lo que siembras hoy, lo cosechas mañana.' }
-];
+// Paleta iOS compartida con el resto de las pantallas rediseñadas.
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: 'rgba(60,60,67,0.6)',
+  separador: 'rgba(60,60,67,0.18)',
+  azul: '#007AFF',
+};
+
+const estiloInput: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  height: 44,
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  // 17px: tamaño de texto de iOS y, al ser ≥16px, Safari no hace zoom al enfocar.
+  fontSize: 17,
+  color: IOS.texto,
+  padding: 0,
+};
+
+/** Una fila de un grupo estilo Ajustes. `separador` dibuja la línea inferior con sangría. */
+function Fila({ children, separador }: { children: React.ReactNode; separador?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 16, position: 'relative' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flex: 1, paddingRight: 16, minHeight: 44 }}>{children}</div>
+      {separador && (
+        <div style={{ position: 'absolute', left: 16, right: 0, bottom: 0, height: 0.5, background: IOS.separador }} />
+      )}
+    </div>
+  );
+}
+
+function Grupo({ children, pie }: { children: React.ReactNode; pie?: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>{children}</div>
+      {pie && (
+        <p style={{ fontSize: 13, lineHeight: '18px', color: IOS.secundario, margin: '6px 16px 0' }}>{pie}</p>
+      )}
+    </div>
+  );
+}
+
+function Interruptor({ activo, onCambio, etiqueta }: { activo: boolean; onCambio: (v: boolean) => void; etiqueta: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={activo}
+      aria-label={etiqueta}
+      onClick={() => onCambio(!activo)}
+      style={{
+        width: 51, height: 31, borderRadius: 999, border: 'none', padding: 2, flexShrink: 0,
+        background: activo ? '#34C759' : 'rgba(120,120,128,0.16)',
+        transition: 'background 0.2s', cursor: 'pointer',
+      }}
+    >
+      <span
+        style={{
+          display: 'block', width: 27, height: 27, borderRadius: 999, background: '#fff',
+          boxShadow: '0 3px 8px rgba(0,0,0,0.15), 0 1px 1px rgba(0,0,0,0.16)',
+          transform: activo ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 0.2s',
+        }}
+      />
+    </button>
+  );
+}
+
+function BotonPrincipal({ children, cargando }: { children: React.ReactNode; cargando: boolean }) {
+  return (
+    <button
+      type="submit"
+      disabled={cargando}
+      className="boton-ios"
+      style={{
+        width: '100%', height: 50, borderRadius: 12, border: 'none',
+        background: IOS.azul, color: '#fff', fontSize: 17, fontWeight: 600,
+        opacity: cargando ? 0.5 : undefined, cursor: cargando ? 'default' : 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const estiloEnlace: React.CSSProperties = {
+  background: 'none', border: 'none', padding: 8, color: IOS.azul, fontSize: 15, cursor: 'pointer',
+};
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [email, setEmail] = useState('');
@@ -55,7 +107,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [name, setName] = useState('');
   // A-02: el tipo se acota a los roles de autoservicio. Los elevados los
   // otorga un admin después del alta, no el propio usuario al registrarse.
-  const [role, setRole] = useState<'local' | 'worker' | 'user'>('user');
+  const [role, setRole] = useState<'local' | 'user'>('user');
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPasswordRecovery, setShowPasswordRecovery] = useState(false);
@@ -68,10 +120,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [businessName, setBusinessName] = useState('');
   const [businessCode, setBusinessCode] = useState('');
 
-  // Seleccionar una frase aleatoria al cargar (solo una vez, sin rotación automática)
-  const currentPhrase = useMemo(() => {
-    const randomIndex = Math.floor(Math.random() * motivationalPhrases.length);
-    return motivationalPhrases[randomIndex];
+
+  // La pantalla es clara: la hora y la batería van en negro mientras se ve, y
+  // vuelven a blanco (el azul de marca del resto de la app) al salir.
+  useEffect(() => {
+    void estiloBarraDeEstado('oscuro');
+    return () => { void estiloBarraDeEstado('claro'); };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -208,645 +262,273 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     }
   };
 
-  // Password Recovery View
+
+  const contenedor: React.CSSProperties = {
+    minHeight: '100dvh',
+    background: IOS.fondo,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: 'calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px)',
+  };
+  const columna: React.CSSProperties = { width: '100%', maxWidth: 400, margin: 'auto 0' };
+
+  // ── Recuperar contraseña ──────────────────────────────────────────────────
   if (showPasswordRecovery) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center p-3 sm:p-4 md:p-6 relative overflow-hidden"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)'
-        }}
-      >
-        {/* Decorative elements */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <motion.div
-            className="absolute -top-24 -right-24 w-64 h-64 sm:w-96 sm:h-96 bg-white/5 rounded-full blur-3xl"
-            animate={{
-              scale: [1, 1.2, 1],
-              opacity: [0.3, 0.5, 0.3]
-            }}
-            transition={{ duration: 8, repeat: Infinity }}
-          />
-          <motion.div
-            className="absolute -bottom-24 -left-24 w-64 h-64 sm:w-96 sm:h-96 bg-yellow-400/10 rounded-full blur-3xl"
-            animate={{
-              scale: [1.2, 1, 1.2],
-              opacity: [0.2, 0.4, 0.2]
-            }}
-            transition={{ duration: 10, repeat: Infinity }}
-          />
+      <div style={contenedor}>
+        <div style={{ width: '100%', maxWidth: 400 }}>
+          <button
+            type="button"
+            onClick={() => setShowPasswordRecovery(false)}
+            disabled={isLoading}
+            style={{ ...estiloEnlace, display: 'flex', alignItems: 'center', gap: 2, padding: '8px 0', fontSize: 17 }}
+          >
+            <ChevronLeft style={{ width: 24, height: 24, marginLeft: -6 }} />
+            Iniciar sesión
+          </button>
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="w-full max-w-md relative z-10"
-        >
-          <Card
-            className="w-full shadow-2xl border border-[#E0EDFF] backdrop-blur-sm"
-            style={{
-              borderRadius: '16px',
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)'
-            }}
-          >
-            <CardHeader className="text-center space-y-3 sm:space-y-4 pb-4 sm:pb-6 pt-6 sm:pt-8 px-4 sm:px-6">
-              <motion.div
-                className="flex flex-col items-center justify-center gap-3 sm:gap-4"
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.2, duration: 0.3 }}
-              >
-                <div
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center relative"
-                  style={{
-                    background: 'linear-gradient(135deg, #0059FF 0%, #0047BA 100%)',
-                    boxShadow: '0 8px 24px rgba(0, 89, 255, 0.3)'
-                  }}
-                >
-                  <KeyRound className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
-                  <div className="absolute inset-0 rounded-full bg-white/20 animate-pulse" />
-                </div>
-                <div className="space-y-2">
-                  <CardTitle className="text-[#0047BA] text-2xl sm:text-[28px]" style={{ fontWeight: 600 }}>
-                    Recuperar Acceso
-                  </CardTitle>
-                  <CardDescription className="text-[#4B5563] text-sm sm:text-[15px] px-2">
-                    Ingresa tu correo para recibir un enlace de recuperación
-                  </CardDescription>
-                </div>
-              </motion.div>
-            </CardHeader>
+        <div style={{ width: '100%', maxWidth: 400, marginTop: 24 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: IOS.texto, margin: '0 0 8px', letterSpacing: 0.2 }}>
+            Recuperar contraseña
+          </h1>
+          <p style={{ fontSize: 15, color: IOS.secundario, margin: '0 0 24px' }}>
+            Te enviaremos un enlace a tu correo para crear una nueva.
+          </p>
 
-            <CardContent className="px-4 sm:px-8 pb-6 sm:pb-8">
-              <form onSubmit={handlePasswordRecovery} className="space-y-4 sm:space-y-5">
-                <div className="space-y-2">
-                  <Label htmlFor="recovery-email" className="flex items-center gap-2 text-[#0047BA] text-sm" style={{ fontWeight: 500 }}>
-                    <Mail className="w-4 h-4" />
-                    Correo electrónico
-                  </Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
-                    <Input
-                      id="recovery-email"
-                      type="email"
-                      placeholder="tu@email.com"
-                      value={recoveryEmail}
-                      onChange={(e) => setRecoveryEmail(e.target.value)}
-                      required
-                      className="pl-10 sm:pl-11 h-11 sm:h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all text-sm sm:text-base"
-                      style={{ borderRadius: '10px' }}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1.5">
-                    Te enviaremos un enlace seguro para restablecer tu contraseña
-                  </p>
-                </div>
-
-                <motion.div whileTap={{ scale: 0.98 }}>
-                  <Button
-                    type="submit"
-                    className="w-full h-11 sm:h-12 text-white relative overflow-hidden group text-sm sm:text-[15px]"
-                    disabled={isLoading}
-                    style={{
-                      background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                      borderRadius: '9999px',
-                      boxShadow: '0 4px 14px rgba(0, 89, 255, 0.4)',
-                      fontWeight: 600
-                    }}
-                  >
-                    <span className="relative z-10">
-                      {isLoading ? 'Enviando...' : 'Enviar enlace de recuperación'}
-                    </span>
-                    <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </Button>
-                </motion.div>
-              </form>
-
-              {/* Info box */}
-              <div className="mt-4 sm:mt-5 p-3 sm:p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200/50">
-                <p className="text-xs text-blue-900">
-                  💡 <strong>Nota:</strong> El enlace de recuperación será válido por 1 hora.
-                  Revisa tu bandeja de spam si no ves el correo en unos minutos.
-                </p>
-              </div>
-
-              <div className="mt-5 sm:mt-6 text-center">
-                <motion.button
-                  onClick={() => setShowPasswordRecovery(false)}
-                  className="flex items-center gap-2 text-[#2563EB] hover:text-[#0047BA] mx-auto group transition-colors text-sm"
-                  disabled={isLoading}
-                  type="button"
-                  whileHover={{ x: -4 }}
-                  transition={{ duration: 0.2 }}
-                  style={{ fontWeight: 500 }}
-                >
-                  <ArrowLeft className="w-4 h-4 group-hover:animate-pulse" />
-                  <span className="underline">Volver al inicio de sesión</span>
-                </motion.button>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+          <form onSubmit={handlePasswordRecovery}>
+            <Grupo pie="El enlace vence en 1 hora. Si no lo ves, revisa la carpeta de spam.">
+              <Fila>
+                <input
+                  id="recovery-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  placeholder="Correo electrónico"
+                  aria-label="Correo electrónico"
+                  value={recoveryEmail}
+                  onChange={(e) => setRecoveryEmail(e.target.value)}
+                  required
+                  style={estiloInput}
+                />
+              </Fila>
+            </Grupo>
+            <BotonPrincipal cargando={isLoading}>{isLoading ? 'Enviando…' : 'Enviar enlace'}</BotonPrincipal>
+          </form>
+        </div>
       </div>
     );
   }
 
-  // Main Login View
+  // ── Iniciar sesión / Crear cuenta ─────────────────────────────────────────
+  const segmento = (valor: 'create' | 'join', texto: string) => {
+    const activo = businessAction === valor;
+    return (
+      <button
+        type="button"
+        onClick={() => setBusinessAction(valor)}
+        aria-pressed={activo}
+        style={{
+          flex: 1, height: 28, border: 'none', borderRadius: 7, fontSize: 13,
+          fontWeight: activo ? 600 : 500, color: IOS.texto, cursor: 'pointer',
+          background: activo ? '#fff' : 'transparent',
+          boxShadow: activo ? '0 3px 8px rgba(0,0,0,0.12), 0 3px 1px rgba(0,0,0,0.04)' : 'none',
+        }}
+      >
+        {texto}
+      </button>
+    );
+  };
+
+  const campoPassword = (
+    <Fila>
+      <input
+        id="password"
+        type={showPassword ? 'text' : 'password'}
+        autoComplete={isCreatingAccount ? 'new-password' : 'current-password'}
+        placeholder={isCreatingAccount ? 'Contraseña (mín. 8 caracteres)' : 'Contraseña'}
+        aria-label="Contraseña"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+        minLength={8}
+        style={estiloInput}
+      />
+      <button
+        type="button"
+        onClick={() => setShowPassword((prev) => !prev)}
+        aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        tabIndex={-1}
+        style={{ background: 'none', border: 'none', padding: '8px 0 8px 8px', color: 'rgba(60,60,67,0.3)', cursor: 'pointer' }}
+      >
+        {showPassword ? <EyeOff style={{ width: 20, height: 20 }} /> : <Eye style={{ width: 20, height: 20 }} />}
+      </button>
+    </Fila>
+  );
+
+  const tamLogo = isCreatingAccount ? 88 : 132;
+
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-3 sm:p-4 md:p-6 relative overflow-hidden"
-      style={{
-        background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)'
-      }}
-    >
-      {/* Decorative elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute -top-24 -right-24 w-64 h-64 sm:w-96 sm:h-96 bg-white/5 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-        <motion.div
-          className="absolute -bottom-24 -left-24 w-64 h-64 sm:w-96 sm:h-96 bg-yellow-400/10 rounded-full blur-3xl"
-          animate={{
-            scale: [1.2, 1, 1.2],
-            opacity: [0.2, 0.4, 0.2]
-          }}
-          transition={{ duration: 10, repeat: Infinity }}
-        />
+    <div style={contenedor}>
+      <div style={columna}>
+        <div style={{ textAlign: 'center', marginBottom: isCreatingAccount ? 28 : 40 }}>
+          {/* El logo manda: grande como ícono de app (radio ≈22% del lado, la
+              proporción de iOS). Al crear cuenta se achica para dejar lugar al formulario. */}
+          <div
+            style={{
+              width: tamLogo, height: tamLogo, borderRadius: tamLogo * 0.225, background: '#0c3c84',
+              margin: `0 auto ${isCreatingAccount ? 16 : 20}px`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 10px 30px rgba(12,60,132,0.25)',
+              transition: 'width 0.25s, height 0.25s, border-radius 0.25s',
+            }}
+          >
+            <img src={logo} alt="La Oca" style={{ width: '78%', height: '78%', objectFit: 'contain' }} />
+          </div>
+          <h1 style={{ fontSize: 30, fontWeight: 700, color: '#0c3c84', margin: 0, letterSpacing: -0.5 }}>
+            {isCreatingAccount ? 'Crear cuenta' : 'Conectoca'}
+          </h1>
+          <p style={{ fontSize: 17, color: IOS.secundario, margin: '4px 0 0' }}>
+            {isCreatingAccount ? 'Crea un negocio o únete a uno existente' : 'Pedidos de La Oca'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          {isCreatingAccount && (
+            <>
+              <div
+                role="group"
+                aria-label="Negocio"
+                style={{ display: 'flex', background: 'rgba(118,118,128,0.12)', borderRadius: 9, padding: 2, marginBottom: 20 }}
+              >
+                {segmento('create', 'Crear negocio')}
+                {segmento('join', 'Unirme a uno')}
+              </div>
+
+              {businessAction === 'create' ? (
+                <Grupo pie="Serás el administrador del negocio.">
+                  <Fila>
+                    <input
+                      id="businessName"
+                      type="text"
+                      autoComplete="organization"
+                      placeholder="Nombre del negocio"
+                      aria-label="Nombre del negocio"
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                      required
+                      minLength={3}
+                      style={estiloInput}
+                    />
+                  </Fila>
+                </Grupo>
+              ) : (
+                <Grupo pie="Pide el código al administrador del negocio. Los roles de producción, despacho y administración se asignan después.">
+                  <Fila separador>
+                    <input
+                      id="businessCode"
+                      type="text"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      placeholder="Código de invitación"
+                      aria-label="Código de invitación"
+                      value={businessCode}
+                      onChange={(e) => setBusinessCode(e.target.value.toUpperCase())}
+                      required
+                      style={{ ...estiloInput, letterSpacing: businessCode ? 1 : 0 }}
+                    />
+                  </Fila>
+                  {/*
+                    A-02: solo roles de autoservicio. Los elevados los otorga un
+                    admin desde el panel de miembros; el servidor ignora cualquier
+                    otro valor (ROLES_AUTOSERVICIO en el Edge Function).
+                  */}
+                  <Fila>
+                    <label htmlFor="role" style={{ fontSize: 17, color: IOS.texto, flex: 1 }}>Rol</label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, color: IOS.secundario, fontSize: 17 }}>
+                      {role === 'local' ? 'Local' : 'Usuario'}
+                      <ChevronsUpDown aria-hidden="true" style={{ width: 16, height: 16 }} />
+                      <select
+                        id="role"
+                        value={role}
+                        onChange={(e) => setRole(e.target.value as 'local' | 'user')}
+                        style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 17 }}
+                      >
+                        <option value="user">Usuario</option>
+                        <option value="local">Local</option>
+                      </select>
+                    </div>
+                  </Fila>
+                </Grupo>
+              )}
+            </>
+          )}
+
+          <Grupo>
+            {isCreatingAccount && (
+              <Fila separador>
+                <input
+                  id="name"
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Nombre completo"
+                  aria-label="Nombre completo"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  style={estiloInput}
+                />
+              </Fila>
+            )}
+            <Fila separador>
+              <input
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete={isCreatingAccount ? 'email' : 'username'}
+                autoCapitalize="none"
+                placeholder="Correo electrónico"
+                aria-label="Correo electrónico"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                style={estiloInput}
+              />
+            </Fila>
+            {campoPassword}
+          </Grupo>
+
+          {!isCreatingAccount && (
+            <Grupo>
+              <Fila>
+                <span id="remember-me-label" style={{ fontSize: 17, color: IOS.texto, flex: 1 }}>Mantener sesión iniciada</span>
+                <Interruptor activo={rememberMe} onCambio={setRememberMe} etiqueta="Mantener sesión iniciada" />
+              </Fila>
+            </Grupo>
+          )}
+
+          <BotonPrincipal cargando={isLoading}>
+            {isLoading ? (isCreatingAccount ? 'Creando cuenta…' : 'Ingresando…') : (isCreatingAccount ? 'Crear cuenta' : 'Iniciar sesión')}
+          </BotonPrincipal>
+        </form>
+
+        {!isCreatingAccount && (
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <button type="button" onClick={() => setShowPasswordRecovery(true)} style={estiloEnlace}>
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+        )}
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="w-full max-w-md relative z-10"
-      >
-        <Card
-          className="w-full shadow-2xl border border-[#E0EDFF] backdrop-blur-sm"
-          style={{
-            borderRadius: '16px',
-            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)'
-          }}
-        >
-          <CardHeader className="text-center space-y-4 pb-6 pt-8">
-            <motion.div
-              className="flex flex-col items-center justify-center gap-4"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.2, duration: 0.3 }}
-            >
-              {/* Logo */}
-              <motion.div
-                className="relative rounded-full flex items-center justify-center shadow-lg"
-                style={{ width: '7rem', height: '7rem', backgroundColor: '#0c3c84' }}
-                whileHover={{ scale: 1.05 }}
-                transition={{ duration: 0.2 }}
-              >
-                <img
-                  src={logo}
-                  alt="La Oca Logo"
-                  className="object-contain relative z-10"
-                  style={{ width: '5rem', height: '5rem', imageRendering: 'crisp-edges' }}
-                />
-              </motion.div>
-
-              {/* Title with accent */}
-              <div className="space-y-2 relative">
-                <CardTitle
-                  className="text-[#0047BA] tracking-tight"
-                  style={{ fontSize: '32px', fontWeight: 600 }}
-                >
-                  CONECTOCA
-                </CardTitle>
-                <div className="h-1 w-24 mx-auto rounded-full bg-gradient-to-r from-[#0059FF] to-[#FFD43B]" />
-                <CardDescription
-                  className="text-[#4B5563] mt-3"
-                  style={{ fontSize: '15px' }}
-                >
-                  {isCreatingAccount ? 'Crea tu cuenta' : 'Conecta con tu centro de fabricación'}
-                </CardDescription>
-              </div>
-            </motion.div>
-          </CardHeader>
-
-          <CardContent className="px-8 pb-8">
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {isCreatingAccount && (
-                <>
-                  <motion.div
-                    className="space-y-2"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <Label htmlFor="name" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                      <UserCircle className="w-4 h-4" />
-                      Nombre completo
-                    </Label>
-                    <div className="relative">
-                      <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <Input
-                        id="name"
-                        type="text"
-                        placeholder="Juan Pérez"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                        className="pl-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
-                        style={{ borderRadius: '10px' }}
-                      />
-                    </div>
-                  </motion.div>
-
-                  {/* Role Selector - Only show when joining a business */}
-                  {businessAction === 'join' && (
-                    <motion.div
-                      className="space-y-2"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      transition={{ duration: 0.3, delay: 0.1 }}
-                    >
-                      <Label htmlFor="role" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                        <Shield className="w-4 h-4" />
-                        Rol
-                      </Label>
-                      <Select value={role} onValueChange={(value: 'local' | 'worker' | 'user') => setRole(value)}>
-                        <SelectTrigger
-                          className="h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20"
-                          style={{ borderRadius: '10px' }}
-                        >
-                          <SelectValue placeholder="Selecciona tu rol" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="user">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-                              <span>Usuario</span>
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="local">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                              <span>Local</span>
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="worker">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                              <span>Trabajador</span>
-                            </div>
-                          </SelectItem>
-                          {/*
-                            A-02: acá había además Administrador, Producción,
-                            Despacho y Pastelería. El servidor tomaba el rol tal
-                            cual venía, así que cualquiera que recibiera el
-                            código de invitación para entrar como local podía
-                            elegir "Administrador — Acceso completo al sistema"
-                            y quedar con acceso total al negocio.
-
-                            Los cuatro roles elevados ahora los otorga un admin
-                            desde el panel de miembros. El servidor ignora
-                            cualquier otro valor que llegue acá (ver
-                            ROLES_AUTOSERVICIO en el Edge Function), así que
-                            quitarlos de la lista no es la defensa: es que la
-                            pantalla diga la verdad sobre lo que va a pasar.
-                          */}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500 mt-1.5">
-                        {role === 'user' && '👤 Acceso básico a pedidos y perfil'}
-                        {role === 'local' && '🏪 Acceso a realizar y ver pedidos'}
-                        {role === 'worker' && '👷 Acceso al módulo de asistencia de personal'}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Los roles de administración (Producción, Despacho, Pastelería,
-                        Administrador) los asigna un administrador del negocio una vez
-                        que ingresás.
-                      </p>
-                    </motion.div>
-                  )}
-
-                  {/* Business Selection */}
-                  <motion.div
-                    className="space-y-2"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    transition={{ duration: 0.3, delay: 0.15 }}
-                  >
-                    <Label className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                      <Sparkles className="w-4 h-4" />
-                      Negocio
-                    </Label>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        onClick={() => setBusinessAction('create')}
-                        className={`flex-1 h-12 transition-all ${businessAction === 'create'
-                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
-                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
-                          }`}
-                        style={{ borderRadius: '10px' }}
-                      >
-                        <span className="relative z-10">Crear Nuevo</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => setBusinessAction('join')}
-                        className={`flex-1 h-12 transition-all ${businessAction === 'join'
-                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
-                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
-                          }`}
-                        style={{ borderRadius: '10px' }}
-                      >
-                        <span className="relative z-10">Unirme a Uno</span>
-                      </Button>
-                    </div>
-                  </motion.div>
-
-                  {/* Business Name (if creating) */}
-                  {businessAction === 'create' && (
-                    <motion.div
-                      className="space-y-2"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <Label htmlFor="businessName" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                        <Sparkles className="w-4 h-4" />
-                        Nombre del Negocio
-                      </Label>
-                      <Input
-                        id="businessName"
-                        type="text"
-                        placeholder="Ej: Panadería La Oca"
-                        value={businessName}
-                        onChange={(e) => setBusinessName(e.target.value)}
-                        required
-                        minLength={3}
-                        className="h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
-                        style={{ borderRadius: '10px' }}
-                      />
-                      <div className="mt-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200/50">
-                        <p className="text-xs text-blue-900">
-                          👑 <strong>Serás el Administrador:</strong> Al crear un negocio nuevo, automáticamente obtendrás acceso completo con rol de administrador.
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Business Code (if joining) */}
-                  {businessAction === 'join' && (
-                    <motion.div
-                      className="space-y-2"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <Label htmlFor="businessCode" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                        <KeyRound className="w-4 h-4" />
-                        Código de Invitación
-                      </Label>
-                      <Input
-                        id="businessCode"
-                        type="text"
-                        placeholder="Ej: ABC123XY"
-                        value={businessCode}
-                        onChange={(e) => setBusinessCode(e.target.value.toUpperCase())}
-                        required
-                        className="h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all uppercase"
-                        style={{ borderRadius: '10px' }}
-                      />
-                      <p className="text-xs text-gray-500 mt-1.5">
-                        🔑 Solicita el código al administrador de tu negocio
-                      </p>
-                    </motion.div>
-                  )}
-                </>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="email" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                  <Mail className="w-4 h-4" />
-                  Correo electrónico
-                </Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="tu@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="pl-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
-                    style={{ borderRadius: '10px' }}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-                  <Lock className="w-4 h-4" />
-                  Contraseña
-                </Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={8}
-                    className="pl-11 pr-11 h-12 bg-white border-[#CBD5E1] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 transition-all"
-                    style={{ borderRadius: '10px' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#2563EB] transition-colors"
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                    tabIndex={-1}
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-                {isCreatingAccount && (
-                  <p className="text-xs text-gray-500 mt-1.5">Mínimo 8 caracteres</p>
-                )}
-                {!isCreatingAccount && (
-                  <div className="flex justify-end pt-1">
-                    <motion.button
-                      type="button"
-                      onClick={() => setShowPasswordRecovery(true)}
-                      className="text-xs text-[#2563EB] hover:text-[#0047BA] flex items-center gap-1.5 group transition-colors"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      style={{ fontSize: '13px', fontWeight: 500 }}
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span className="relative">
-                        ¿Olvidaste tu contraseña?
-                        <span className="absolute bottom-0 left-0 w-0 h-px bg-[#2563EB] group-hover:w-full transition-all duration-300"></span>
-                      </span>
-                    </motion.button>
-                  </div>
-                )}
-              </div>
-
-              {/* Remember Me Checkbox - Only show when logging in */}
-              {!isCreatingAccount && (
-                <motion.div
-                  className="flex items-center gap-2 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/50"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <Checkbox
-                    id="remember-me"
-                    checked={rememberMe}
-                    onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                    className="border-blue-400 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                  />
-                  <label
-                    htmlFor="remember-me"
-                    className="text-sm text-blue-900 cursor-pointer select-none flex-1"
-                    style={{ fontWeight: 500 }}
-                  >
-                    🔒 Mantener mi sesión iniciada
-                  </label>
-                  <motion.div
-                    className="text-xs text-blue-700 bg-white/60 px-2 py-1 rounded-full"
-                    whileHover={{ scale: 1.05 }}
-                    title="Tu sesión permanecerá activa incluso después de cerrar el navegador"
-                  >
-                    ⓘ
-                  </motion.div>
-                </motion.div>
-              )}
-
-              <motion.div
-                whileTap={{ scale: 0.98 }}
-                className="pt-2"
-              >
-                <Button
-                  type="submit"
-                  className="w-full h-12 text-white relative overflow-hidden group"
-                  disabled={isLoading}
-                  style={{
-                    background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                    borderRadius: '9999px',
-                    boxShadow: '0 4px 14px rgba(0, 89, 255, 0.4)',
-                    fontSize: '15px',
-                    fontWeight: 600
-                  }}
-                >
-                  <span className="relative z-10">
-                    {isLoading ? 'Procesando...' : (isCreatingAccount ? 'Crear cuenta' : 'Iniciar sesión')}
-                  </span>
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-                  {isLoading && (
-                    <motion.div
-                      className="absolute inset-0 bg-white/20"
-                      animate={{ x: ['-100%', '100%'] }}
-                      transition={{ duration: 1, repeat: Infinity }}
-                    />
-                  )}
-                </Button>
-              </motion.div>
-            </form>
-
-            <div className="mt-6 text-center">
-              <motion.button
-                onClick={handleToggleMode}
-                className="text-[#2563EB] hover:text-[#0047BA] relative group transition-colors"
-                disabled={isLoading}
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                style={{ fontSize: '14px', fontWeight: 500 }}
-              >
-                <span className="relative">
-                  {isCreatingAccount ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Crear una'}
-                  <span className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-[#2563EB] to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></span>
-                </span>
-              </motion.button>
-            </div>
-
-            {/* Frase motivacional - Modo Crear Cuenta */}
-            {isCreatingAccount && (
-              <motion.div
-                className="mt-6"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4, duration: 0.3 }}
-              >
-                <div className="flex items-center justify-center px-4">
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.3 }}
-                    className="text-center"
-                  >
-                    <p
-                      className="flex items-center justify-center gap-2"
-                      style={{
-                        fontSize: '15px',
-                        fontWeight: 400,
-                        color: '#4B5563',
-                        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-                        lineHeight: '1.5'
-                      }}
-                    >
-                      <span className="text-xl">{currentPhrase.emoji}</span>
-                      <span>{currentPhrase.text}</span>
-                    </p>
-                  </motion.div>
-                </div>
-              </motion.div>
-            )}
-
-            {!isCreatingAccount && (
-              <motion.div
-                className="mt-6"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4, duration: 0.3 }}
-              >
-                {/* Frase motivacional */}
-                <div className="flex items-center justify-center px-4">
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.3 }}
-                    className="text-center"
-                  >
-                    <p
-                      className="flex items-center justify-center gap-2"
-                      style={{
-                        fontSize: '15px',
-                        fontWeight: 400,
-                        color: '#4B5563',
-                        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-                        lineHeight: '1.5'
-                      }}
-                    >
-                      <span className="text-xl">{currentPhrase.emoji}</span>
-                      <span>{currentPhrase.text}</span>
-                    </p>
-                  </motion.div>
-                </div>
-              </motion.div>
-            )}
-          </CardContent>
-        </Card>
-
-      </motion.div>
+      <div style={{ textAlign: 'center', marginTop: 24, fontSize: 15, color: IOS.secundario }}>
+        {isCreatingAccount ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'}{' '}
+        <button type="button" onClick={handleToggleMode} disabled={isLoading} style={{ ...estiloEnlace, padding: '8px 4px', fontWeight: 600 }}>
+          {isCreatingAccount ? 'Iniciar sesión' : 'Crear una'}
+        </button>
+      </div>
     </div>
   );
 }
