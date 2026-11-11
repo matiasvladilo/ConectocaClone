@@ -3,7 +3,7 @@ import { User, Order } from '../App';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Package, Plus, User as UserIcon, Menu, Bell, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
+import { Package, Plus, User as UserIcon, Menu, Bell, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, ChevronRight, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
@@ -685,32 +685,6 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
             </motion.div>
           )}
 
-          {/* History Button */}
-          {onViewHistory && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.35 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onViewHistory}
-                variant="outline"
-                className="w-full h-12 border-2 hover:bg-blue-50 hover:border-[#0059FF] transition-colors group"
-                style={{
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  borderColor: '#E0EDFF'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 text-[#0047BA] group-hover:text-[#0059FF] transition-colors">
-                  <History className="w-5 h-5" />
-                  Ver historial completo
-                </div>
-              </Button>
-            </motion.div>
-          )}
         </div>
 
         {/* Orders List */}
@@ -724,7 +698,32 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
               {pagination ? 'Mis Pedidos' : 'Pedidos Recientes'}
             </h3>
             <div className="flex items-center gap-3">
-              {pagination && (
+              {/* Historial completo: enlace discreto "Ver todo" (estilo
+                  encabezado de sección de iOS) en vez de un botón grande;
+                  la pestaña "Anteriores" ya cubre lo reciente. */}
+              {onViewHistory ? (
+                <button
+                  type="button"
+                  onClick={onViewHistory}
+                  aria-label={pagination ? `Ver historial completo (${pagination.total} pedidos)` : 'Ver historial completo'}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    minHeight: 44,
+                    padding: '0 2px',
+                    fontSize: 15,
+                    fontWeight: 500,
+                    color: '#0059FF',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Ver todo
+                  <ChevronRight style={{ width: 17, height: 17 }} />
+                </button>
+              ) : pagination && (
                 <span
                   className="text-xs px-2 py-1 rounded-full"
                   style={{
