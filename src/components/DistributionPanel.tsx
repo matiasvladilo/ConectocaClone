@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, PackageX, AlertTriangle, Boxes, Search, History, RefreshCw, Download, DollarSign } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, Search, RefreshCw, Share, X, ChevronRight, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
@@ -13,8 +8,31 @@ import type { Product, Category, StockEvent } from '../utils/api';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
-import { etiquetaMovimiento, SIGNO_MOVIMIENTO, COLOR_MOVIMIENTO } from '../utils/stockEventDisplay';
+import { etiquetaMovimiento, SIGNO_MOVIMIENTO } from '../utils/stockEventDisplay';
 import { exportarLibroExcel } from '../utils/descargarArchivo';
+
+/**
+ * Panel de la Distribuidora: stock actual y qué reponer. Estilo iOS como el
+ * resto (encabezado azul con buscador, píldoras de estado, lista agrupada y
+ * hojas inferiores). Tailwind está precompilado: el estilo va inline.
+ */
+
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+};
+
+const ESTADOS_STOCK: { key: 'todos' | 'agotado' | 'bajo' | 'ok'; label: string; color: string }[] = [
+  { key: 'todos', label: 'Todos', color: '#007AFF' },
+  { key: 'agotado', label: 'Agotados', color: '#FF3B30' },
+  { key: 'bajo', label: 'Stock bajo', color: '#FF9500' },
+  { key: 'ok', label: 'OK', color: '#34C759' },
+];
 
 interface DistributionPanelProps {
   onBack: () => void;
@@ -277,297 +295,335 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     }
   };
 
+  const conteoEstado = {
+    todos: productosDelAmbito.length,
+    agotado: stats.agotados,
+    bajo: stats.bajos,
+    ok: productosDelAmbito.length - stats.agotados - stats.bajos,
+  };
+  const categoriaActual = categoriaId === 'all'
+    ? 'Todas las categorías'
+    : categories.find((c) => c.id === categoriaId)?.name ?? 'Categoría';
+  // Si la carga falló, "—" en vez de 0: un "0 agotados" con los datos rotos se
+  // lee como "está todo bien", que es la conclusión más cara de equivocar acá.
+  const v = (texto: string) => (errorCarga ? '—' : texto);
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div
-        className="max-w-7xl mx-auto px-4 py-6 space-y-6"
-        style={{ paddingTop: 'max(env(safe-area-inset-top), 1.5rem)' }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={onBack} aria-label="Volver">
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Distribuidora</h1>
-              <p className="text-sm text-gray-600">Stock actual y productos a reponer</p>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Distribuidora</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>Stock actual y productos a reponer</p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleRefrescarManual}
-              disabled={refrescando}
-              className="gap-2"
-              aria-label="Refrescar"
-            >
-              <RefreshCw className={`w-4 h-4 ${refrescando ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{refrescando ? 'Actualizando…' : 'Refrescar'}</span>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handlePedirDescarga}
-              disabled={exportando || loading}
-              className="gap-2"
-              aria-label="Descargar Excel"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">{exportando ? 'Generando…' : 'Excel'}</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* Banner de confirmación de descarga: aparece al tocar "Excel" y la
-            descarga real solo ocurre si el usuario la acepta acá. */}
-        <AnimatePresence>
-          {confirmandoDescarga && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18 }}
-              className="rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
-            >
-              <div className="flex items-start gap-3 flex-1 min-w-0">
-                <Download className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-medium text-gray-900">Descargar inventario en Excel</p>
-                  <p className="text-sm text-gray-600">
-                    {filas.length} {filas.length === 1 ? 'producto' : 'productos'} · archivo .xlsx
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Button
-                  variant="outline"
-                  onClick={() => setConfirmandoDescarga(false)}
-                  disabled={exportando}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleExportarExcel}
-                  disabled={exportando}
-                  className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Download className="w-4 h-4" />
-                  {exportando ? 'Generando…' : 'Descargar'}
-                </Button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Mismo criterio que la tabla: si la carga falló, las tarjetas muestran
-            "—" en vez de 0. Un "0 agotados" con los datos rotos se lee como
-            "está todo bien", que es la conclusión más cara de equivocar acá. */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="rounded-2xl p-3.5 bg-red-50 border border-red-100">
-            <div className="flex items-center gap-1.5 text-red-700/80 text-[13px] font-medium">
-              <PackageX className="w-4 h-4 flex-shrink-0" />
-              Agotados
-            </div>
-            <div className="mt-1 text-2xl font-bold text-red-600 tabular-nums leading-none">
-              {errorCarga ? '—' : stats.agotados}
-            </div>
+            <button type="button" onClick={handleRefrescarManual} disabled={refrescando} aria-label="Refrescar" style={botonRedondo}>
+              <RefreshCw className={refrescando ? 'animate-spin' : ''} style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
+            <button type="button" onClick={handlePedirDescarga} disabled={exportando || loading} aria-label="Descargar Excel" style={{ ...botonRedondo, opacity: loading ? 0.5 : 1 }}>
+              <Share style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
           </div>
 
-          <div className="rounded-2xl p-3.5 bg-amber-50 border border-amber-100">
-            <div className="flex items-center gap-1.5 text-amber-700/80 text-[13px] font-medium">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              Stock bajo
-            </div>
-            <div className="mt-1 text-2xl font-bold text-amber-600 tabular-nums leading-none">
-              {errorCarga ? '—' : stats.bajos}
-            </div>
-          </div>
-
-          <div className="rounded-2xl p-3.5 bg-white border border-gray-200">
-            <div className="flex items-center gap-1.5 text-gray-500 text-[13px] font-medium">
-              <Boxes className="w-4 h-4 flex-shrink-0" />
-              Productos
-            </div>
-            <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums leading-none">
-              {errorCarga ? '—' : stats.total}
-            </div>
-          </div>
-
-          <div className="rounded-2xl p-3.5 bg-green-50 border border-green-100">
-            <div className="flex items-center gap-1.5 text-green-700/80 text-[13px] font-medium">
-              <DollarSign className="w-4 h-4 flex-shrink-0" />
-              Inventario
-            </div>
-            <div className="mt-1 text-xl font-bold text-green-600 tabular-nums leading-none truncate">
-              {errorCarga ? '—' : formatCLP(stats.valor)}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-gray-500" />
-            <Input
+          <div style={{ position: 'relative', marginTop: 12 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'rgba(255,255,255,0.75)' }} />
+            <input
+              type="search"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               placeholder="Buscar por nombre o SKU"
+              className="buscador-sobre-azul"
+              style={{ width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 16, padding: busqueda ? '0 34px' : '0 12px 0 34px' }}
             />
-          </div>
-
-          <Select value={categoriaId} onValueChange={handleCambiarCategoria}>
-            <SelectTrigger>
-              <SelectValue placeholder="Categoría" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las categorías</SelectItem>
-              {categories.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={filtroEstado} onValueChange={(v) => setFiltroEstado(v as any)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              <SelectItem value="agotado">Agotados</SelectItem>
-              <SelectItem value="bajo">Stock bajo</SelectItem>
-              <SelectItem value="ok">Stock OK</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Card className="shadow-md">
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="p-4 text-sm text-gray-500">Cargando…</div>
-            ) : errorCarga ? (
-              <div className="p-4 text-sm text-red-600">
-                No se pudieron cargar los productos. Esta lista está vacía porque falló la
-                consulta, no porque no haya stock que reponer. Recargá la página para
-                reintentar.
-              </div>
-            ) : filas.length === 0 ? (
-              <div className="p-4 text-sm text-gray-500">
-                No hay productos que controlen stock en esta categoría.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-left px-3 py-2 text-gray-600">Producto</th>
-                      <th className="text-left px-3 py-2 text-gray-600">Estado</th>
-                      <th className="text-right px-3 py-2 text-gray-600">Stock</th>
-                      <th className="text-right px-3 py-2 text-gray-600">Mínimo</th>
-                      <th className="text-right px-3 py-2 text-gray-600">Movimientos</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filas.map(({ producto, estado }) => (
-                      <tr key={producto.id} className="border-b hover:bg-gray-50">
-                        <td className="px-3 py-2">
-                          <div className="text-gray-900">{producto.name}</div>
-                          {producto.sku && (
-                            <div className="text-xs text-gray-500 font-mono">{producto.sku}</div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {estado === 'agotado' ? (
-                            <Badge className="bg-red-50 text-red-600">Agotado</Badge>
-                          ) : estado === 'bajo' ? (
-                            <Badge className="bg-amber-50 text-amber-600">Bajo</Badge>
-                          ) : (
-                            <Badge className="bg-gray-50 text-gray-600">OK</Badge>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-900">{producto.stock}</td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-500">
-                          {producto.minStock ?? MIN_STOCK_POR_DEFECTO}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Button variant="outline" onClick={() => abrirMovimientos(producto)} aria-label={`Ver movimientos de ${producto.name}`}>
-                            <History className="w-4 h-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            {busqueda && (
+              <button type="button" onClick={() => setBusqueda('')} aria-label="Borrar búsqueda" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X style={{ width: 14, height: 14, color: '#fff' }} />
+              </button>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Se deja explícito para que quede claro que está planeado y no olvidado:
-            calcular una sugerencia hoy sería inventar un número, porque el
-            historial de reposiciones recién empieza a acumularse. */}
-        <p className="text-xs text-gray-500">
-          La sugerencia de cuánto y cada cuánto reponer va a estar disponible cuando se acumule
-          más historial de movimientos.
-        </p>
+          </div>
+        </div>
       </div>
 
-      <Dialog open={!!productoMovimientos} onOpenChange={(o) => !o && setProductoMovimientos(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Movimientos</DialogTitle>
-            <DialogDescription>{productoMovimientos?.name}</DialogDescription>
-          </DialogHeader>
+      <div className="max-w-7xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Resumen + categoría */}
+        <div style={{ ...tarjeta, marginBottom: 12 }}>
+          <div style={{ padding: '14px 16px 12px' }}>
+            <p style={{ fontSize: 13, color: IOS.secundario }}>Valor del inventario</p>
+            <p style={{ fontSize: 30, fontWeight: 700, color: IOS.texto, letterSpacing: -0.4, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+              {loading ? '…' : v(formatCLP(stats.valor))}
+            </p>
+            <p style={{ fontSize: 13, color: IOS.secundario, marginTop: 2 }}>
+              {loading ? 'Cargando…' : v(`${stats.total} productos con control de stock`)}
+            </p>
+          </div>
+          <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+          <label className="fila-ios" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, minHeight: 46, padding: '0 16px', cursor: 'pointer' }}>
+            <span style={{ fontSize: 16, color: IOS.texto }}>Categoría</span>
+            <span className="truncate" style={{ flex: 1, textAlign: 'right', fontSize: 15, color: IOS.secundario }}>{categoriaActual}</span>
+            <ChevronsUpDown style={{ width: 15, height: 15, color: IOS.secundario, flexShrink: 0 }} />
+            <select
+              value={categoriaId}
+              onChange={(e) => handleCambiarCategoria(e.target.value)}
+              aria-label="Categoría"
+              style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 16 }}
+            >
+              <option value="all">Todas las categorías</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        </div>
 
-          {cargandoMovimientos ? (
-            <div className="text-sm text-gray-500">Cargando…</div>
-          ) : errorMovimientos ? (
-            // Explícitamente distinto del empty-state: "todavía no hay
-            // movimientos" cuando en realidad la consulta falló haría pasar un
-            // kardex roto por un kardex vacío, y nadie lo investigaría.
-            <div className="text-sm text-red-600">
-              No se pudieron cargar los movimientos. Esto es un error de consulta, no
-              quiere decir que el producto no tenga movimientos. Cerrá y volvé a abrir
-              para reintentar.
-            </div>
-          ) : movimientos.length === 0 ? (
-            <div className="text-sm text-gray-500">
-              Todavía no hay movimientos registrados para este producto.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {movimientos.map(m => (
-                <div key={m.id} className="flex items-center justify-between border-b py-2">
-                  <div>
-                    <div className="text-sm text-gray-900">{etiquetaMovimiento(m)}</div>
-                    <div className="text-xs text-gray-500">{formatDateCL(m.createdAt)}</div>
+        {/* Estado de stock */}
+        <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 16px', padding: '0 16px' }}>
+          {ESTADOS_STOCK.map((e) => {
+            const activo = filtroEstado === e.key;
+            return (
+              <button
+                key={e.key}
+                type="button"
+                aria-pressed={activo}
+                onClick={() => setFiltroEstado(e.key)}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? e.color : IOS.tarjeta, color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}
+              >
+                {!activo && e.key !== 'todos' && <span style={{ width: 8, height: 8, borderRadius: 4, background: e.color }} />}
+                {e.label}
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>{errorCarga || loading ? '—' : conteoEstado[e.key]}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Lista */}
+        <section>
+          <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>
+            {loading || errorCarga ? 'Productos' : `${filas.length} productos · lo más urgente primero`}
+          </h3>
+          <div style={tarjeta}>
+            {loading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+                <Loader2 className="animate-spin" style={{ width: 22, height: 22, color: IOS.secundario }} />
+              </div>
+            ) : errorCarga ? (
+              <div style={{ padding: '20px 16px', textAlign: 'center' }}>
+                <p style={{ fontSize: 15, color: IOS.rojo }}>No se pudieron cargar los productos.</p>
+                <p style={{ fontSize: 13, color: IOS.secundario, marginTop: 4 }}>
+                  La lista está vacía porque falló la consulta, no porque no haya stock que reponer.
+                </p>
+                <button type="button" onClick={() => { cargar().catch(() => {}); }} style={{ marginTop: 10, color: IOS.azul, fontSize: 16, background: 'none', border: 'none' }}>
+                  Reintentar
+                </button>
+              </div>
+            ) : filas.length === 0 ? (
+              <p style={{ padding: '28px 16px', textAlign: 'center', fontSize: 15, color: IOS.secundario }}>
+                {busqueda || filtroEstado !== 'todos' ? 'Ningún producto coincide con el filtro' : 'No hay productos que controlen stock en esta categoría'}
+              </p>
+            ) : (
+              filas.map(({ producto, estado }, i) => {
+                const info = ESTADOS_STOCK.find((e) => e.key === estado)!;
+                const minimo = producto.minStock ?? MIN_STOCK_POR_DEFECTO;
+                return (
+                  <div key={producto.id}>
+                    {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 34 }} />}
+                    <button
+                      type="button"
+                      onClick={() => abrirMovimientos(producto)}
+                      className="fila-ios"
+                      aria-label={`Ver movimientos de ${producto.name}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 56, padding: '8px 12px 8px 16px', textAlign: 'left' }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: 4, background: info.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span className="truncate" style={{ display: 'block', fontSize: 15, color: IOS.texto }}>{producto.name}</span>
+                        <span style={{ display: 'block', fontSize: 12, color: IOS.secundario }}>
+                          {estado === 'agotado' ? 'Agotado' : estado === 'bajo' ? 'Stock bajo' : 'OK'}
+                          {producto.sku ? ` · ${producto.sku}` : ''}
+                        </span>
+                      </span>
+                      <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <span style={{ display: 'block', fontSize: 17, fontWeight: 600, color: estado === 'agotado' ? IOS.rojo : IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                          {fmtNumero(producto.stock)}
+                        </span>
+                        <span style={{ display: 'block', fontSize: 12, color: IOS.secundario, fontVariantNumeric: 'tabular-nums' }}>mín. {fmtNumero(minimo)}</span>
+                      </span>
+                      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC', flexShrink: 0 }} />
+                    </button>
                   </div>
-                  {m.type === 'ajuste' ? (
-                    // En un ajuste el signo no está en los datos (quantity es
-                    // siempre positiva y la tabla no guarda la dirección), así
-                    // que se muestra al frente el stock resultante —que sí es un
-                    // dato real— y la magnitud queda abajo, aclarada como tal.
-                    <div className="text-right">
-                      <div className="font-mono text-gray-900">
-                        {m.stockAfter !== undefined ? `quedó en ${m.stockAfter}` : `corrección de ${m.quantity}`}
-                      </div>
-                      {m.stockAfter !== undefined && (
-                        <div className="text-xs text-gray-500">corrección de {m.quantity}</div>
-                      )}
+                );
+              })
+            )}
+          </div>
+          {/* Se deja explícito para que quede claro que está planeado y no olvidado:
+              calcular una sugerencia hoy sería inventar un número, porque el
+              historial de reposiciones recién empieza a acumularse. */}
+          <p style={{ fontSize: 13, color: IOS.secundario, padding: '8px 16px 0', lineHeight: 1.35 }}>
+            Toca un producto para ver sus movimientos. La sugerencia de cuánto y cada cuánto reponer
+            llegará cuando haya más historial.
+          </p>
+        </section>
+      </div>
+
+      {createPortal(
+        <AnimatePresence>
+          {/* Confirmación de descarga: el usuario pidió aceptar la descarga en
+              vez de que el Excel baje solo al tocar el botón. */}
+          {confirmandoDescarga && (
+            <Hoja key="descarga" onClose={() => !exportando && setConfirmandoDescarga(false)} etiqueta="Descargar inventario">
+              <div style={{ padding: '4px 16px 0', textAlign: 'center' }}>
+                <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Descargar inventario en Excel</p>
+                <p style={{ fontSize: 14, color: IOS.secundario, marginTop: 4 }}>
+                  {filas.length} {filas.length === 1 ? 'producto' : 'productos'} · {categoriaActual}
+                  {filtroEstado !== 'todos' ? ` · ${ESTADOS_STOCK.find((e) => e.key === filtroEstado)?.label}` : ''}
+                </p>
+              </div>
+              <div style={{ padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleExportarExcel}
+                  disabled={exportando}
+                  className="boton-ios"
+                  style={{ height: 50, borderRadius: 12, border: 'none', background: IOS.azul, color: '#fff', fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: exportando ? 0.6 : undefined }}
+                >
+                  {exportando && <Loader2 className="animate-spin" style={{ width: 18, height: 18 }} />}
+                  {exportando ? 'Generando…' : 'Descargar'}
+                </button>
+                <button type="button" onClick={() => setConfirmandoDescarga(false)} disabled={exportando} style={{ height: 50, borderRadius: 12, border: 'none', background: '#fff', color: IOS.azul, fontSize: 17, fontWeight: 600 }}>
+                  Cancelar
+                </button>
+              </div>
+            </Hoja>
+          )}
+
+          {productoMovimientos && (
+            <Hoja key="movs" onClose={() => setProductoMovimientos(null)} etiqueta={`Movimientos de ${productoMovimientos.name}`} alto>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px 12px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p className="truncate" style={{ fontSize: 20, fontWeight: 700, color: IOS.texto }}>{productoMovimientos.name}</p>
+                  <p style={{ fontSize: 13, color: IOS.secundario }}>
+                    Stock {fmtNumero(productoMovimientos.stock)} · mín. {fmtNumero(productoMovimientos.minStock ?? MIN_STOCK_POR_DEFECTO)}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setProductoMovimientos(null)} aria-label="Cerrar" style={botonGris}>
+                  <X style={{ width: 17, height: 17, color: '#3C3C43' }} />
+                </button>
+              </div>
+              <div style={{ overflowY: 'auto', padding: '0 16px' }}>
+                <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>Movimientos</h3>
+                <div style={tarjeta}>
+                  {cargandoMovimientos ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: 28 }}>
+                      <Loader2 className="animate-spin" style={{ width: 20, height: 20, color: IOS.secundario }} />
                     </div>
+                  ) : errorMovimientos ? (
+                    // Distinto del vacío: "todavía no hay movimientos" cuando la
+                    // consulta falló haría pasar un kardex roto por uno vacío.
+                    <p style={{ padding: 16, fontSize: 14, color: IOS.rojo }}>
+                      No se pudieron cargar los movimientos. Es un error de consulta, no que el producto no tenga movimientos. Cierra y vuelve a abrir para reintentar.
+                    </p>
+                  ) : movimientos.length === 0 ? (
+                    <p style={{ padding: '24px 16px', textAlign: 'center', fontSize: 14, color: IOS.secundario }}>
+                      Todavía no hay movimientos registrados.
+                    </p>
                   ) : (
-                    <div className="text-right">
-                      <div className={`font-mono ${COLOR_MOVIMIENTO[m.type]}`}>
-                        {SIGNO_MOVIMIENTO[m.type]}{m.quantity}
+                    movimientos.map((m, i) => (
+                      <div key={m.id}>
+                        {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 15, color: IOS.texto }}>{etiquetaMovimiento(m)}</p>
+                            <p style={{ fontSize: 12, color: IOS.secundario }}>{formatDateCL(m.createdAt)}</p>
+                          </div>
+                          {m.type === 'ajuste' ? (
+                            // En un ajuste el signo no está en los datos (quantity es
+                            // siempre positiva), así que al frente va el stock
+                            // resultante —que sí es un dato real— y la magnitud abajo.
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                                {m.stockAfter !== undefined ? `quedó en ${fmtNumero(m.stockAfter)}` : `corrección de ${fmtNumero(m.quantity)}`}
+                              </p>
+                              {m.stockAfter !== undefined && <p style={{ fontSize: 12, color: IOS.secundario }}>corrección de {fmtNumero(m.quantity)}</p>}
+                            </div>
+                          ) : (
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: 15, fontWeight: 600, color: SIGNO_MOVIMIENTO[m.type] === '+' ? '#248A3D' : SIGNO_MOVIMIENTO[m.type] === '−' ? IOS.rojo : IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                                {SIGNO_MOVIMIENTO[m.type]}{fmtNumero(m.quantity)}
+                              </p>
+                              {m.stockAfter !== undefined && <p style={{ fontSize: 12, color: IOS.secundario }}>queda {fmtNumero(m.stockAfter)}</p>}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      {m.stockAfter !== undefined && (
-                        <div className="text-xs text-gray-500">queda {m.stockAfter}</div>
-                      )}
-                    </div>
+                    ))
                   )}
                 </div>
-              ))}
-            </div>
+              </div>
+            </Hoja>
           )}
-        </DialogContent>
-      </Dialog>
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }
+
+/** Hoja inferior estilo iOS (se desliza hacia abajo para cerrar). */
+function Hoja({ children, onClose, etiqueta, alto }: { children: React.ReactNode; onClose: () => void; etiqueta: string; alto?: boolean }) {
+  useEffect(() => {
+    const alTeclear = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [onClose]);
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50 }} />
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label={etiqueta}
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+        drag="y"
+        dragDirectionLock
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => { if (info.offset.y > 120 || info.velocity.y > 600) onClose(); }}
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 51, margin: '0 auto', maxWidth: 640,
+          background: IOS.fondo, borderRadius: '14px 14px 0 0', maxHeight: alto ? '85vh' : undefined,
+          display: 'flex', flexDirection: 'column', paddingBottom: 'max(env(safe-area-inset-bottom), 20px)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 10px' }}>
+          <span style={{ width: 36, height: 5, borderRadius: 3, background: '#C7C7CC' }} />
+        </div>
+        {children}
+      </motion.div>
+    </>
+  );
+}
+
+const fmtNumero = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+};
+
+const botonGris: React.CSSProperties = {
+  width: 32, height: 32, borderRadius: 16, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#E3E3E8',
+};
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
