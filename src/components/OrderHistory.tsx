@@ -30,7 +30,8 @@ import { PaginationControls } from './PaginationControls';
 import logo from '../assets/logo-icon.png';
 import { EditOrderDialog } from './EditOrderDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
-import { productsAPI, Product, categoriesAPI, Category } from '../utils/api';
+import { productsAPI, Product, categoriesAPI, Category, ordersAPI } from '../utils/api';
+import { mapApiOrder } from '../utils/mapApiOrder';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import { canEditOrder } from '../utils/orderPermissions';
 
@@ -106,6 +107,70 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [dateFilterType, setDateFilterType] = useState<DateFilterType>('createdAt');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
+
+  // Historial completo. La app carga solo los 50 pedidos más recientes (los
+  // que necesita el inicio); con eso los filtros de fecha no encontraban nada
+  // más antiguo. Al entrar aquí se piden todas las páginas al servidor.
+  const [historialCompleto, setHistorialCompleto] = useState<Order[] | null>(null);
+  const [cargandoHistorial, setCargandoHistorial] = useState(true);
+  const [progresoHistorial, setProgresoHistorial] = useState<{ cargados: number; total: number } | null>(null);
+  const [recargarHistorial, setRecargarHistorial] = useState(0);
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      setCargandoHistorial(true);
+      try {
+        // Son miles de pedidos: se piden por páginas, varias a la vez, y la
+        // lista se va completando a medida que llegan (no se espera al final).
+        const POR_PAGINA = 500;
+        const EN_PARALELO = 4;
+        const paginas = new Map<number, Order[]>();
+        const publicar = (total: number) => {
+          if (cancelado) return;
+          const todos = Array.from(paginas.keys()).sort((x, y) => x - y)
+            .flatMap((n) => paginas.get(n)!);
+          setHistorialCompleto(todos);
+          setProgresoHistorial({ cargados: todos.length, total });
+        };
+
+        const primera = await ordersAPI.getAll(accessToken, 1, POR_PAGINA);
+        const total = primera.pagination?.total ?? primera.data.length;
+        const totalPaginas = primera.pagination?.totalPages ?? 1;
+        paginas.set(1, primera.data.map(mapApiOrder));
+        publicar(total);
+
+        const pendientes = Array.from({ length: Math.max(0, totalPaginas - 1) }, (_, i) => i + 2);
+        const trabajador = async () => {
+          while (!cancelado && pendientes.length > 0) {
+            const n = pendientes.shift()!;
+            const res = await ordersAPI.getAll(accessToken, n, POR_PAGINA);
+            paginas.set(n, res.data.map(mapApiOrder));
+            publicar(total);
+          }
+        };
+        await Promise.all(Array.from({ length: EN_PARALELO }, trabajador));
+      } catch (err) {
+        // Si falla, se sigue mostrando lo que ya se tenga (como mínimo, los
+        // pedidos recientes que trae la app).
+        console.error('Error cargando el historial completo de pedidos:', err);
+      } finally {
+        if (!cancelado) setCargandoHistorial(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [accessToken, recargarHistorial]);
+
+  // Los pedidos que trae la app (props) se refrescan por polling: para esos ids
+  // mandan sobre la copia del historial, y los nuevos que lleguen se suman.
+  const allOrders = useMemo(() => {
+    if (!historialCompleto) return orders;
+    const porId = new Map<string, Order>();
+    for (const o of historialCompleto) porId.set(o.id, o);
+    for (const o of orders) porId.set(o.id, o);
+    return Array.from(porId.values());
+  }, [orders, historialCompleto]);
 
   // Catálogo (productos + categorías) para dos usos: la etiqueta de categoría
   // en cada tarjeta de pedido, y el desglose del Total por categoría del modal.
@@ -158,15 +223,26 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
     return resultado;
   };
 
+  // Categorías raíz que existen en el catálogo, para el filtro.
+  const categoriasDisponibles = useMemo(
+    () => Array.from(new Set(categoriaPorProducto.values())).sort((a, b) => a.localeCompare(b, 'es')),
+    [categoriaPorProducto],
+  );
+
   const itemsPerPage = 10;
 
   // Filter and search orders
   const filteredOrders = useMemo(() => {
-    let filtered = [...orders];
+    let filtered = [...allOrders];
 
     // Filter by status
     if (filterStatus !== 'all') {
       filtered = filtered.filter(order => order.status === filterStatus);
+    }
+
+    // Por categoría: el pedido entra si tiene al menos un producto de ella.
+    if (filterCategory !== 'all') {
+      filtered = filtered.filter(order => categoriasDePedido(order).includes(filterCategory));
     }
 
     // Filter by search query
@@ -236,7 +312,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
     });
 
     return filtered;
-  }, [orders, filterStatus, searchQuery, sortBy, dateFrom, dateTo, dateFilterType]);
+  }, [allOrders, filterStatus, filterCategory, categoriaPorProducto, searchQuery, sortBy, dateFrom, dateTo, dateFilterType]);
 
   // Pagination
   const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
@@ -285,6 +361,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
   const clearFilters = () => {
     setSearchQuery('');
     setFilterStatus('all');
+    setFilterCategory('all');
     setDateFrom('');
     setDateTo('');
     setSortBy('date-desc');
@@ -292,7 +369,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
     setCurrentPage(1);
   };
 
-  const hasActiveFilters = searchQuery || filterStatus !== 'all' || dateFrom || dateTo || sortBy !== 'date-desc';
+  const hasActiveFilters = searchQuery || filterStatus !== 'all' || filterCategory !== 'all' || dateFrom || dateTo || sortBy !== 'date-desc';
 
   return (
     <div
@@ -581,7 +658,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
                     <Input
                       placeholder="Buscar por producto, cliente o ID..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                       className="pl-11 h-11 bg-white border-[#CBD5E1] focus:border-[#2563EB]"
                       style={{ borderRadius: '10px' }}
                     />
@@ -598,7 +675,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
                   </div>
 
                   {/* Status Filter */}
-                  <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as FilterStatus)}>
+                  <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v as FilterStatus); setCurrentPage(1); }}>
                     <SelectTrigger
                       className="w-full md:w-48 h-11 bg-white border-[#CBD5E1]"
                       style={{ borderRadius: '10px' }}
@@ -613,6 +690,22 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
                       <SelectItem value="dispatched">Despachados</SelectItem>
                       <SelectItem value="delivered">Recibidos</SelectItem>
                       <SelectItem value="cancelled">Cancelados</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Category Filter */}
+                  <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v); setCurrentPage(1); }}>
+                    <SelectTrigger
+                      className="w-full md:w-48 h-11 bg-white border-[#CBD5E1]"
+                      style={{ borderRadius: '10px' }}
+                    >
+                      <SelectValue placeholder="Categoría" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas las categorías</SelectItem>
+                      {categoriasDisponibles.map((categoria) => (
+                        <SelectItem key={categoria} value={categoria}>{categoria}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
 
@@ -746,6 +839,11 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
                         Estado: {statusConfig[filterStatus]?.label}
                       </Badge>
                     )}
+                    {filterCategory !== 'all' && (
+                      <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                        Categoría: {filterCategory}
+                      </Badge>
+                    )}
                     {(dateFrom || dateTo) && (
                       <Badge className="bg-blue-100 text-blue-700 border-blue-200">
                         {dateFilterType === 'deadline' ? 'Despacho' : 'Pedido'}: {dateFrom || '...'} - {dateTo || '...'}
@@ -773,6 +871,11 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
           <p className="text-gray-700" style={{ fontSize: '14px', fontWeight: 500 }}>
             Mostrando {paginatedOrders.length} de {filteredOrders.length} pedidos
           </p>
+          {cargandoHistorial && (
+            <p className="text-gray-500 text-sm">
+              Cargando historial completo{progresoHistorial ? ` (${progresoHistorial.cargados} de ${progresoHistorial.total})` : ''}...
+            </p>
+          )}
         </div>
 
         {/* Orders List/Grid */}
@@ -1117,6 +1220,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
             userRole={userRole}
             onOrderUpdated={() => {
               onRefresh();
+              setRecargarHistorial((n) => n + 1);
               setEditingOrder(null);
             }}
           />
