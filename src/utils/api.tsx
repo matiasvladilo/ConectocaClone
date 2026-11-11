@@ -629,7 +629,8 @@ export const productsAPI = {
     return response?.data || response;
   },
 
-  delete: async (token: string, productId: string): Promise<{ deleted: boolean }> => {
+  // archived=true: el producto tenía pedidos, así que se archivó en vez de borrarse.
+  delete: async (token: string, productId: string): Promise<{ deleted: boolean; archived?: boolean }> => {
     const response = await fetchAPI(`/products/${productId}`, {
       method: 'DELETE',
     }, token);

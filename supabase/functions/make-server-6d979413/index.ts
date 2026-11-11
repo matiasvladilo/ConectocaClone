@@ -918,7 +918,8 @@ async function checkDuplicateSku(
     .from('products')
     .select('id', { count: 'exact', head: true })
     .eq('business_id', businessId)
-    .eq('sku', sku);
+    .eq('sku', sku)
+    .is('archived_at', null); // un archivado no bloquea reusar su SKU
 
   if (excludeProductId) query = query.neq('id', excludeProductId);
 
@@ -950,6 +951,8 @@ app.get("/make-server-6d979413/products", async (c) => {
       .from('products')
       .select('*, categories(name), product_ingredients(ingredient_id, quantity)', { count: 'exact' })
       .eq('business_id', profile.businessId)
+      // Los archivados (eliminados con historial de pedidos) no se listan.
+      .is('archived_at', null)
       // Alfabético en vez de por fecha de creación: así los productos de una
       // misma categoría/marca (ej. todos los "Café...", todos los "Confort...")
       // quedan agrupados sin importar cuándo se cargó cada uno.
@@ -1355,10 +1358,28 @@ app.delete("/make-server-6d979413/products/:id", async (c) => {
     if (!existing) return c.json({ error: 'Producto no encontrado' }, 404);
     if (existing.business_id !== profile.businessId) return c.json({ error: 'No tienes permiso' }, 403);
 
-    await supabaseAdmin.from('products').delete().eq('id', productId);
+    const { error: deleteError } = await supabaseAdmin.from('products').delete().eq('id', productId);
 
-    console.log(`Product deleted: ${existing.name}`);
-    return c.json({ data: { deleted: true } });
+    if (!deleteError) {
+      console.log(`Product deleted: ${existing.name}`);
+      return c.json({ data: { deleted: true, archived: false } });
+    }
+
+    // 23503 = otra tabla todavía referencia al producto (o a sus lotes): ya se
+    // usó en pedidos. Borrarlo rompería ese historial, así que se archiva: deja
+    // de aparecer en el catálogo pero los pedidos y costos quedan intactos.
+    // Antes este error se ignoraba y se respondía "eliminado", y el producto
+    // volvía a aparecer al recargar.
+    if (deleteError.code !== '23503') throw deleteError;
+
+    const { error: archiveError } = await supabaseAdmin
+      .from('products')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', productId);
+    if (archiveError) throw archiveError;
+
+    console.log(`Product archived (has order history): ${existing.name}`);
+    return c.json({ data: { deleted: true, archived: true } });
   } catch (err: any) {
     console.error('Error deleting product:', err);
     return c.json({ error: 'Error al eliminar producto' }, 500);
@@ -2624,7 +2645,8 @@ app.delete('/make-server-6d979413/categories/:id', async (c) => {
     const { count } = await supabaseAdmin
       .from('products')
       .select('id', { count: 'exact', head: true })
-      .eq('category_id', categoryId);
+      .eq('category_id', categoryId)
+      .is('archived_at', null); // los archivados quedan con category_id NULL (FK SET NULL)
 
     if (count && count > 0) {
       return c.json({
@@ -2782,7 +2804,8 @@ app.delete('/make-server-6d979413/production-areas/:id', async (c) => {
     const { count } = await supabaseAdmin
       .from('products')
       .select('id', { count: 'exact', head: true })
-      .eq('production_area_id', areaId);
+      .eq('production_area_id', areaId)
+      .is('archived_at', null); // los archivados quedan con el área en NULL (FK SET NULL)
 
     if (count && count > 0) {
       return c.json({

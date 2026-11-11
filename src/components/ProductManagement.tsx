@@ -366,9 +366,13 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     if (!isDeleting) return;
 
     try {
-      await productsAPI.delete(accessToken, isDeleting.id);
+      const result = await productsAPI.delete(accessToken, isDeleting.id);
       setProducts(products.filter(p => p.id !== isDeleting.id));
-      toast.success('Producto eliminado exitosamente');
+      toast.success(
+        result?.archived
+          ? 'Producto eliminado del catálogo (su historial de pedidos se conserva)'
+          : 'Producto eliminado exitosamente'
+      );
 
       // Si el borrado se disparó desde el diálogo de edición, hay que cerrarlo:
       // si no, queda un formulario abierto sobre un producto que ya no existe y
