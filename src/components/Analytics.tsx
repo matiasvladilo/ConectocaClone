@@ -1,45 +1,25 @@
-import { useState, useMemo, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import {
   ArrowLeft,
-  TrendingUp,
-  DollarSign,
-  Package,
-  CheckCircle2,
-  Clock,
-  BarChart3,
-  PieChart,
-  Download,
+  Share,
   Calendar as CalendarIcon,
-  Warehouse,
   AlertTriangle,
-  Factory
+  Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   BarChart,
   Bar,
-  PieChart as RePieChart,
-  Pie,
-  Cell,
-  AreaChart,
-  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from 'recharts';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner';
 import type { User, Order } from '../App';
 import { ingredientsAPI, productIngredientsAPI, ordersAPI, type Ingredient, type ProductIngredient } from '../utils/api';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { projectId } from '../utils/supabase/info';
 import { productsAPI, categoriesAPI, type Product, type Category } from '../utils/api';
 import { indexarCategorias, construirMatrizPorLocal, construirDetalleVentas } from '../utils/reporteAnaliticas';
 import { createClient } from '../utils/supabase/client';
@@ -49,6 +29,16 @@ import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { exportarLibroExcel } from "../utils/descargarArchivo";
+import { formatCLP } from '../utils/format';
+
+/**
+ * Analíticas (admin y producción). Estilo iOS como el resto de las pantallas
+ * rediseñadas: encabezado azul compacto, control segmentado para el período,
+ * cifra principal grande, mosaicos y listas agrupadas en vez de tarjetas con
+ * borde de color y gráficos de torta.
+ *
+ * Nota: Tailwind está precompilado (src/index.css); el estilo va inline.
+ */
 
 interface AnalyticsProps {
   user: User;
@@ -57,23 +47,11 @@ interface AnalyticsProps {
   accessToken?: string;
 }
 
-interface DailyStats {
-  date: string;
-  pedidos: number;
-  ingresos: number;
-}
-
 interface ProductStats {
   name: string;
   cantidad: number;
   ingresos: number;
   ventasTotales?: number;
-}
-
-interface StatusDistribution {
-  name: string;
-  value: number;
-  color: string;
 }
 
 interface ProductionOrder {
@@ -94,19 +72,96 @@ interface ProductionOrder {
   notes?: string;
 }
 
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  terciario: 'rgba(60, 60, 67, 0.3)',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  verde: '#34C759',
+  naranja: '#FF9500',
+};
+
+// Colores de estado: los mismos de Historial y Detalle del pedido.
+const ESTADOS = [
+  { key: 'pending', label: 'Pendientes', color: '#FF9500' },
+  { key: 'in_progress', label: 'En preparación', color: '#007AFF' },
+  { key: 'completed', label: 'Listos', color: '#34C759' },
+  { key: 'dispatched', label: 'Despachados', color: '#5856D6' },
+  { key: 'delivered', label: 'Recibidos', color: '#30B0C7' },
+  { key: 'cancelled', label: 'Cancelados', color: '#FF3B30' },
+] as const;
+
+// Pedidos por página al traer el período completo. PostgREST corta en 1000
+// filas por consulta, así que no tiene sentido pedir más por página.
+const PAGINA = 1000;
+
+/** $1,2 M / $850 mil / $12.300: montos legibles en mosaicos y ejes. */
+function montoCorto(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) {
+    return `$${(n / 1_000_000).toLocaleString('es-CL', { maximumFractionDigits: 1 })} M`;
+  }
+  if (abs >= 10_000) return `$${Math.round(n / 1000).toLocaleString('es-CL')} mil`;
+  return formatCLP(n);
+}
+
+/** Marcas del eje Y en pasos "redondos" (1, 2, 2,5 o 5 × 10^k), ~4 tramos. */
+function marcasEje(max: number): number[] {
+  if (max <= 0) return [0, 1];
+  const bruto = max / 4;
+  const pot = 10 ** Math.floor(Math.log10(bruto));
+  const paso = [1, 2, 2.5, 5, 10].map((m) => m * pot).find((p) => p >= bruto) ?? 10 * pot;
+  const marcas: number[] = [];
+  for (let v = 0; v < max + paso; v += paso) marcas.push(v);
+  return marcas;
+}
+
+const numero = (n: number, decimales = 0) =>
+  n.toLocaleString('es-CL', { maximumFractionDigits: decimales });
+
+const claveDia = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const fechaDePedido = (order: Order): Date | null => {
+  const s = (order as any).createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps) {
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('90d');
+  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: new Date(new Date().setDate(new Date().getDate() - 90)),
+    from: new Date(new Date().setDate(new Date().getDate() - 30)),
     to: new Date(),
   });
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState<'resumen' | 'productos' | 'estados' | 'costos'>('resumen');
+  const [metricaDiaria, setMetricaDiaria] = useState<'ingresos' | 'pedidos'>('ingresos');
+  const [ordenProductos, setOrdenProductos] = useState<'ingresos' | 'cantidad'>('ingresos');
+  const [verTodosProductos, setVerTodosProductos] = useState(false);
+  const [exportando, setExportando] = useState(false);
+
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [productionOrders, setProductionOrders] = useState<ProductionOrder[]>([]);
   const [productIngredients, setProductIngredients] = useState<ProductIngredient[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProduction, setLoadingProduction] = useState(false);
-  const [allOrders, setAllOrders] = useState<Order[]>(orders);
+  const produccionPedida = useRef(false);
+
+  // Arranca vacío: los ~50 pedidos que trae Inicio daban cifras parciales
+  // ("50 pedidos") durante el primer segundo de carga.
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  // Hasta qué fecha hacia atrás están cargados los pedidos, y si ya no hay más.
+  const [cargadoDesde, setCargadoDesde] = useState<Date | null>(null);
+  const [sinMas, setSinMas] = useState(false);
+  const [cargandoPedidos, setCargandoPedidos] = useState(false);
+  const [progreso, setProgreso] = useState<{ cargados: number; total: number } | null>(null);
+  const paginaSiguiente = useRef(1);
 
   // Catálogo propio del export, independiente de loadProductionData: si la carga
   // de producción falla, la planilla igual sale categorizada.
@@ -118,26 +173,93 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
   // el usuario nunca ve el console.error).
   const [catalogoListo, setCatalogoListo] = useState(false);
 
-  // Fetch all orders for comprehensive analytics processing
+  const puedeVerCostos = user.role === 'admin';
+
+  // ── Período ──────────────────────────────────────────────────────────────
+  const { startDate, endDate } = useMemo(() => {
+    const fin = new Date();
+    fin.setHours(23, 59, 59, 999);
+    if (timeRange === 'custom' && dateRange?.from) {
+      const ini = new Date(dateRange.from);
+      ini.setHours(0, 0, 0, 0);
+      const f = new Date(dateRange.to ?? dateRange.from);
+      f.setHours(23, 59, 59, 999);
+      return { startDate: ini, endDate: f };
+    }
+    const dias = timeRange === '7d' ? 7 : timeRange === '90d' ? 90 : 30;
+    const ini = new Date();
+    ini.setHours(0, 0, 0, 0);
+    ini.setDate(ini.getDate() - (dias - 1));
+    return { startDate: ini, endDate: fin };
+  }, [timeRange, dateRange]);
+
+  const dateRangeInDays = useMemo(
+    () => Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000)),
+    [startDate, endDate],
+  );
+
+  const etiquetaPeriodo =
+    timeRange === 'custom' && dateRange?.from
+      ? dateRange.to && claveDia(dateRange.to) !== claveDia(dateRange.from)
+        ? `${format(dateRange.from, 'd MMM', { locale: es })} – ${format(dateRange.to, 'd MMM yyyy', { locale: es })}`
+        : format(dateRange.from, "d 'de' MMMM yyyy", { locale: es })
+      : `Últimos ${dateRangeInDays} días`;
+
+  // ── Pedidos: traer TODO el período ───────────────────────────────────────
+  // Antes se pedía una sola página de 1000 y el resto quedaba fuera: con
+  // 2.600 pedidos en 90 días, los ingresos salían a menos de la mitad. Ahora se
+  // pagina (más recientes primero) hasta cubrir el inicio del período; si
+  // después se elige un rango más antiguo, se siguen trayendo páginas.
+  // Un solo cargador a la vez: el bucle relee `objetivo` en cada vuelta, así
+  // que si el período cambia a mitad de la carga simplemente sigue (o para)
+  // según el nuevo inicio, sin carreras entre dos cargas.
+  const objetivo = useRef(startDate);
+  objetivo.current = startDate;
+  const acumulados = useRef<Order[]>([]);
+  const masAntiguo = useRef<Date | null>(null);
+  const hayMas = useRef(true);
+  const corriendo = useRef(false);
+  const montado = useRef(true);
+  useEffect(() => () => { montado.current = false; }, []);
+
   useEffect(() => {
-    const fetchAllOrders = async () => {
-      if (!accessToken) return;
+    if (!accessToken || corriendo.current) return;
+    if (!hayMas.current || (masAntiguo.current && masAntiguo.current <= objetivo.current)) return;
+
+    corriendo.current = true;
+    setCargandoPedidos(true);
+    (async () => {
       try {
-        const response = await ordersAPI.getAll(accessToken, 1, 1000);
-        if (response && response.data) {
-          const normalized = response.data.map((order: any) => ({
+        while (hayMas.current && (!masAntiguo.current || masAntiguo.current > objetivo.current)) {
+          const resp = await ordersAPI.getAll(accessToken, paginaSiguiente.current, PAGINA);
+          if (!montado.current) return;
+          const pagina = (resp?.data || []).map((order: any) => ({
             ...order,
             deadline: order.deadline ? order.deadline.slice(0, 10) : order.deadline,
           }));
-          setAllOrders(normalized);
+          acumulados.current = acumulados.current.concat(pagina);
+          paginaSiguiente.current += 1;
+          hayMas.current = !!resp?.pagination?.hasNext && pagina.length > 0;
+          const ultimo = pagina.length ? fechaDePedido(pagina[pagina.length - 1]) : null;
+          if (ultimo) masAntiguo.current = ultimo;
+          setProgreso({ cargados: acumulados.current.length, total: resp?.pagination?.total ?? acumulados.current.length });
+          // Se publica cada página: las cifras se van completando a la vista.
+          setAllOrders(acumulados.current);
+          setCargadoDesde(masAntiguo.current);
         }
       } catch (error) {
         console.error('Error fetching orders for analytics:', error);
+        if (montado.current) toast.error('No se pudieron cargar todos los pedidos');
+        hayMas.current = false;
+      } finally {
+        corriendo.current = false;
+        if (montado.current) {
+          setSinMas(!hayMas.current);
+          setCargandoPedidos(false);
+        }
       }
-    };
-
-    fetchAllOrders();
-  }, [accessToken]);
+    })();
+  }, [accessToken, startDate]);
 
   // Catálogo para agrupar la planilla por categoría. Si falla, el export sigue
   // funcionando: indexarCategorias con listas vacías manda todo a "Sin categoría".
@@ -153,153 +275,95 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         setCatalogCategories(categorias);
         setCatalogoListo(true);
       } catch (error) {
-        console.error('Error cargando catálogo para categorizar el reporte:', error);
+        console.error('Error cargando catálogo para el reporte:', error);
         setCatalogoListo(false);
       }
     };
-
     fetchCatalogo();
   }, [accessToken]);
 
-  // Color palette matching La Oca brand
-  const COLORS = {
-    primary: '#1e40af', // blue-800
-    secondary: '#eab308', // yellow-500
-    success: '#22c55e', // green-500
-    danger: '#ef4444', // red-500
-    warning: '#f59e0b', // amber-500
-    info: '#3b82f6', // blue-500
-  };
+  const datosCompletos = sinMas || (!!cargadoDesde && cargadoDesde <= startDate);
 
-  const PIE_COLORS = ['#1e40af', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe'];
-
-  // Calculate date range
-  const dateRangeInDays = useMemo(() => {
-    switch (timeRange) {
-      case '7d': return 7;
-      case '30d': return 30;
-      case '90d': return 90;
-      case 'custom':
-        if (dateRange?.from && dateRange?.to) {
-          const diffTime = Math.abs(dateRange.to.getTime() - dateRange.from.getTime());
-          return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-        }
-        return 30; // Fallback
-      default: return 30;
-    }
-  }, [timeRange, dateRange]);
-
-  const startDate = useMemo(() => {
-    if (timeRange === 'custom' && dateRange?.from) {
-      return dateRange.from;
-    }
-    const date = new Date();
-    date.setDate(date.getDate() - dateRangeInDays);
-    return date;
-  }, [dateRangeInDays, timeRange, dateRange]);
-
-  // Filter orders by date range using createdAt (when the order was placed)
   const filteredOrders = useMemo(() => {
-    return allOrders.filter(order => {
-      const dateString = (order as any).createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
-      if (!dateString) return false;
-      const orderDate = new Date(dateString);
-      if (isNaN(orderDate.getTime())) return false;
-      if (timeRange === 'custom') {
-        if (dateRange?.to) {
-          const endDate = new Date(dateRange.to);
-          endDate.setHours(23, 59, 59, 999);
-          return orderDate >= startDate && orderDate <= endDate;
-        } else if (dateRange?.from) {
-          const endDate = new Date(dateRange.from);
-          endDate.setHours(23, 59, 59, 999);
-          return orderDate >= startDate && orderDate <= endDate;
-        }
-      }
-      return orderDate >= startDate;
-    }).map(order => ({
-      ...order,
-      products: order.products?.map(product => ({
-        ...product,
-        id: (product as any).id || product.productId || undefined
-      }))
-    }));
-  }, [allOrders, startDate, timeRange, dateRange]);
+    return allOrders
+      .filter((order) => {
+        const d = fechaDePedido(order);
+        return !!d && d >= startDate && d <= endDate;
+      })
+      .map((order) => ({
+        ...order,
+        products: order.products?.map((product) => ({
+          ...product,
+          id: (product as any).id || product.productId || undefined,
+        })),
+      }));
+  }, [allOrders, startDate, endDate]);
 
   const mapaCategorias = useMemo(
     () => indexarCategorias(catalogProducts, catalogCategories),
     [catalogProducts, catalogCategories]
   );
 
-  // Calculate KPIs
+  // ── KPIs ─────────────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
-    // Use price×quantity per product item (real revenue), not order.total (can be wrong from old KV store)
-    const totalRevenue = filteredOrders.reduce((sum, order) =>
-      sum + (order.products?.reduce((s, p) => s + (p.price * p.quantity), 0) || order.total || 0), 0);
-    const completedOrders = filteredOrders.filter(o =>
-      o.status === 'completed' || o.status === 'dispatched' || o.status === 'delivered' || o.status === 'cancelled'
-    ).length;
+    // Ingresos por precio×cantidad de cada ítem (no order.total, que en datos
+    // viejos del KV store puede venir mal). Los cancelados no suman ingresos.
+    const vigentes = filteredOrders.filter((o) => o.status !== 'cancelled');
+    const totalRevenue = vigentes.reduce(
+      (sum, order) => sum + (order.products?.reduce((s, p) => s + p.price * p.quantity, 0) || order.total || 0),
+      0,
+    );
     const totalOrders = filteredOrders.length;
+    const cancelados = totalOrders - vigentes.length;
+    // "Completado" = salió de producción. Antes contaba también los cancelados
+    // como completados, inflando la tasa.
+    const completedOrders = filteredOrders.filter(
+      (o) => o.status === 'completed' || o.status === 'dispatched' || o.status === 'delivered',
+    ).length;
     const successRate = totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0;
-
-    // Average production time (in hours) - simplified calculation
-    const avgProductionTime = filteredOrders
-      .filter(o => o.status === 'completed' || o.status === 'cancelled')
-      .reduce((sum, order) => {
-        const created = new Date(order.createdAt || order.date);
-        const now = new Date();
-        const hours = (now.getTime() - created.getTime()) / (1000 * 60 * 60);
-        return sum + hours;
-      }, 0) / (completedOrders || 1);
-
     return {
       totalRevenue,
       totalOrders,
+      vigentes: vigentes.length,
+      cancelados,
       completedOrders,
       successRate,
-      avgProductionTime: Math.round(avgProductionTime)
+      ticket: vigentes.length > 0 ? totalRevenue / vigentes.length : 0,
+      porDia: totalOrders / dateRangeInDays,
     };
-  }, [filteredOrders]);
-
-  // Daily statistics for line chart
-  const dailyStats = useMemo((): DailyStats[] => {
-    const statsMap = new Map<string, { pedidos: number; ingresos: number }>();
-
-    // Initialize all days in range
-    for (let i = 0; i < dateRangeInDays; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - (dateRangeInDays - 1 - i));
-      const dateStr = date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
-      statsMap.set(dateStr, { pedidos: 0, ingresos: 0 });
-    }
-
-    // Fill with actual data — group by createdAt (when the order was placed)
-    filteredOrders.forEach(order => {
-      const dateString = order.createdAt || order.date || (order.deadline ? `${order.deadline}T12:00:00` : null);
-      if (!dateString) return;
-      const orderDate = new Date(dateString);
-      const dateStr = orderDate.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
-
-      const current = statsMap.get(dateStr);
-      if (current) {
-        current.pedidos += 1;
-        current.ingresos += order.total || 0;
-      }
-    });
-
-    return Array.from(statsMap.entries()).map(([date, stats]) => ({
-      date,
-      pedidos: stats.pedidos,
-      ingresos: stats.ingresos
-    }));
   }, [filteredOrders, dateRangeInDays]);
 
-  // Product statistics (All products)
+  // Serie diaria del período (incluye días sin pedidos, con 0).
+  const dailyStats = useMemo(() => {
+    const mapa = new Map<string, { label: string; pedidos: number; ingresos: number }>();
+    const d = new Date(startDate);
+    while (d <= endDate) {
+      mapa.set(claveDia(d), {
+        label: d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }),
+        pedidos: 0,
+        ingresos: 0,
+      });
+      d.setDate(d.getDate() + 1);
+    }
+    filteredOrders.forEach((order) => {
+      const f = fechaDePedido(order);
+      if (!f) return;
+      const actual = mapa.get(claveDia(f));
+      if (!actual) return;
+      actual.pedidos += 1;
+      if (order.status !== 'cancelled') {
+        actual.ingresos += order.products?.reduce((s, p) => s + p.price * p.quantity, 0) || order.total || 0;
+      }
+    });
+    return Array.from(mapa.values());
+  }, [filteredOrders, startDate, endDate]);
+
+  // ── Productos ────────────────────────────────────────────────────────────
   const allProductStats = useMemo((): ProductStats[] => {
     const statsMap = new Map<string, { cantidad: number; ingresos: number; pedidos: Set<string> }>();
-
-    filteredOrders.forEach(order => {
-      order.products?.forEach(product => {
+    filteredOrders.forEach((order) => {
+      if (order.status === 'cancelled') return;
+      order.products?.forEach((product) => {
         const current = statsMap.get(product.name) || { cantidad: 0, ingresos: 0, pedidos: new Set<string>() };
         current.cantidad += product.quantity;
         current.ingresos += product.price * product.quantity;
@@ -307,1342 +371,724 @@ export function Analytics({ user, orders, onBack, accessToken }: AnalyticsProps)
         statsMap.set(product.name, current);
       });
     });
-
     return Array.from(statsMap.entries())
       .map(([name, stats]) => ({
         name,
         cantidad: stats.cantidad,
         ingresos: stats.ingresos,
-        ventasTotales: stats.pedidos.size
+        ventasTotales: stats.pedidos.size,
       }))
       .sort((a, b) => b.cantidad - a.cantidad);
   }, [filteredOrders]);
 
-  // Top 10 products for the bar chart
-  const topProductStats = useMemo(() => allProductStats.slice(0, 10), [allProductStats]);
+  const productosOrdenados = useMemo(
+    () => [...allProductStats].sort((a, b) => (ordenProductos === 'ingresos' ? b.ingresos - a.ingresos : b.cantidad - a.cantidad)),
+    [allProductStats, ordenProductos],
+  );
 
-  // Status distribution for pie chart
-  const statusDistribution = useMemo((): StatusDistribution[] => {
-    const distribution: Record<string, { count: number; label: string; color: string }> = {
-      pending: { count: 0, label: 'Pendientes', color: COLORS.warning },
-      in_progress: { count: 0, label: 'En Preparación', color: COLORS.info },
-      completed: { count: 0, label: 'Listos', color: COLORS.success },
-      dispatched: { count: 0, label: 'Despachados', color: COLORS.primary },
-      delivered: { count: 0, label: 'Recibidos', color: COLORS.secondary },
-      cancelled: { count: 0, label: 'Cancelados', color: COLORS.danger }
-    };
-
-    filteredOrders.forEach(order => {
-      if (distribution[order.status]) {
-        distribution[order.status].count++;
-      }
-    });
-
-    return Object.entries(distribution)
-      .filter(([_, data]) => data.count > 0)
-      .map(([_, data]) => ({
-        name: data.label,
-        value: data.count,
-        color: data.color
-      }));
+  // ── Estados ──────────────────────────────────────────────────────────────
+  const statusDistribution = useMemo(() => {
+    const conteo: Record<string, number> = {};
+    filteredOrders.forEach((o) => { conteo[o.status] = (conteo[o.status] || 0) + 1; });
+    return ESTADOS.map((e) => ({ ...e, value: conteo[e.key] || 0 }));
   }, [filteredOrders]);
 
-  // Load production data (ingredients and production orders)
+  // ── Costos (solo admin, se cargan al abrir la pestaña) ───────────────────
   useEffect(() => {
-    if (accessToken && (user.role === 'admin' || user.role === 'production')) {
-      console.log('✓ Access token available, loading production data for admin/production user');
-      loadProductionData();
-    } else if (!accessToken && (user.role === 'admin' || user.role === 'production')) {
-      console.warn('⚠️ Admin/Production user but no access token available');
-    } else if (user.role !== 'admin' && user.role !== 'production') {
-      console.log('ℹ️ Non-admin/production user, skipping production data load');
-    }
-  }, [accessToken, user.role]);
+    if (activeTab !== 'costos' || !puedeVerCostos || produccionPedida.current) return;
+    produccionPedida.current = true;
+    void loadProductionData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, puedeVerCostos]);
 
   const loadProductionData = async () => {
     setLoadingProduction(true);
     try {
-      // Get fresh access token from Supabase session
+      // Token fresco de la sesión: esta carga puede ocurrir minutos después de
+      // abrir la pantalla y el accessToken del prop puede haber vencido.
       const supabase = createClient();
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
       if (sessionError || !session?.access_token) {
-        console.error('⚠️ No valid session for loading production data:', sessionError);
-        toast.error('No se pudo obtener sesión válida. Por favor, vuelva a iniciar sesión.');
-        setLoadingProduction(false);
+        toast.error('No se pudo obtener una sesión válida. Vuelve a iniciar sesión.');
         return;
       }
-
       const token = session.access_token;
-      // B-02: acá se logueaban la longitud del token y sus primeros 30
-      // caracteres. No incluía la firma, así que el token no era reutilizable a
-      // partir del log, pero exponía el encabezado y el inicio del payload en
-      // la consola y en cualquier recolector de logs. No hay motivo para
-      // imprimir parte de un token.
-      console.log('✓ Using fresh access token from Supabase session');
 
-      // Load ingredients
-      console.log('📦 Loading ingredients...');
-      const ingredientsData = await ingredientsAPI.getAll(token);
+      const [ingredientsData, productsData, respOrdenes] = await Promise.all([
+        ingredientsAPI.getAll(token),
+        productsAPI.getAll(token),
+        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-6d979413/production-orders`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        }),
+      ]);
       setIngredients(ingredientsData);
-      console.log(`✓ Loaded ${ingredientsData.length} ingredients`);
-
-      // Load production orders from server (using accessToken for authentication)
-      console.log('📦 Loading production orders...');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-6d979413/production-orders`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('❌ Error loading production orders:', response.status, errorData);
-        throw new Error(errorData.error || 'Failed to load production orders');
-      }
-
-      const data = await response.json();
-      // Handle both { orders: [...] } and direct array responses
-      const ordersData = data.orders || data;
-      setProductionOrders(Array.isArray(ordersData) ? ordersData : []);
-      console.log(`✓ Loaded ${ordersData.length} production orders`);
-
-      // Load all products to get their ingredients
-      console.log('📦 Loading products for recipe analysis...');
-      const productsData = await productsAPI.getAll(token);
       setProducts(productsData);
 
-      // Load ingredients for each product
-      const allProductIngredients: ProductIngredient[] = [];
-      for (const product of productsData) {
-        if (product.id) {
-          try {
-            const productIngs = await productIngredientsAPI.getByProduct(token, product.id);
-            if (productIngs && productIngs.length > 0) {
-              console.log(`✓ Loaded ${productIngs.length} ingredients for product "${product.name}":`, productIngs);
-              allProductIngredients.push(...productIngs);
-            } else {
-              console.log(`ℹ️ No ingredients found for product "${product.name}"`);
-            }
-          } catch (error) {
-            console.error(`Error loading ingredients for product ${product.name}:`, error);
-          }
-        }
+      if (respOrdenes.ok) {
+        const data = await respOrdenes.json();
+        const ordersData = data.orders || data;
+        setProductionOrders(Array.isArray(ordersData) ? ordersData : []);
       }
-      setProductIngredients(allProductIngredients);
-      console.log(`✓ Loaded ${allProductIngredients.length} product-ingredient relationships`);
-      console.log('📋 All product ingredients:', allProductIngredients);
 
-      toast.success('Datos de producción cargados exitosamente');
+      // Recetas: una consulta por producto, en paralelo.
+      const recetas = await Promise.all(
+        productsData
+          .filter((p) => p.id)
+          .map((p) => productIngredientsAPI.getByProduct(token, p.id).catch(() => [] as ProductIngredient[])),
+      );
+      setProductIngredients(recetas.flat());
     } catch (error: any) {
-      console.error('❌ Error loading production data:', error);
+      console.error('Error loading production data:', error);
       toast.error(error.message || 'Error al cargar datos de producción');
     } finally {
       setLoadingProduction(false);
     }
   };
 
-  // Production cost analytics
   const productionCosts = useMemo(() => {
     if (!ingredients.length) return null;
-
-    const totalInventoryValue = ingredients.reduce((sum, ing) => {
-      return sum + (ing.currentStock * (ing.costPerUnit || 0));
-    }, 0);
-
-    const lowStockItems = ingredients.filter(ing => ing.currentStock <= ing.minStock);
-
+    const totalInventoryValue = ingredients.reduce((sum, ing) => sum + ing.currentStock * (ing.costPerUnit || 0), 0);
+    // Bajo el mínimo de verdad: con `<=` contaba todo lo que estaba justo en el
+    // mínimo (86 de 90 materias primas) y la alerta dejaba de significar algo.
+    const lowStockItems = ingredients
+      .filter((ing) => ing.minStock > 0 && ing.currentStock < ing.minStock)
+      .sort((a, b) => a.currentStock / a.minStock - b.currentStock / b.minStock);
     const ingredientsByValue = ingredients
-      .map(ing => ({
+      .map((ing) => ({
         name: ing.name,
         value: ing.currentStock * (ing.costPerUnit || 0),
         stock: ing.currentStock,
         unit: ing.unit,
-        costPerUnit: ing.costPerUnit || 0
       }))
+      .filter((i) => i.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
-
-    return {
-      totalInventoryValue,
-      lowStockItems,
-      ingredientsByValue,
-      totalIngredients: ingredients.length
-    };
+    return { totalInventoryValue, lowStockItems, ingredientsByValue, totalIngredients: ingredients.length };
   }, [ingredients]);
 
-  // Profitability analysis: Calculate production cost vs sale price
+  // Rentabilidad: costo de receta vs precio de venta, por producto vendido.
   const profitabilityAnalysis = useMemo(() => {
-    if (!productIngredients.length || !ingredients.length || !filteredOrders.length || !products.length) {
-      console.log('⚠️ Profitability analysis skipped:', {
-        productIngredients: productIngredients.length,
-        ingredients: ingredients.length,
-        filteredOrders: filteredOrders.length,
-        products: products.length
-      });
-      return [];
-    }
+    if (!productIngredients.length || !ingredients.length || !filteredOrders.length || !products.length) return [];
 
-    console.log('📊 Starting profitability analysis...');
-    console.log('Product ingredients:', productIngredients);
-    console.log('Ingredients:', ingredients);
-    console.log('Products:', products);
+    const idPorNombre = new Map<string, string>();
+    products.forEach((p) => { if (p.name && p.id) idPorNombre.set(p.name, p.id); });
 
-    // Create a map of product names to their IDs (for reverse lookup)
-    const productNameToIdMap = new Map<string, string>();
-    products.forEach(product => {
-      if (product.name && product.id) {
-        productNameToIdMap.set(product.name, product.id);
-      }
+    const recetaPorNombre = new Map<string, ProductIngredient[]>();
+    const recetaPorId = new Map<string, ProductIngredient[]>();
+    productIngredients.forEach((pi) => {
+      if (pi.productName) recetaPorNombre.set(pi.productName, [...(recetaPorNombre.get(pi.productName) || []), pi]);
+      if (pi.productId) recetaPorId.set(pi.productId, [...(recetaPorId.get(pi.productId) || []), pi]);
     });
 
-    console.log('Product name to ID map:', Array.from(productNameToIdMap.entries()));
+    const ingPorNombre = new Map(ingredients.map((ing) => [ing.name, ing]));
+    const ingPorId = new Map(ingredients.map((ing) => [ing.id, ing]));
 
-    // Create a map of product names AND IDs to their recipes
-    const recipeMapByName = new Map<string, ProductIngredient[]>();
-    const recipeMapById = new Map<string, ProductIngredient[]>();
+    // Costo unitario por producto (se calcula una vez, no por cada ítem vendido).
+    const costoUnitario = new Map<string, number>();
+    const costoDe = (nombre: string, id?: string) => {
+      const clave = id || nombre;
+      if (costoUnitario.has(clave)) return costoUnitario.get(clave)!;
+      const receta = (id && recetaPorId.get(id)) || recetaPorNombre.get(nombre) || [];
+      const costo = receta.reduce((s, item) => {
+        const ing = (item.ingredientName && ingPorNombre.get(item.ingredientName)) || (item.ingredientId && ingPorId.get(item.ingredientId));
+        return s + (ing && ing.costPerUnit ? item.quantity * ing.costPerUnit : 0);
+      }, 0);
+      costoUnitario.set(clave, costo);
+      return costo;
+    };
 
-    productIngredients.forEach(pi => {
-      // Map by product name
-      if (pi.productName) {
-        const existingByName = recipeMapByName.get(pi.productName) || [];
-        existingByName.push(pi);
-        recipeMapByName.set(pi.productName, existingByName);
-      }
-
-      // Map by product ID
-      if (pi.productId) {
-        const existingById = recipeMapById.get(pi.productId) || [];
-        existingById.push(pi);
-        recipeMapById.set(pi.productId, existingById);
-      }
-    });
-
-    console.log('Recipe maps created:', {
-      byName: Array.from(recipeMapByName.keys()),
-      byId: Array.from(recipeMapById.keys())
-    });
-
-    // Create an ingredient map for quick lookup (by name and ID)
-    const ingredientMapByName = new Map(ingredients.map(ing => [ing.name, ing]));
-    const ingredientMapById = new Map(ingredients.map(ing => [ing.id, ing]));
-
-    // Calculate profitability for each product sold
-    const profitMap = new Map<string, {
-      totalRevenue: number;
-      totalCost: number;
-      unitsSold: number;
-      avgPrice: number;
-      productId?: string;
-    }>();
-
-    filteredOrders.forEach(order => {
-      order.products?.forEach(product => {
-        // Try to find product ID from name if not already set
-        let productId = product.id;
-        if (!productId && product.name) {
-          productId = productNameToIdMap.get(product.name);
-          if (productId) {
-            console.log(`✓ Found product ID for "${product.name}": ${productId}`);
-          }
-        }
-
-        // Try to find recipe by product ID first, then by name
-        let recipe = productId ? recipeMapById.get(productId) : undefined;
-        if (!recipe) {
-          recipe = recipeMapByName.get(product.name);
-        }
-
-        let productionCost = 0;
-
-        if (recipe && recipe.length > 0) {
-          console.log(`📦 Calculating cost for ${product.name} (ID: ${productId}):`, recipe);
-
-          // Calculate cost based on recipe
-          recipe.forEach(recipeItem => {
-            // Try to find ingredient by name first, then by ID
-            let ing = recipeItem.ingredientName ? ingredientMapByName.get(recipeItem.ingredientName) : undefined;
-            if (!ing && recipeItem.ingredientId) {
-              ing = ingredientMapById.get(recipeItem.ingredientId);
-            }
-
-            if (ing && ing.costPerUnit) {
-              const itemCost = recipeItem.quantity * ing.costPerUnit;
-              productionCost += itemCost;
-              console.log(`  - ${recipeItem.ingredientName}: ${recipeItem.quantity} x $${ing.costPerUnit} = $${itemCost}`);
-            } else {
-              console.warn(`  ⚠️ Ingredient not found or no cost: ${recipeItem.ingredientName}`);
-            }
-          });
-
-          console.log(`  ✓ Total production cost per unit: $${productionCost}`);
-        } else {
-          // Product doesn't have a recipe configured yet - this is normal for new products
-          console.log(`ℹ️ No recipe configured for product: ${product.name} (ID: ${productId}) - Using price as revenue only`);
-        }
-
-        const current = profitMap.get(product.name) || {
-          totalRevenue: 0,
-          totalCost: 0,
-          unitsSold: 0,
-          avgPrice: 0,
-          productId: productId
-        };
-
-        current.totalRevenue += product.price * product.quantity;
-        current.totalCost += productionCost * product.quantity;
-        current.unitsSold += product.quantity;
-        current.avgPrice = product.price;
-
-        profitMap.set(product.name, current);
+    const acumulado = new Map<string, { totalRevenue: number; totalCost: number; unitsSold: number; avgPrice: number }>();
+    filteredOrders.forEach((order) => {
+      if (order.status === 'cancelled') return;
+      order.products?.forEach((product) => {
+        const id = (product as any).id || idPorNombre.get(product.name);
+        const costo = costoDe(product.name, id);
+        const actual = acumulado.get(product.name) || { totalRevenue: 0, totalCost: 0, unitsSold: 0, avgPrice: 0 };
+        actual.totalRevenue += product.price * product.quantity;
+        actual.totalCost += costo * product.quantity;
+        actual.unitsSold += product.quantity;
+        actual.avgPrice = product.price;
+        acumulado.set(product.name, actual);
       });
     });
 
-    const result = Array.from(profitMap.entries())
-      .map(([name, data]) => ({
+    return Array.from(acumulado.entries())
+      .map(([name, d]) => ({
         name,
-        revenue: data.totalRevenue,
-        cost: data.totalCost,
-        profit: data.totalRevenue - data.totalCost,
-        margin: data.totalRevenue > 0 ? ((data.totalRevenue - data.totalCost) / data.totalRevenue) * 100 : 0,
-        unitsSold: data.unitsSold,
-        avgPrice: data.avgPrice,
-        costPerUnit: data.unitsSold > 0 ? data.totalCost / data.unitsSold : 0
+        revenue: d.totalRevenue,
+        cost: d.totalCost,
+        profit: d.totalRevenue - d.totalCost,
+        margin: d.totalRevenue > 0 ? ((d.totalRevenue - d.totalCost) / d.totalRevenue) * 100 : 0,
+        unitsSold: d.unitsSold,
+        avgPrice: d.avgPrice,
+        costPerUnit: d.unitsSold > 0 ? d.totalCost / d.unitsSold : 0,
       }))
       .sort((a, b) => b.profit - a.profit);
-
-    console.log('📊 Profitability analysis results:', result);
-    return result;
   }, [productIngredients, ingredients, filteredOrders, products]);
 
-  // Production orders trend
-  const productionTrend = useMemo(() => {
-    if (!productionOrders.length) return [];
+  // Solo productos con receta costeada: el resto tendría margen 100% ficticio.
+  const conReceta = profitabilityAnalysis.filter((p) => p.cost > 0);
+  const margenGlobal = (() => {
+    const ing = conReceta.reduce((s, p) => s + p.revenue, 0);
+    const util = conReceta.reduce((s, p) => s + p.profit, 0);
+    return ing > 0 ? (util / ing) * 100 : null;
+  })();
 
-    const trendMap = new Map<string, { ordenes: number; terminadas: number }>();
+  const ordenesProduccionPeriodo = productionOrders.filter((o) => {
+    const d = new Date(o.createdAt);
+    return d >= startDate && d <= endDate;
+  });
 
-    // Initialize all days in range
-    for (let i = 0; i < dateRangeInDays; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - (dateRangeInDays - 1 - i));
-      const dateStr = date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
-      trendMap.set(dateStr, { ordenes: 0, terminadas: 0 });
-    }
-
-    // Fill with production order data
-    productionOrders.forEach(order => {
-      const orderDate = new Date(order.createdAt);
-      if (orderDate >= startDate) {
-        const dateStr = orderDate.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
-        const current = trendMap.get(dateStr);
-        if (current) {
-          current.ordenes += 1;
-          if (order.status === 'TERMINADA') {
-            current.terminadas += 1;
-          }
-        }
-      }
-    });
-
-    return Array.from(trendMap.entries()).map(([date, stats]) => ({
-      date,
-      ordenes: stats.ordenes,
-      terminadas: stats.terminadas
-    }));
-  }, [productionOrders, dateRangeInDays, startDate]);
-
-  // Export data as Excel
+  // ── Exportar ─────────────────────────────────────────────────────────────
+  // Antes había dos botones (Excel y "Google Drive") que generaban el mismo
+  // libro con distinto nombre de archivo. Un .xlsx se abre igual en Drive.
   const handleExport = async () => {
+    if (!datosCompletos) {
+      toast.info('Espera a que terminen de cargar los pedidos del período');
+      return;
+    }
+    setExportando(true);
     try {
       if (!catalogoListo) {
         toast.warning('No se pudo cargar el catálogo: la planilla sale sin agrupar por categoría');
       }
-
-      // Import the xlsx library dynamically
       const XLSX = await import('xlsx');
 
-      // 1. Sheet: Resumen General
-      const resumenData = [
+      const resumenData: (string | number)[][] = [
         ['Resumen de Gestión', ''],
-        ['Periodo', timeRange === 'custom' && dateRange?.from && dateRange?.to
-          ? `${dateRange.from.toLocaleDateString('es-CL')} - ${dateRange.to.toLocaleDateString('es-CL')}`
-          : `Últimos ${dateRangeInDays} días`],
+        ['Periodo', etiquetaPeriodo],
         ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
         ['', ''],
         ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales', kpis.totalRevenue],
+        ['Ingresos Totales (sin cancelados)', kpis.totalRevenue],
         ['Pedidos Totales', kpis.totalOrders],
         ['Pedidos Completados', kpis.completedOrders],
-        ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
+        ['Pedidos Cancelados', kpis.cancelados],
+        ['Ticket Promedio', Math.round(kpis.ticket)],
       ];
-
-      // Add Profitability if available
-      if ((user.role === 'admin' || user.role === 'production') && profitabilityAnalysis.length > 0) {
-        const totalProfit = profitabilityAnalysis.reduce((sum, p) => sum + p.profit, 0);
-        const margin = kpis.totalRevenue > 0 ? (totalProfit / kpis.totalRevenue) * 100 : 0;
-
+      if (puedeVerCostos && margenGlobal !== null) {
         resumenData.push(
-          ['Utilidad Estimada', totalProfit],
-          ['Margen Global Estimado', `${margin.toFixed(1)}%`]
+          ['Utilidad Estimada (productos con receta)', conReceta.reduce((s, p) => s + p.profit, 0)],
+          ['Margen Estimado (productos con receta)', `${margenGlobal.toFixed(1)}%`],
         );
       }
-
       const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
-
-      // 2. Sheet: Detalle Ventas
       const wsVentas = XLSX.utils.json_to_sheet(construirDetalleVentas(filteredOrders, mapaCategorias));
-
-      // 3. Sheet: Productos (Aggregated, All products)
-      const productosData = allProductStats.map(p => {
-        const prof = profitabilityAnalysis.find(x => x.name === p.name);
-
-        const rowData: any = {
+      const productosData = allProductStats.map((p) => {
+        const prof = profitabilityAnalysis.find((x) => x.name === p.name);
+        const fila: Record<string, string | number> = {
           'Producto': p.name,
           'Unidades Vendidas': p.cantidad,
           'Ventas Totales (N° de Pedidos)': p.ventasTotales || 0,
           'Ingresos Totales': p.ingresos,
         };
-
-        if (prof) {
-          rowData['Precio Promedio'] = prof.avgPrice;
-          rowData['Costo Unitario (Est.)'] = prof.costPerUnit;
-          rowData['Costo Total (Est.)'] = prof.cost;
-          rowData['Utilidad (Est.)'] = prof.profit;
-          rowData['Margen (%)'] = `${prof.margin.toFixed(1)}%`;
+        if (prof && prof.cost > 0) {
+          fila['Precio Promedio'] = prof.avgPrice;
+          fila['Costo Unitario (Est.)'] = prof.costPerUnit;
+          fila['Costo Total (Est.)'] = prof.cost;
+          fila['Utilidad (Est.)'] = prof.profit;
+          fila['Margen (%)'] = `${prof.margin.toFixed(1)}%`;
         }
-
-        return rowData;
+        return fila;
       });
-
       const wsProductos = XLSX.utils.json_to_sheet(productosData);
-
-      // 4. Sheet: Por Local (agrupada por categoría)
       const wsLocales = XLSX.utils.aoa_to_sheet(construirMatrizPorLocal(filteredOrders, mapaCategorias));
 
-      // Create workbook
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, wsResumen, 'Resumen');
       XLSX.utils.book_append_sheet(workbook, wsVentas, 'Detalle Ventas');
       XLSX.utils.book_append_sheet(workbook, wsProductos, 'Productos');
       XLSX.utils.book_append_sheet(workbook, wsLocales, 'Por Local');
 
-      // File name with date range
-      const rangeStr = timeRange === 'custom' && dateRange?.from
-        ? (dateRange.to
-          ? `${format(dateRange.from, 'dd-MM-yyyy')}_al_${format(dateRange.to, 'dd-MM-yyyy')}`
-          : format(dateRange.from, 'dd-MM-yyyy'))
-        : `ultimos_${dateRangeInDays}_dias`;
-
-      const fileName = `Reporte_ConectOca_${rangeStr}.xlsx`;
-      await exportarLibroExcel(workbook, fileName);
-
-      toast.success('Reporte Excel generado exitosamente');
+      const rangeStr = `${format(startDate, 'dd-MM-yyyy')}_al_${format(endDate, 'dd-MM-yyyy')}`;
+      await exportarLibroExcel(workbook, `Reporte_ConectOca_${rangeStr}.xlsx`);
+      toast.success('Reporte generado');
     } catch (error) {
       console.error('Error exporting data:', error);
       toast.error('Error al exportar datos');
+    } finally {
+      setExportando(false);
     }
   };
 
-  // Exportar formato Google Drive (XLSX completo)
-  const handleExportDrive = async () => {
-    try {
-      if (!catalogoListo) {
-        toast.warning('No se pudo cargar el catálogo: la planilla sale sin agrupar por categoría');
-      }
+  // ── Render ───────────────────────────────────────────────────────────────
+  const pestañas: [typeof activeTab, string][] = [
+    ['resumen', 'Resumen'],
+    ['productos', 'Productos'],
+    ['estados', 'Estados'],
+    ...(puedeVerCostos ? ([['costos', 'Costos']] as [typeof activeTab, string][]) : []),
+  ];
 
-      // Import the xlsx library dynamically
-      const XLSX = await import('xlsx');
-
-      // 1. Sheet: Resumen General
-      const resumenData = [
-        ['Resumen de Gestión', ''],
-        ['Periodo', timeRange === 'custom' && dateRange?.from && dateRange?.to
-          ? `${dateRange.from.toLocaleDateString('es-CL')} - ${dateRange.to.toLocaleDateString('es-CL')}`
-          : `Últimos ${dateRangeInDays} días`],
-        ['Fecha Generación', new Date().toLocaleDateString('es-CL')],
-        ['', ''],
-        ['Métricas Clave', 'Valor'],
-        ['Ingresos Totales', kpis.totalRevenue],
-        ['Pedidos Totales', kpis.totalOrders],
-        ['Pedidos Completados', kpis.completedOrders],
-        ['Tasa de Éxito', `${kpis.successRate.toFixed(1)}%`],
-      ];
-
-      if ((user.role === 'admin' || user.role === 'production') && profitabilityAnalysis.length > 0) {
-        const totalProfit = profitabilityAnalysis.reduce((sum, p) => sum + p.profit, 0);
-        const margin = kpis.totalRevenue > 0 ? (totalProfit / kpis.totalRevenue) * 100 : 0;
-        resumenData.push(
-          ['Utilidad Estimada', totalProfit],
-          ['Margen Global Estimado', `${margin.toFixed(1)}%`]
-        );
-      }
-      const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
-
-      // 2. Sheet: Detalle Ventas
-      const wsVentas = XLSX.utils.json_to_sheet(construirDetalleVentas(filteredOrders, mapaCategorias));
-
-      // 3. Sheet: Productos
-      const productosData = allProductStats.map(p => {
-        const prof = profitabilityAnalysis.find(x => x.name === p.name);
-        const rowData: any = {
-          'Producto': p.name,
-          'Unidades Vendidas': p.cantidad,
-          'Ventas Totales (N° de Pedidos)': p.ventasTotales || 0,
-          'Ingresos Totales': p.ingresos,
-        };
-        if (prof) {
-          rowData['Precio Promedio'] = prof.avgPrice;
-          rowData['Costo Unitario (Est.)'] = prof.costPerUnit;
-          rowData['Costo Total (Est.)'] = prof.cost;
-          rowData['Utilidad (Est.)'] = prof.profit;
-          rowData['Margen (%)'] = `${prof.margin.toFixed(1)}%`;
-        }
-        return rowData;
-      });
-      const wsProductos = XLSX.utils.json_to_sheet(productosData);
-
-      // 4. Sheet: Por Local (agrupada por categoría)
-      const wsLocales = XLSX.utils.aoa_to_sheet(construirMatrizPorLocal(filteredOrders, mapaCategorias));
-
-      // Create workbook
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, wsResumen, 'Resumen');
-      XLSX.utils.book_append_sheet(workbook, wsVentas, 'Detalle Ventas');
-      XLSX.utils.book_append_sheet(workbook, wsProductos, 'Productos');
-      XLSX.utils.book_append_sheet(workbook, wsLocales, 'Por Local');
-
-      // File name with date range
-      const rangeStr = timeRange === 'custom' && dateRange?.from
-        ? (dateRange.to
-          ? `${format(dateRange.from, 'dd-MM-yyyy')}_al_${format(dateRange.to, 'dd-MM-yyyy')}`
-          : format(dateRange.from, 'dd-MM-yyyy'))
-        : `ultimos_${dateRangeInDays}_dias`;
-
-      const fileName = `GoogleDrive_ConectOca_${rangeStr}.xlsx`;
-
-      await exportarLibroExcel(workbook, fileName);
-
-      toast.success('Reporte compatible con Google Drive generado');
-    } catch (error) {
-      console.error('Error exporting data for Google Drive:', error);
-      toast.error('Error al exportar datos para Google Drive');
-    }
-  };
-
+  const maxProducto = productosOrdenados[0]
+    ? (ordenProductos === 'ingresos' ? productosOrdenados[0].ingresos : productosOrdenados[0].cantidad) || 1
+    : 1;
+  // Antes de la primera página no hay cifras: "—" en vez de un $0 que parece real.
+  const sinDatos = allOrders.length === 0 && !datosCompletos;
+  const v = (texto: string) => (sinDatos ? '—' : texto);
+  const marcasDiarias = marcasEje(Math.max(0, ...dailyStats.map((d) => d[metricaDiaria])));
+  const productosVisibles = verTodosProductos ? productosOrdenados : productosOrdenados.slice(0, 10);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 overflow-x-hidden">
-      {/* Header. El inset del notch va acá para que el azul del header llegue
-          hasta la barra de estado en el contenedor nativo (env()=0 en web). */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        <div className="max-w-7xl mx-auto px-4 py-5">
-          <div className="flex items-center gap-3 mb-4">
-            <motion.button
-              onClick={onBack}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              className="w-10 h-10 shrink-0 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado compacto */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
+          paddingTop: 'max(env(safe-area-inset-top), 16px)',
+        }}
+      >
+        <div className="max-w-3xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>
+                Analíticas
+              </h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {etiquetaPeriodo}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exportando}
+              aria-label="Exportar a Excel"
+              style={{ ...botonRedondo, opacity: exportando ? 0.6 : 1 }}
             >
-              <ArrowLeft className="w-5 h-5" />
-            </motion.button>
-
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <motion.div
-                className="w-9 h-9 shrink-0 bg-white/20 rounded-full flex items-center justify-center"
-                whileHover={{ rotate: [0, -10, 10, -10, 0], transition: { duration: 0.5 } }}
-              >
-                <Factory className="w-5 h-5 text-white" />
-              </motion.div>
-              <div className="min-w-0">
-                <span className="tracking-wider text-sm font-semibold truncate block">CONECTOCA</span>
-                <p className="text-xs text-blue-200 opacity-80 truncate">Gestión de Pedidos La Oca</p>
-              </div>
-            </div>
-
-            <div className="flex gap-1.5 shrink-0">
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  onClick={handleExportDrive}
-                  variant="outline"
-                  size="sm"
-                  className="bg-emerald-600 border-emerald-500 hover:bg-emerald-700 text-white px-2"
-                >
-                  <Download className="w-4 h-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Google Drive</span>
-                </Button>
-              </motion.div>
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  onClick={handleExport}
-                  variant="outline"
-                  size="sm"
-                  className="bg-white/10 border-white/20 hover:bg-white/20 text-white px-2"
-                >
-                  <Download className="w-4 h-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Excel</span>
-                </Button>
-              </motion.div>
-            </div>
+              {exportando
+                ? <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: '#fff' }} />
+                : <Share style={{ width: 18, height: 18, color: '#fff' }} />}
+            </button>
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl mb-2">📊 Dashboard de Analíticas</h1>
-              {(user.role === 'admin' || user.role === 'production') && (
-                <Badge
-                  className="mb-2 border px-2.5 py-1"
-                  style={{
-                    background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
-                    color: '#0047BA',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    boxShadow: '0 2px 8px rgba(255, 212, 59, 0.3)'
-                  }}
-                >
-                  🌐 VISTA GLOBAL
-                </Badge>
-              )}
+          {/* Período */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <div role="group" aria-label="Período" style={{ display: 'flex', flex: 1, padding: 2, borderRadius: 9, background: 'rgba(255,255,255,0.18)' }}>
+              {([['7d', '7 días'], ['30d', '30 días'], ['90d', '90 días']] as const).map(([v, t]) => {
+                const activo = timeRange === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={activo}
+                    onClick={() => setTimeRange(v)}
+                    style={{
+                      flex: 1, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13,
+                      fontWeight: activo ? 600 : 500,
+                      background: activo ? '#fff' : 'transparent',
+                      color: activo ? '#0047BA' : '#fff',
+                    }}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-blue-100 text-sm">
-              {(user.role === 'admin' || user.role === 'production')
-                ? 'Métricas de rendimiento de todos los usuarios'
-                : 'Insights y métricas de rendimiento de CONECTOCA'}
-            </p>
-          </motion.div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto p-4 space-y-6">
-        {/* Time Range Selector */}
-        <div className="flex items-center gap-2 justify-between flex-wrap">
-          <div className="flex gap-1.5 flex-wrap">
-            {/* Standard Ranges */}
-            {(['7d', '30d', '90d'] as const).map((range) => (
-              <Button
-                key={range}
-                onClick={() => setTimeRange(range)}
-                variant={timeRange === range ? 'default' : 'outline'}
-                size="sm"
-                className={timeRange === range ? 'bg-blue-600 hover:bg-blue-700' : ''}
-              >
-                {range === '7d' && 'Últimos 7 días'}
-                {range === '30d' && 'Últimos 30 días'}
-                {range === '90d' && 'Últimos 90 días'}
-              </Button>
-            ))}
-
-            {/* Custom Range */}
             <Popover>
               <PopoverTrigger asChild>
-                <Button
-                  variant={timeRange === 'custom' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setTimeRange('custom')}
-                  className={timeRange === 'custom' ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                <button
+                  type="button"
+                  aria-label="Elegir fechas"
+                  aria-pressed={timeRange === 'custom'}
+                  style={{
+                    height: 34, padding: '0 12px', borderRadius: 9, border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+                    background: timeRange === 'custom' ? '#fff' : 'rgba(255,255,255,0.18)',
+                    color: timeRange === 'custom' ? '#0047BA' : '#fff',
+                  }}
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange?.from ? (
-                    dateRange.to ? (
-                      <>
-                        {format(dateRange.from, "dd/MM/yyyy")} -{" "}
-                        {format(dateRange.to, "dd/MM/yyyy")}
-                      </>
-                    ) : (
-                      format(dateRange.from, "dd/MM/yyyy")
-                    )
-                  ) : (
-                    <span>Personalizado</span>
-                  )}
-                </Button>
+                  <CalendarIcon style={{ width: 15, height: 15 }} />
+                  Fechas
+                </button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0" align="end">
                 <Calendar
                   initialFocus
                   mode="range"
                   defaultMonth={dateRange?.from}
                   selected={dateRange}
-                  onSelect={setDateRange}
-                  numberOfMonths={2}
+                  onSelect={(r) => { setDateRange(r); if (r?.from) setTimeRange('custom'); }}
+                  numberOfMonths={1}
                   locale={es}
+                  disabled={{ after: new Date() }}
                 />
               </PopoverContent>
             </Popover>
           </div>
+        </div>
+      </div>
 
-          <Badge variant="outline" className="text-sm">
-            <CalendarIcon className="w-4 h-4 mr-2" />
-            {filteredOrders.length} pedidos en este período
-          </Badge>
+      <div className="max-w-3xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Cargando más pedidos */}
+        {!datosCompletos && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: IOS.secundario, margin: '0 4px 12px' }}>
+            <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} />
+            {progreso
+              ? `Cargando pedidos… ${numero(progreso.cargados)} de ${numero(progreso.total)}`
+              : 'Cargando pedidos…'}
+          </div>
+        )}
+
+        {/* Cifra principal */}
+        <div style={{ ...tarjeta, padding: '16px 16px 14px', marginBottom: 12, opacity: datosCompletos ? 1 : 0.55 }}>
+          <p style={{ fontSize: 13, color: IOS.secundario }}>Ingresos</p>
+          <p style={{ fontSize: 34, fontWeight: 700, color: IOS.texto, letterSpacing: -0.5, lineHeight: 1.15, fontVariantNumeric: 'tabular-nums' }}>
+            {v(formatCLP(kpis.totalRevenue))}
+          </p>
+          <p style={{ fontSize: 13, color: IOS.secundario, marginTop: 2 }}>
+            {sinDatos ? 'Cargando…' : `${numero(kpis.vigentes)} pedidos${kpis.cancelados > 0 ? ` · sin ${numero(kpis.cancelados)} cancelados` : ''}`}
+          </p>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Total Revenue */}
-          <Card className="border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <DollarSign className="w-4 h-4" />
-                Ingresos Totales
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl text-green-600">
-                ${kpis.totalRevenue.toLocaleString('es-CL')}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                De {kpis.totalOrders} pedidos
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Completed Orders */}
-          <Card className="border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <CheckCircle2 className="w-4 h-4" />
-                Pedidos Completados
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl text-blue-600">
-                {kpis.completedOrders}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Tasa de éxito: {kpis.successRate.toFixed(1)}%
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Total Orders */}
-          <Card className="border-l-4 border-l-yellow-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <Package className="w-4 h-4" />
-                Total de Pedidos
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl text-yellow-600">
-                {kpis.totalOrders}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                En los últimos {dateRangeInDays} días
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Avg Production Time */}
-          <Card className="border-l-4 border-l-purple-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2 text-gray-600">
-                <Clock className="w-4 h-4" />
-                Tiempo Promedio
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl text-purple-600">
-                {kpis.avgProductionTime}h
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Por pedido completado
-              </p>
-            </CardContent>
-          </Card>
+        {/* Mosaicos */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24, opacity: datosCompletos ? 1 : 0.55 }}>
+          <Mosaico titulo="Ticket promedio" valor={v(formatCLP(kpis.ticket))} />
+          <Mosaico titulo="Pedidos por día" valor={v(numero(kpis.porDia, 1))} />
+          <Mosaico titulo="Completados" valor={v(`${numero(kpis.successRate, 1)}%`)} detalle={sinDatos ? undefined : `${numero(kpis.completedOrders)} de ${numero(kpis.totalOrders)}`} />
+          <Mosaico
+            titulo="Cancelados"
+            valor={v(numero(kpis.cancelados))}
+            detalle={kpis.totalOrders > 0 ? `${numero((kpis.cancelados / kpis.totalOrders) * 100, 1)}% del total` : undefined}
+          />
         </div>
 
-        {/* Charts Section */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
-            <TabsTrigger value="overview" className="gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Resumen
-            </TabsTrigger>
-            <TabsTrigger value="products" className="gap-2">
-              <BarChart3 className="w-4 h-4" />
-              Productos
-            </TabsTrigger>
-            <TabsTrigger value="status" className="gap-2">
-              <PieChart className="w-4 h-4" />
-              Estados
-            </TabsTrigger>
-            <TabsTrigger value="revenue" className="gap-2">
-              <DollarSign className="w-4 h-4" />
-              Ingresos
-            </TabsTrigger>
-            {user.role === 'admin' && (
-              <TabsTrigger value="costs" className="gap-2">
-                <Factory className="w-4 h-4" />
-                Costos
-              </TabsTrigger>
-            )}
-          </TabsList>
+        {/* Secciones */}
+        <div role="tablist" style={{ display: 'flex', padding: 2, borderRadius: 9, background: IOS.relleno, marginBottom: 16 }}>
+          {pestañas.map(([v, t]) => {
+            const activo = activeTab === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={activo}
+                onClick={() => setActiveTab(v)}
+                style={{
+                  flex: 1, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13,
+                  fontWeight: activo ? 600 : 500, color: IOS.texto,
+                  background: activo ? '#fff' : 'transparent',
+                  boxShadow: activo ? '0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.04)' : 'none',
+                }}
+              >
+                {t}
+              </button>
+            );
+          })}
+        </div>
 
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-blue-600" />
-                  Pedidos por Día
-                </CardTitle>
-                <CardDescription>
-                  Visualización de pedidos en los últimos {dateRangeInDays} días
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dailyStats}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                      }}
-                    />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="pedidos"
-                      stroke={COLORS.primary}
-                      strokeWidth={3}
-                      dot={{ fill: COLORS.primary, r: 4 }}
-                      activeDot={{ r: 6 }}
-                      name="Pedidos"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
+        {activeTab === 'resumen' && (
+          <Seccion
+            titulo={metricaDiaria === 'ingresos' ? 'Ingresos por día' : 'Pedidos por día'}
+            accion={
+              <SegmentoChico
+                opciones={[['ingresos', '$'], ['pedidos', 'N.º']]}
+                valor={metricaDiaria}
+                onCambio={(v) => setMetricaDiaria(v as 'ingresos' | 'pedidos')}
+              />
+            }
+          >
+            <div style={{ ...tarjeta, padding: '16px 8px 8px 0' }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={dailyStats} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barCategoryGap={dailyStats.length > 45 ? 1 : 2}>
+                  <CartesianGrid vertical={false} stroke="rgba(60,60,67,0.12)" />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                    minTickGap={24}
+                    tick={{ fontSize: 11, fill: IOS.secundario }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    width={metricaDiaria === 'ingresos' ? 76 : 36}
+                    tick={{ fontSize: 11, fill: IOS.secundario }}
+                    tickFormatter={(v: number) => (metricaDiaria === 'ingresos' ? montoCorto(v) : numero(v))}
+                    allowDecimals={false}
+                    ticks={marcasDiarias}
+                    domain={[0, marcasDiarias[marcasDiarias.length - 1]]}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(0,122,255,0.08)' }}
+                    contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', fontSize: 13 }}
+                    labelStyle={{ color: IOS.secundario, marginBottom: 2 }}
+                    formatter={(v: number) =>
+                      metricaDiaria === 'ingresos' ? [formatCLP(v), 'Ingresos'] : [numero(v), 'Pedidos']
+                    }
+                  />
+                  <Bar dataKey={metricaDiaria} fill={IOS.azul} radius={[3, 3, 0, 0]} maxBarSize={28} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Seccion>
+        )}
 
-          {/* Products Tab */}
-          <TabsContent value="products" className="space-y-6">
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-yellow-600" />
-                  Productos Más Vendidos
-                </CardTitle>
-                <CardDescription>
-                  Top 10 productos por cantidad vendida
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={topProductStats} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis type="number" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={150}
-                      stroke="#6b7280"
-                      style={{ fontSize: '11px' }}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                      }}
-                      formatter={(value, name) => {
-                        if (name === 'cantidad') return [value, 'Cantidad'];
-                        if (name === 'ingresos') return [`$${value.toLocaleString('es-CL')}`, 'Ingresos'];
-                        return [value, name];
-                      }}
-                    />
-                    <Legend />
-                    <Bar dataKey="cantidad" fill={COLORS.secondary} name="Cantidad" />
-                    <Bar dataKey="ingresos" fill={COLORS.primary} name="Ingresos ($)" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
+        {activeTab === 'productos' && (
+          <Seccion
+            titulo={`${numero(allProductStats.length)} productos vendidos`}
+            accion={
+              <SegmentoChico
+                opciones={[['ingresos', '$'], ['cantidad', 'Unid.']]}
+                valor={ordenProductos}
+                onCambio={(v) => setOrdenProductos(v as 'ingresos' | 'cantidad')}
+              />
+            }
+            pie="Sin pedidos cancelados."
+          >
+            <div style={tarjeta}>
+              {productosVisibles.length === 0 ? (
+                <Vacio texto="No hay ventas en este período" />
+              ) : (
+                productosVisibles.map((p, i) => {
+                  const valor = ordenProductos === 'ingresos' ? p.ingresos : p.cantidad;
+                  return (
+                    <div key={p.name}>
+                      {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 44 }} />}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                        <span style={{ width: 16, fontSize: 13, color: IOS.secundario, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {i + 1}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span className="truncate" style={{ flex: 1, fontSize: 15, color: IOS.texto }}>{p.name}</span>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                              {ordenProductos === 'ingresos' ? montoCorto(p.ingresos) : numero(p.cantidad, 2)}
+                            </span>
+                          </div>
+                          <div style={{ height: 4, borderRadius: 2, background: IOS.relleno, margin: '6px 0 4px' }}>
+                            <div style={{ height: 4, borderRadius: 2, background: IOS.azul, width: `${Math.max(2, (valor / maxProducto) * 100)}%` }} />
+                          </div>
+                          <span style={{ fontSize: 12, color: IOS.secundario }}>
+                            {ordenProductos === 'ingresos'
+                              ? `${numero(p.cantidad, 2)} unid. · ${numero(p.ventasTotales || 0)} pedidos`
+                              : `${formatCLP(p.ingresos)} · ${numero(p.ventasTotales || 0)} pedidos`}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {productosOrdenados.length > 10 && (
+                <>
+                  <div style={{ height: 0.5, background: IOS.separador }} />
+                  <button
+                    type="button"
+                    onClick={() => setVerTodosProductos((v) => !v)}
+                    className="fila-ios"
+                    style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, color: IOS.azul, fontSize: 15 }}
+                  >
+                    {verTodosProductos ? 'Ver menos' : `Ver los ${numero(productosOrdenados.length)}`}
+                    <ChevronDown style={{ width: 16, height: 16, transform: verTodosProductos ? 'rotate(180deg)' : undefined }} />
+                  </button>
+                </>
+              )}
+            </div>
+          </Seccion>
+        )}
 
-          {/* Status Tab */}
-          <TabsContent value="status" className="space-y-6">
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <PieChart className="w-5 h-5 text-green-600" />
-                  Distribución por Estado
-                </CardTitle>
-                <CardDescription>
-                  Porcentaje de pedidos por estado actual
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={400}>
-                  <RePieChart>
-                    <Pie
-                      data={statusDistribution}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={120}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {statusDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                      }}
-                    />
-                  </RePieChart>
-                </ResponsiveContainer>
-
-                {/* Legend */}
-                <div className="grid grid-cols-2 gap-3 mt-6">
-                  {statusDistribution.map((item, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <div
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span className="text-sm text-gray-600">
-                        {item.name}: {item.value}
-                      </span>
+        {activeTab === 'estados' && (
+          <Seccion titulo={`${numero(kpis.totalOrders)} pedidos por estado`} pie="Estado actual de los pedidos hechos en el período.">
+            <div style={{ ...tarjeta, padding: 16 }}>
+              {kpis.totalOrders === 0 ? (
+                <Vacio texto="No hay pedidos en este período" />
+              ) : (
+                <>
+                  {/* Barra apilada: cada tramo separado por 2px de fondo */}
+                  <div style={{ display: 'flex', gap: 2, height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 14 }}>
+                    {statusDistribution.filter((e) => e.value > 0).map((e) => (
+                      <div key={e.key} title={`${e.label}: ${e.value}`} style={{ flex: e.value, background: e.color }} />
+                    ))}
+                  </div>
+                  {statusDistribution.map((e, i) => (
+                    <div key={e.key}>
+                      {i > 0 && <div style={{ height: 0.5, background: IOS.separador }} />}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 5, background: e.color, flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 15, color: e.value ? IOS.texto : IOS.secundario }}>{e.label}</span>
+                        <span style={{ fontSize: 15, fontWeight: 600, color: e.value ? IOS.texto : IOS.secundario, fontVariantNumeric: 'tabular-nums' }}>
+                          {numero(e.value)}
+                        </span>
+                        <span style={{ width: 52, textAlign: 'right', fontSize: 13, color: IOS.secundario, fontVariantNumeric: 'tabular-nums' }}>
+                          {numero((e.value / kpis.totalOrders) * 100, 1)}%
+                        </span>
+                      </div>
                     </div>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Revenue Tab */}
-          <TabsContent value="revenue" className="space-y-6">
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="w-5 h-5 text-green-600" />
-                  Ingresos Diarios
-                </CardTitle>
-                <CardDescription>
-                  Evolución de ingresos en el período seleccionado
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={dailyStats}>
-                    <defs>
-                      <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.8} />
-                        <stop offset="95%" stopColor={COLORS.success} stopOpacity={0.1} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                      }}
-                      formatter={(value) => [`$${value.toLocaleString('es-CL')}`, 'Ingresos']}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="ingresos"
-                      stroke={COLORS.success}
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#colorIngresos)"
-                      name="Ingresos"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Costs Tab */}
-          <TabsContent value="costs" className="space-y-6">
-            {/* KPIs de Costos */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <Card className="border-l-4 border-l-green-500 shadow-md">
-                <CardHeader className="pb-3">
-                  <CardDescription className="flex items-center gap-2 text-gray-600">
-                    <Warehouse className="w-4 h-4" />
-                    Valor Inventario
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl text-green-600">
-                    ${productionCosts?.totalInventoryValue.toLocaleString('es-CL') || 0}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {productionCosts?.totalIngredients || 0} ingredientes
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-l-4 border-l-red-500 shadow-md">
-                <CardHeader className="pb-3">
-                  <CardDescription className="flex items-center gap-2 text-gray-600">
-                    <AlertTriangle className="w-4 h-4" />
-                    Stock Bajo
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl text-red-600">
-                    {productionCosts?.lowStockItems.length || 0}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Requieren atención
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-l-4 border-l-blue-500 shadow-md">
-                <CardHeader className="pb-3">
-                  <CardDescription className="flex items-center gap-2 text-gray-600">
-                    <Factory className="w-4 h-4" />
-                    Órdenes Producción
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl text-blue-600">
-                    {productionOrders.length}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Total registradas
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-l-4 border-l-purple-500 shadow-md">
-                <CardHeader className="pb-3">
-                  <CardDescription className="flex items-center gap-2 text-gray-600">
-                    <TrendingUp className="w-4 h-4" />
-                    Margen Promedio
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl text-purple-600">
-                    {profitabilityAnalysis.length > 0
-                      ? (profitabilityAnalysis.reduce((sum, p) => sum + p.margin, 0) / profitabilityAnalysis.length).toFixed(1)
-                      : 0}%
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    De {profitabilityAnalysis.length} productos
-                  </p>
-                </CardContent>
-              </Card>
+                </>
+              )}
             </div>
+          </Seccion>
+        )}
 
-            {/* Valor de Inventario por Ingrediente */}
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Warehouse className="w-5 h-5 text-blue-600" />
-                  Top 10 Ingredientes por Valor de Inventario
-                </CardTitle>
-                <CardDescription>
-                  Materias primas con mayor valor monetario en stock
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {productionCosts?.ingredientsByValue && productionCosts.ingredientsByValue.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <BarChart data={productionCosts.ingredientsByValue} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis type="number" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={150}
-                        stroke="#6b7280"
-                        style={{ fontSize: '11px' }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#fff',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                        }}
-                        formatter={(value: any, name: string) => {
-                          if (name === 'value') return [`$${value.toLocaleString('es-CL')}`, 'Valor'];
-                          return [value, name];
-                        }}
-                      />
-                      <Legend />
-                      <Bar dataKey="value" fill="#8B5CF6" name="Valor ($)" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-64 text-gray-500">
-                    <div className="text-center">
-                      <Warehouse className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                      <p>No hay datos de inventario disponibles</p>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+        {activeTab === 'costos' && puedeVerCostos && (
+          loadingProduction ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 40, color: IOS.secundario, fontSize: 14 }}>
+              <Loader2 className="animate-spin" style={{ width: 18, height: 18 }} />
+              Cargando costos y recetas…
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+                <Mosaico
+                  titulo="Margen estimado"
+                  valor={margenGlobal === null ? '—' : `${numero(margenGlobal, 1)}%`}
+                  detalle={`${numero(conReceta.length)} productos con receta`}
+                />
+                <Mosaico titulo="Valor inventario" valor={montoCorto(productionCosts?.totalInventoryValue || 0)} detalle={`${numero(productionCosts?.totalIngredients || 0)} materias primas`} />
+                <Mosaico
+                  titulo="Stock bajo"
+                  valor={numero(productionCosts?.lowStockItems.length || 0)}
+                  detalle="bajo el mínimo"
+                  alerta={(productionCosts?.lowStockItems.length || 0) > 0}
+                />
+                <Mosaico titulo="Órdenes de producción" valor={numero(ordenesProduccionPeriodo.length)} detalle="en el período" />
+              </div>
 
-            {/* Análisis de Rentabilidad */}
-            <Card className="shadow-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-green-600" />
-                  Análisis de Rentabilidad por Producto
-                </CardTitle>
-                <CardDescription>
-                  Comparación de ingresos vs costos de producción
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {profitabilityAnalysis && profitabilityAnalysis.length > 0 ? (
-                  <>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <BarChart data={profitabilityAnalysis.slice(0, 10)}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                        <XAxis
-                          dataKey="name"
-                          angle={-45}
-                          textAnchor="end"
-                          height={100}
-                          stroke="#6b7280"
-                          style={{ fontSize: '10px' }}
-                        />
-                        <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: '#fff',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: '8px',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                          }}
-                          formatter={(value: any) => `$${value.toLocaleString('es-CL')}`}
-                        />
-                        <Legend />
-                        <Bar dataKey="revenue" fill="#22c55e" name="Ingresos" />
-                        <Bar dataKey="cost" fill="#ef4444" name="Costo" />
-                        <Bar dataKey="profit" fill="#3b82f6" name="Utilidad" />
-                      </BarChart>
-                    </ResponsiveContainer>
-
-                    {/* Tabla detallada */}
-                    <div className="mt-6 overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b-2 border-gray-200 bg-gray-50">
-                            <th className="text-left p-3">Producto</th>
-                            <th className="text-right p-3">Unidades</th>
-                            <th className="text-right p-3">Costo Unit.</th>
-                            <th className="text-right p-3">Precio Venta</th>
-                            <th className="text-right p-3">Ingresos</th>
-                            <th className="text-right p-3">Costos</th>
-                            <th className="text-right p-3">Utilidad</th>
-                            <th className="text-right p-3">Margen %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {profitabilityAnalysis.slice(0, 10).map((item, index) => (
-                            <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
-                              <td className="p-3">{item.name}</td>
-                              <td className="text-right p-3">{item.unitsSold}</td>
-                              <td className="text-right p-3">${item.costPerUnit.toFixed(0)}</td>
-                              <td className="text-right p-3">${item.avgPrice.toLocaleString('es-CL')}</td>
-                              <td className="text-right p-3 text-green-600">
-                                ${item.revenue.toLocaleString('es-CL')}
-                              </td>
-                              <td className="text-right p-3 text-red-600">
-                                ${item.cost.toLocaleString('es-CL')}
-                              </td>
-                              <td className="text-right p-3 text-blue-600">
-                                ${item.profit.toLocaleString('es-CL')}
-                              </td>
-                              <td className="text-right p-3">
-                                <Badge
-                                  className={item.margin > 50 ? 'bg-green-500' : item.margin > 30 ? 'bg-yellow-500' : 'bg-red-500'}
-                                  style={{ fontSize: '10px' }}
-                                >
-                                  {item.margin.toFixed(1)}%
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex items-center justify-center h-64 text-gray-500">
-                    <div className="text-center">
-                      <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                      <p>No hay datos suficientes para análisis de rentabilidad</p>
-                      <p className="text-xs mt-1">Configure recetas de productos para ver este análisis</p>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Tendencia de Órdenes de Producción */}
-            {productionTrend.length > 0 && (
-              <Card className="shadow-md">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Factory className="w-5 h-5 text-orange-600" />
-                    Tendencia de Órdenes de Producción
-                  </CardTitle>
-                  <CardDescription>
-                    Evolución de órdenes creadas y terminadas
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={productionTrend}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis
-                        dataKey="date"
-                        stroke="#6b7280"
-                        style={{ fontSize: '12px' }}
-                      />
-                      <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#fff',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                        }}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="ordenes"
-                        stroke="#fb923c"
-                        strokeWidth={3}
-                        dot={{ fill: '#fb923c', r: 4 }}
-                        name="Órdenes Creadas"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="terminadas"
-                        stroke="#22c55e"
-                        strokeWidth={3}
-                        dot={{ fill: '#22c55e', r: 4 }}
-                        name="Órdenes Terminadas"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Alertas de Stock Bajo */}
-            {productionCosts && productionCosts.lowStockItems.length > 0 && (
-              <Card className="shadow-md border-l-4 border-l-red-500">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-red-600">
-                    <AlertTriangle className="w-5 h-5" />
-                    ⚠️ Alertas de Stock Bajo
-                  </CardTitle>
-                  <CardDescription>
-                    Ingredientes que requieren reposición urgente
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {productionCosts.lowStockItems.map((item, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-200">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-600" />
-                            <span className="text-sm">{item.name}</span>
-                          </div>
-                          <div className="text-xs text-gray-600 mt-1">
-                            Stock actual: {item.currentStock} {item.unit} | Mínimo: {item.minStock} {item.unit}
-                          </div>
+              {productionCosts && productionCosts.lowStockItems.length > 0 && (
+                <Seccion
+                  titulo="Reponer"
+                  pie={productionCosts.lowStockItems.length > 8
+                    ? `Los 8 más críticos de ${numero(productionCosts.lowStockItems.length)}. El detalle completo está en Materia prima.`
+                    : undefined}
+                >
+                  <div style={tarjeta}>
+                    {productionCosts.lowStockItems.slice(0, 8).map((item, i) => (
+                      <div key={item.id || item.name}>
+                        {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 44 }} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                          <AlertTriangle style={{ width: 18, height: 18, color: IOS.rojo, flexShrink: 0 }} />
+                          <span className="truncate" style={{ flex: 1, fontSize: 15, color: IOS.texto }}>{item.name}</span>
+                          <span style={{ fontSize: 13, color: IOS.secundario, fontVariantNumeric: 'tabular-nums' }}>
+                            {numero(item.currentStock, 2)} / mín. {numero(item.minStock, 2)} {item.unit}
+                          </span>
                         </div>
-                        <Badge className="bg-red-500 text-white">
-                          URGENTE
-                        </Badge>
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        </Tabs>
+                </Seccion>
+              )}
 
-        {/* Additional Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="shadow-md">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Ticket Promedio</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl text-blue-600">
-                ${kpis.totalOrders > 0
-                  ? Math.round(kpis.totalRevenue / kpis.totalOrders).toLocaleString('es-CL')
-                  : 0
-                }
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Por pedido</p>
-            </CardContent>
-          </Card>
+              <Seccion titulo="Rentabilidad por producto" pie="Costo según las recetas cargadas. Solo productos con receta.">
+                <div style={tarjeta}>
+                  {conReceta.length === 0 ? (
+                    <Vacio texto="Configura recetas de productos para ver la rentabilidad" />
+                  ) : (
+                    conReceta.slice(0, 15).map((p, i) => (
+                      <div key={p.name}>
+                        {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p className="truncate" style={{ fontSize: 15, color: IOS.texto }}>{p.name}</p>
+                            <p style={{ fontSize: 12, color: IOS.secundario, fontVariantNumeric: 'tabular-nums' }}>
+                              Vende {montoCorto(p.revenue)} · cuesta {montoCorto(p.cost)}
+                            </p>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <p style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>{montoCorto(p.profit)}</p>
+                            <p style={{ fontSize: 12, fontWeight: 600, color: p.margin >= 30 ? IOS.verde : p.margin >= 0 ? IOS.naranja : IOS.rojo }}>
+                              {numero(p.margin, 1)}%
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Seccion>
 
-          <Card className="shadow-md">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Pedidos por Día</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl text-yellow-600">
-                {(kpis.totalOrders / dateRangeInDays).toFixed(1)}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Promedio diario</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-md">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Productos Únicos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl text-green-600">
-                {allProductStats.length}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Diferentes productos vendidos</p>
-            </CardContent>
-          </Card>
-        </div>
+              {productionCosts && productionCosts.ingredientsByValue.length > 0 && (
+                <Seccion titulo="Inventario por valor">
+                  <div style={tarjeta}>
+                    {productionCosts.ingredientsByValue.map((ing, i) => (
+                      <div key={ing.name}>
+                        {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p className="truncate" style={{ fontSize: 15, color: IOS.texto }}>{ing.name}</p>
+                            <p style={{ fontSize: 12, color: IOS.secundario }}>{numero(ing.stock, 2)} {ing.unit}</p>
+                          </div>
+                          <span style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>
+                            {montoCorto(ing.value)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Seccion>
+              )}
+            </>
+          )
+        )}
       </div>
     </div>
   );
+}
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+};
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+function Mosaico({ titulo, valor, detalle, alerta }: { titulo: string; valor: string; detalle?: string; alerta?: boolean }) {
+  return (
+    <div style={{ ...tarjeta, padding: '12px 14px' }}>
+      <p style={{ fontSize: 13, color: IOS.secundario }}>{titulo}</p>
+      <p style={{ fontSize: 22, fontWeight: 700, color: alerta ? IOS.rojo : IOS.texto, letterSpacing: -0.3, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+        {valor}
+      </p>
+      {detalle && <p style={{ fontSize: 12, color: IOS.secundario, marginTop: 1 }}>{detalle}</p>}
+    </div>
+  );
+}
+
+function Seccion({ titulo, accion, pie, children }: { titulo: string; accion?: ReactNode; pie?: string; children: ReactNode }) {
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 4px 6px 16px', minHeight: 30 }}>
+        <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', fontWeight: 400 }}>
+          {titulo}
+        </h3>
+        {accion}
+      </div>
+      {children}
+      {pie && <p style={{ fontSize: 13, color: IOS.secundario, padding: '6px 16px 0', lineHeight: 1.35 }}>{pie}</p>}
+    </section>
+  );
+}
+
+function SegmentoChico({ opciones, valor, onCambio }: { opciones: [string, string][]; valor: string; onCambio: (v: string) => void }) {
+  return (
+    <div role="group" style={{ display: 'flex', padding: 2, borderRadius: 8, background: IOS.relleno }}>
+      {opciones.map(([v, t]) => {
+        const activo = v === valor;
+        return (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={activo}
+            onClick={() => onCambio(v)}
+            style={{
+              minWidth: 44, height: 26, padding: '0 8px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
+              fontWeight: activo ? 600 : 500, color: IOS.texto,
+              background: activo ? '#fff' : 'transparent',
+              boxShadow: activo ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+            }}
+          >
+            {t}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Vacio({ texto }: { texto: string }) {
+  return <p style={{ padding: '28px 16px', textAlign: 'center', fontSize: 14, color: IOS.secundario }}>{texto}</p>;
 }
