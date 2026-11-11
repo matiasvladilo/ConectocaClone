@@ -1,9 +1,6 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { Button } from './ui/button';
-import { Label } from './ui/label';
 import { Camera, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
 import { projectId } from '../utils/supabase/info';
 
 // Carga diferida: react-easy-crop no hace falta hasta que alguien elige una
@@ -116,104 +113,56 @@ export function ImageUpload({ value, onChange, label = "Imagen del producto", ac
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
+  // Estilo iOS: miniatura cuadrada + acciones como filas de texto azul. Los
+  // inputs de archivo viven siempre montados (antes solo existían sin foto, así
+  // que "cambiar" una foto obligaba a quitarla primero), y "Quitar foto" es un
+  // botón visible: antes solo aparecía con hover, imposible en un teléfono.
+  const fila: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
+    padding: '0 16px', background: 'none', border: 'none', textAlign: 'left',
+    fontSize: 16, color: '#007AFF', cursor: 'pointer',
+  };
+  const separador = <div style={{ height: 0.5, background: 'rgba(60,60,67,0.18)', marginLeft: 16 }} />;
+
   return (
-    <div className="space-y-3">
-      <Label className="flex items-center gap-2 text-[#0047BA]" style={{ fontSize: '14px', fontWeight: 500 }}>
-        <ImageIcon className="w-4 h-4" />
-        {label}
-      </Label>
+    <div>
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" disabled={uploading} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" disabled={uploading} />
 
-      <AnimatePresence mode="wait">
-        {previewUrl ? (
-          <motion.div
-            key="preview"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="relative group"
-          >
-            {/* El cuadro se ajusta a la proporción real de la foto (sin recortar ni
-                forzarla a un cuadrado) — solo se limita la altura máxima para que
-                una foto muy vertical no domine el formulario. */}
-            <div className="relative max-w-[150px] max-h-64 mx-auto bg-gray-50 rounded-lg overflow-hidden border-2 border-blue-200 shadow-sm">
-              <img
-                src={previewUrl}
-                alt="Preview"
-                className="block w-full h-auto max-h-64 object-contain"
-              />
-              <motion.button
-                type="button"
-                onClick={handleRemoveImage}
-                className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <X className="w-4 h-4" />
-              </motion.button>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="upload"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="space-y-2"
-          >
-            {/* Hidden file inputs */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileSelect}
-              className="hidden"
-              disabled={uploading}
-            />
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileSelect}
-              className="hidden"
-              disabled={uploading}
-            />
-
-            {/* Upload buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-24 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                onClick={() => cameraInputRef.current?.click()}
-                disabled={uploading}
-              >
-                <Camera className="w-6 h-6 text-blue-600" />
-                <span className="text-sm font-medium text-blue-900">
-                  {uploading ? 'Subiendo...' : 'Tomar Foto'}
-                </span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-24 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-all"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                <Upload className="w-6 h-6 text-blue-600" />
-                <span className="text-sm font-medium text-blue-900">
-                  {uploading ? 'Subiendo...' : 'Cargar Imagen'}
-                </span>
-              </Button>
-            </div>
-
-            <p className="text-xs text-gray-500 text-center mt-2">
-              📸 Formatos: JPG, PNG, GIF • Máximo 5MB
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px' }}>
+        <div style={{ width: 72, height: 72, borderRadius: 12, overflow: 'hidden', background: '#F2F2F7', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {previewUrl ? (
+            <img src={previewUrl} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          ) : (
+            <ImageIcon style={{ width: 26, height: 26, color: '#C7C7CC' }} />
+          )}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 16, color: '#000' }}>{label}</p>
+          <p style={{ fontSize: 13, color: '#8E8E93' }}>
+            {uploading ? 'Subiendo…' : previewUrl ? 'Así se ve en el catálogo' : 'JPG o PNG, hasta 5 MB'}
+          </p>
+        </div>
+      </div>
+      {separador}
+      <button type="button" className="fila-ios" style={fila} onClick={() => cameraInputRef.current?.click()} disabled={uploading}>
+        <Camera style={{ width: 18, height: 18 }} />
+        {previewUrl ? 'Tomar otra foto' : 'Tomar foto'}
+      </button>
+      {separador}
+      <button type="button" className="fila-ios" style={fila} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+        <Upload style={{ width: 18, height: 18 }} />
+        Elegir de la galería
+      </button>
+      {previewUrl && (
+        <>
+          {separador}
+          <button type="button" className="fila-ios" style={{ ...fila, color: '#FF3B30' }} onClick={handleRemoveImage} disabled={uploading}>
+            <X style={{ width: 18, height: 18 }} />
+            Quitar foto
+          </button>
+        </>
+      )}
 
       {/* Editor de recorte: se renderiza solo mientras está abierto para que la
           carga diferida sirva de algo (el chunk de react-easy-crop se baja

@@ -864,3 +864,9 @@ body {
 .boton-ios:active:not(:disabled) {
   opacity: 0.7;
 }
+
+/* Hojas iOS montadas sobre el Dialog de shadcn: su ✕ automática (último hijo)
+   se oculta porque la hoja trae su propia barra con Cancelar / Guardar. */
+.hoja-ios > button:last-child {
+  display: none;
+}

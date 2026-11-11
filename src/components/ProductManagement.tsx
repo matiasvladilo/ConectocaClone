@@ -743,7 +743,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         )}
       </div>
 
-      {/* Create/Edit Dialog */}
+      {/* Create/Edit Dialog — hoja estilo Ajustes de iOS: Cancelar / título /
+          Guardar arriba y secciones agrupadas. Se mantiene el Dialog de Radix por
+          el manejo de foco (ver onCloseAutoFocus). */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         {/* Radix, al desmontar el diálogo, devuelve el foco al elemento que lo abrió: la
             tarjeta de la grilla. Cuando salimos por "Configurar receta" eso ocurre ~200ms
@@ -751,56 +753,77 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
             usuario queda tecleando sobre una grilla que no ve, donde Enter abre el diálogo
             de OTRO producto y se lleva puesto lo que estaba editando sin guardar. */}
         <DialogContent
-          className="max-w-2xl max-h-[90vh] overflow-y-auto"
+          className="hoja-ios"
           onCloseAutoFocus={(e) => e.preventDefault()}
+          style={{
+            top: 'auto', bottom: 0, left: 0, right: 0, translate: 'none', margin: '0 auto',
+            width: '100%', maxWidth: 640, height: '94dvh', padding: 0, gap: 0, border: 'none',
+            borderRadius: '14px 14px 0 0', background: IOS_PM.fondo, display: 'flex', flexDirection: 'column',
+          }}
         >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {editingProduct ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-              {editingProduct ? 'Editar Producto' : 'Crear Nuevo Producto'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingProduct
-                ? 'Actualiza la información del producto'
-                : 'Completa los datos del nuevo producto'}
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+            {/* Barra superior */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '14px 16px 10px', gap: 8 }}>
+              <button type="button" onClick={handleCloseDialog} disabled={submitting} style={{ ...textoBoton, flex: 1, textAlign: 'left' }}>
+                Cancelar
+              </button>
+              <DialogTitle style={{ fontSize: 17, fontWeight: 600, color: IOS_PM.texto, textAlign: 'center', flex: 2 }} className="truncate">
+                {editingProduct ? 'Editar producto' : 'Nuevo producto'}
+              </DialogTitle>
+              <button type="submit" disabled={submitting} style={{ ...textoBoton, flex: 1, textAlign: 'right', fontWeight: 600, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                {submitting && <span className="animate-spin" style={{ width: 14, height: 14, borderRadius: 7, border: '2px solid #C7C7CC', borderTopColor: 'transparent' }} />}
+                {submitting ? 'Guardando' : editingProduct ? 'Guardar' : 'Crear'}
+              </button>
+            </div>
+            <DialogDescription className="sr-only">
+              {editingProduct ? 'Actualiza la información del producto' : 'Completa los datos del nuevo producto'}
             </DialogDescription>
-          </DialogHeader>
 
-          <form onSubmit={handleSubmit} className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 16px max(env(safe-area-inset-bottom), 24px)' }}>
+              {/* Foto */}
+              <SeccionPM>
+                <ImageUpload
+                  value={formData.imageUrl}
+                  onChange={(url) => setFormData({ ...formData, imageUrl: url })}
+                  label="Foto del producto"
+                  accessToken={accessToken}
+                />
+              </SeccionPM>
+
+              {/* Nombre */}
+              <SeccionPM titulo="Nombre">
                 {editingProduct ? (
-                  <>
-                    <Label htmlFor="name">Nombre del Producto *</Label>
-                    <Input
+                  <FilaPM>
+                    <input
                       id="name"
+                      aria-label="Nombre del producto"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Ej: Cajas de Cartón Premium"
+                      placeholder="Nombre del producto"
                       required
+                      style={{ ...inputPM, textAlign: 'left' }}
                     />
-                  </>
+                  </FilaPM>
                 ) : (
-                  <ProductNameFields
-                    value={nameParts}
-                    onChange={(partes) => {
-                      setNameParts(partes);
-                      // formData.name queda siempre igual al nombre compuesto, así
-                      // la validación y el payload de handleSubmit no cambian nada.
-                      setFormData(f => ({ ...f, name: componerNombre(partes) }));
-                    }}
-                    productosExistentes={products}
-                  />
+                  <div style={{ padding: 16 }}>
+                    <ProductNameFields
+                      value={nameParts}
+                      onChange={(partes) => {
+                        setNameParts(partes);
+                        // formData.name queda siempre igual al nombre compuesto, así
+                        // la validación y el payload de handleSubmit no cambian nada.
+                        setFormData(f => ({ ...f, name: componerNombre(partes) }));
+                      }}
+                      productosExistentes={products}
+                    />
+                  </div>
                 )}
-              </div>
+              </SeccionPM>
 
-              <div className="col-span-2">
-                <Label htmlFor="sku" className="flex items-center gap-2">
-                  <Barcode className="w-4 h-4 text-gray-500" />
-                  SKU / Código de barras
-                </Label>
-                <div className="relative">
-                  <Input
+              {/* Código y descripción */}
+              <SeccionPM pie="El código es opcional. Puedes escanearlo con la pistola lectora o con la cámara.">
+                <FilaPM etiqueta="Código" htmlFor="sku" separador>
+                  <input
                     id="sku"
                     value={formData.sku}
                     onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
@@ -809,331 +832,224 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                       // escanear dentro del form dispararía un submit prematuro.
                       if (e.key === 'Enter') e.preventDefault();
                     }}
-                    placeholder="Ej: 7801234567890"
+                    placeholder="Sin código"
                     inputMode="numeric"
-                    className="pr-11"
                     autoComplete="off"
+                    style={inputPM}
                   />
                   <button
                     type="button"
                     onClick={() => setFormScannerOpen(true)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-[#2563EB] hover:bg-blue-50 transition-colors"
                     aria-label="Escanear código de barras con la cámara"
+                    style={{ background: 'none', border: 'none', padding: '6px 0 6px 10px', color: IOS_PM.azul, display: 'flex' }}
                   >
-                    <Camera className="w-5 h-5" />
+                    <Camera style={{ width: 20, height: 20 }} />
                   </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Opcional. Podés escanearlo con la pistola lectora o con la cámara.
-                </p>
-              </div>
-
-              <div className="col-span-2">
-                <Label htmlFor="description">Descripción</Label>
-                <Textarea
+                </FilaPM>
+                <textarea
                   id="description"
+                  aria-label="Descripción"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Describe el producto..."
+                  placeholder="Descripción (opcional)"
                   rows={3}
+                  style={{ display: 'block', width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '12px 16px', fontSize: 16, color: IOS_PM.texto, background: 'transparent', fontFamily: 'inherit' }}
                 />
-              </div>
+              </SeccionPM>
 
-              <div>
-                <Label htmlFor={enLotes ? undefined : 'price'}>Precio de Venta {!enLotes && '*'}</Label>
-                {enLotes ? (
-                  // Mismo patrón visual que ya usa el bloque de stock al editar: el
-                  // precio de estos productos lo calcula el backend según el lote
-                  // activo, no se edita a mano.
-                  <div className="rounded-lg bg-blue-50 px-4 py-3">
-                    <span className="text-lg font-mono text-gray-900">{formatCLP(parseCLP(formData.price))}</span>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Se actualiza solo según el costo del lote de compra activo.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input
-                      id="price"
-                      type="text"
-                      value={formData.price}
-                      onChange={(e) => setFormData({ ...formData, price: formatCLPInput(e.target.value) })}
-                      placeholder="0"
-                      className="pl-9"
-                      required
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                {/* htmlFor solo cuando el input existe (rama de creación, id="stock"
-                    más abajo): al editar no hay ningún elemento con ese id, y un
-                    htmlFor huérfano no anuncia nada al lector de pantalla ni hace
-                    nada al clickear (Hallazgo 2). */}
-                <Label htmlFor={editingProduct ? undefined : 'stock'}>Stock {!editingProduct && '*'}</Label>
-                {editingProduct ? (
-                  // Al editar, el stock NO es un campo de este formulario. Era la
-                  // causa del bug reportado: quien lo tipeaba y cerraba el diálogo
-                  // sin llegar a "Guardar Cambios" (que queda debajo del scroll en
-                  // teléfono) perdía el número sin ningún aviso. Ahora se muestra y
-                  // se cambia por el diálogo de ajuste, que confirma en el acto.
-                  <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
-                    <span className="text-lg font-mono text-gray-900">
-                      {formData.unlimitedStock ? '∞' : formData.stock}
-                    </span>
-                    {!formData.unlimitedStock && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        // `productoEditado` y no `editingProduct`: ver su comentario
-                        // más arriba. Abrir el diálogo de ajuste con datos viejos (p.ej.
-                        // ingredients desactualizados) le haría calcular mal `enLotes`
-                        // en StockAdjustDialog.
-                        onClick={() => setStockProduct(productoEditado)}
-                        disabled={submitting}
-                        className="border-[#0059FF] text-[#0059FF] hover:bg-blue-50"
-                      >
-                        <BoxIcon className="w-4 h-4 mr-1" />
-                        Ajustar
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <BoxIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input
+              {/* Precio y stock */}
+              <SeccionPM
+                titulo="Precio y stock"
+                pie={
+                  enLotes
+                    ? 'El precio se actualiza solo según el costo del lote de compra activo. Si el mínimo queda vacío se usa 10.'
+                    : 'Cuando el stock llegue al mínimo, Distribuidora lo marca como bajo. Si lo dejas vacío se usa 10.'
+                }
+              >
+                <FilaPM etiqueta="Precio" htmlFor={enLotes ? undefined : 'price'} separador>
+                  {enLotes ? (
+                    // El precio de estos productos lo calcula el backend según el
+                    // lote activo: no se edita a mano.
+                    <span style={{ flex: 1, textAlign: 'right', fontSize: 16, color: IOS_PM.secundario }}>{formatCLP(parseCLP(formData.price))}</span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 16, color: formData.price ? IOS_PM.texto : '#C7C7CC', marginLeft: 'auto' }}>$</span>
+                      <input
+                        id="price"
+                        type="text"
+                        inputMode="numeric"
+                        value={formData.price}
+                        onChange={(e) => setFormData({ ...formData, price: formatCLPInput(e.target.value) })}
+                        placeholder="0"
+                        required
+                        style={{ ...inputPM, flex: 'none', width: 120 }}
+                      />
+                    </>
+                  )}
+                </FilaPM>
+                <FilaPM etiqueta="Stock" htmlFor={editingProduct ? undefined : 'stock'} separador>
+                  {editingProduct ? (
+                    // Al editar, el stock NO es un campo de este formulario: quien lo
+                    // tipeaba y cerraba sin guardar perdía el número sin aviso. Se
+                    // cambia por el diálogo de ajuste, que confirma en el acto.
+                    <>
+                      <span style={{ flex: 1, textAlign: 'right', fontSize: 16, color: IOS_PM.secundario, fontVariantNumeric: 'tabular-nums' }}>
+                        {formData.unlimitedStock ? 'Sin límite' : formData.stock}
+                      </span>
+                      {!formData.unlimitedStock && (
+                        <button
+                          type="button"
+                          // `productoEditado` y no `editingProduct`: abrir el ajuste con
+                          // datos viejos le haría calcular mal `enLotes`.
+                          onClick={() => setStockProduct(productoEditado)}
+                          disabled={submitting}
+                          style={{ marginLeft: 10, height: 30, padding: '0 12px', borderRadius: 15, border: 'none', background: IOS_PM.relleno, color: IOS_PM.azul, fontSize: 14, fontWeight: 600 }}
+                        >
+                          Ajustar
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <input
                       id="stock"
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       // Sin step el navegador asume 1 y rechaza "6.8" con su
                       // propio tooltip, aunque el producto se venda por fracción.
                       step={formData.allowDecimal ? 'any' : '1'}
-                      value={formData.stock}
+                      value={formData.unlimitedStock ? '' : formData.stock}
                       onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                      placeholder="0"
-                      className="pl-9"
-                      required
+                      placeholder={formData.unlimitedStock ? 'Sin límite' : '0'}
+                      required={!formData.unlimitedStock}
                       disabled={formData.unlimitedStock}
+                      style={inputPM}
                     />
-                  </div>
-                )}
-              </div>
+                  )}
+                </FilaPM>
+                <FilaPM etiqueta="Stock mínimo" htmlFor="min-stock">
+                  <input
+                    id="min-stock"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    value={formData.minStock}
+                    onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                    placeholder="10"
+                    disabled={formData.unlimitedStock}
+                    style={inputPM}
+                  />
+                </FilaPM>
+              </SeccionPM>
 
-              <div>
-                <Label htmlFor="min-stock">Stock mínimo</Label>
-                <Input
-                  id="min-stock"
-                  type="number"
-                  min="0"
-                  value={formData.minStock}
-                  onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
-                  placeholder="Ej: 10"
-                  disabled={formData.unlimitedStock}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Cuando el stock llegue a este número, el panel de Distribuidora lo marca como bajo. Si lo dejás vacío se usa 10.
-                </p>
-              </div>
-
-              {/* Opciones de stock: mismo patrón de interruptores que UserProfile,
-                  en un solo bloque neutro para que no compitan con el resto del form. */}
-              <div className="col-span-2 rounded-lg border border-gray-200 overflow-hidden">
-                <div className="flex items-center justify-between gap-4 px-4 py-3">
-                  <Label htmlFor="unlimited-stock" className="cursor-pointer flex-1 min-w-0">
-                    <div>
-                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>Stock ilimitado</p>
-                      <p className="text-xs text-gray-500 mt-0.5">No descuenta stock al vender</p>
-                    </div>
-                  </Label>
+              {/* Opciones de stock */}
+              <SeccionPM>
+                <FilaPM separador>
+                  <label htmlFor="unlimited-stock" style={{ flex: 1, cursor: 'pointer', padding: '6px 0' }}>
+                    <span style={{ display: 'block', fontSize: 16, color: IOS_PM.texto }}>Stock ilimitado</span>
+                    <span style={{ display: 'block', fontSize: 12, color: IOS_PM.secundario }}>No descuenta stock al vender</span>
+                  </label>
                   <Switch
                     id="unlimited-stock"
                     checked={formData.unlimitedStock}
-                    onCheckedChange={(checked) =>
-                      setFormData(prev => alternarStockIlimitado(prev, checked))
-                    }
+                    onCheckedChange={(checked) => setFormData(prev => alternarStockIlimitado(prev, checked))}
                   />
-                </div>
-                <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-gray-200">
-                  <Label htmlFor="allow-decimal" className="cursor-pointer flex-1 min-w-0">
-                    <div>
-                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>Venta por fracción</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Permite cantidades como 0.5 o 1.5</p>
-                    </div>
-                  </Label>
+                </FilaPM>
+                <FilaPM>
+                  <label htmlFor="allow-decimal" style={{ flex: 1, cursor: 'pointer', padding: '6px 0' }}>
+                    <span style={{ display: 'block', fontSize: 16, color: IOS_PM.texto }}>Venta por fracción</span>
+                    <span style={{ display: 'block', fontSize: 12, color: IOS_PM.secundario }}>Permite cantidades como 0,5 o 1,5</span>
+                  </label>
                   <Switch
                     id="allow-decimal"
                     checked={formData.allowDecimal}
                     onCheckedChange={(checked) => setFormData({ ...formData, allowDecimal: checked })}
                   />
-                </div>
-              </div>
+                </FilaPM>
+              </SeccionPM>
 
-              <div className="col-span-2">
-                <Label htmlFor="categoryId">Categoría</Label>
-                <Select
-                  value={formData.categoryId || "none"}
-                  onValueChange={(value: string) => {
-                    if (value === "none") {
-                      setFormData({
-                        ...formData,
-                        categoryId: '',
-                        category: 'General'
-                      });
+              {/* Clasificación */}
+              <SeccionPM titulo="Clasificación">
+                <SelectorPM
+                  etiqueta="Categoría"
+                  valor={formData.categoryId || 'none'}
+                  texto={formData.categoryId ? (categories.find(c => c.id === formData.categoryId)?.name ?? 'Categoría') : 'Sin categoría'}
+                  onCambio={(value) => {
+                    if (value === 'none') {
+                      setFormData({ ...formData, categoryId: '', category: 'General' });
                     } else {
-                      const selectedCategory = categories.find(c => c.id === value);
-                      setFormData({
-                        ...formData,
-                        categoryId: value,
-                        category: selectedCategory?.name || 'General'
-                      });
+                      const elegida = categories.find(c => c.id === value);
+                      setFormData({ ...formData, categoryId: value, category: elegida?.name || 'General' });
                     }
                   }}
+                  separador
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin categoría</SelectItem>
-                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
-                      <SelectGroup key={categoria.id}>
-                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
-                        {hijas.map((hija) => (
-                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
-                            {hija.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {categories.length === 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    No hay categorías. <button type="button" onClick={onManageCategories} className="text-blue-600 underline">Crear una</button>
-                  </p>
-                )}
-              </div>
-
-              <div className="col-span-2">
-                <Label htmlFor="productionAreaId">Área de Producción</Label>
-                <Select
-                  value={formData.productionAreaId || "none"}
-                  onValueChange={(value: string) => {
-                    if (value === "none") {
-                      setFormData({
-                        ...formData,
-                        productionAreaId: ''
-                      });
-                    } else {
-                      setFormData({
-                        ...formData,
-                        productionAreaId: value
-                      });
-                    }
-                  }}
+                  <option value="none">Sin categoría</option>
+                  {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                    hijas.length === 0 ? (
+                      <option key={categoria.id} value={categoria.id}>{categoria.name}</option>
+                    ) : (
+                      <optgroup key={categoria.id} label={categoria.name}>
+                        <option value={categoria.id}>{categoria.name}</option>
+                        {hijas.map((hija) => <option key={hija.id} value={hija.id}>{hija.name}</option>)}
+                      </optgroup>
+                    )
+                  ))}
+                </SelectorPM>
+                <SelectorPM
+                  etiqueta="Área de producción"
+                  valor={formData.productionAreaId || 'none'}
+                  texto={formData.productionAreaId ? (productionAreas.find(a => a.id === formData.productionAreaId)?.name ?? 'Área') : 'Ninguna'}
+                  onCambio={(value) => setFormData({ ...formData, productionAreaId: value === 'none' ? '' : value })}
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar área de producción" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin área de producción</SelectItem>
-                    {productionAreas.map((area) => (
-                      <SelectItem key={area.id} value={area.id}>
-                        {area.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {productionAreas.length === 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    No hay áreas de producción. <button type="button" onClick={onManageCategories} className="text-blue-600 underline">Crear una</button>
-                  </p>
-                )}
-              </div>
-
-              <div className="col-span-2">
-                <ImageUpload
-                  value={formData.imageUrl}
-                  onChange={(url) => setFormData({ ...formData, imageUrl: url })}
-                  label="Imagen del Producto"
-                  accessToken={accessToken}
-                />
-              </div>
-
-              {/* Recipe Summary (read-only) */}
-              <div className="col-span-2">
-                <div className="border-t pt-4 mt-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-sm flex items-center gap-2">
-                        <Factory className="w-4 h-4 text-blue-600" />
-                        Receta
-                      </Label>
-                      <p className="text-sm text-gray-500 mt-1">
-                        {recetaCount} ingrediente{recetaCount !== 1 ? 's' : ''} configurado{recetaCount !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                    {/* Solo al editar: un producto que todavía no existe no tiene
-                        receta que configurar, y el botón sacaba del formulario
-                        perdiendo lo que se llevara escrito. */}
-                    {editingProduct && (
-                      <Button type="button" variant="outline" onClick={abrirReceta}>
-                        Configurar receta
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <DialogFooter>
-              {/* Esta acción vivía en la tarjeta del listado. Con la grilla compacta
-                  ya no entra ahí, así que se movió acá (Ajustar Stock, que vivía al
-                  lado de Eliminar, se fue en cambio a la ficha de solo lectura).
-                  `type="button"` es obligatorio: el contenido del diálogo es un
-                  <form> y sin eso dispararía un submit. */}
-              {editingProduct && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsDeleting(editingProduct)}
-                  disabled={submitting}
-                  className="border-red-500 text-red-500 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  Eliminar
-                </Button>
+                  <option value="none">Ninguna</option>
+                  {productionAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                </SelectorPM>
+              </SeccionPM>
+              {/* "Crear una" lleva a Categorías: solo tiene sentido cuando faltan
+                  categorías (antes también aparecía para las áreas de producción,
+                  y llevaba a la pantalla equivocada). */}
+              {categories.length === 0 && (
+                <p style={{ fontSize: 13, color: IOS_PM.secundario, margin: '-14px 16px 22px' }}>
+                  No hay categorías.{' '}
+                  <button type="button" onClick={onManageCategories} style={{ color: IOS_PM.azul, background: 'none', border: 'none', padding: 0, fontSize: 13 }}>Crear una</button>
+                </p>
               )}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCloseDialog}
-                disabled={submitting}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                  color: 'white'
-                }}
-              >
-                {submitting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                    Guardando...
-                  </>
+
+              {/* Receta */}
+              <SeccionPM pie={editingProduct ? undefined : 'Podrás configurar la receta después de crear el producto.'}>
+                {/* Solo al editar: un producto que todavía no existe no tiene receta
+                    que configurar, y salir del formulario perdería lo escrito. */}
+                {editingProduct ? (
+                  <button type="button" onClick={abrirReceta} className="fila-ios" style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 48, padding: '0 16px', textAlign: 'left', border: 'none' }}>
+                    <span style={{ flex: 1, fontSize: 16, color: IOS_PM.texto }}>Receta</span>
+                    <span style={{ fontSize: 15, color: IOS_PM.secundario }}>
+                      {recetaCount} ingrediente{recetaCount !== 1 ? 's' : ''}
+                    </span>
+                    <ChevronRightPM />
+                  </button>
                 ) : (
-                  <>
-                    {editingProduct ? 'Guardar Cambios' : 'Guardar Producto'}
-                  </>
+                  <FilaPM etiqueta="Receta">
+                    <span style={{ flex: 1, textAlign: 'right', fontSize: 15, color: IOS_PM.secundario }}>Sin configurar</span>
+                  </FilaPM>
                 )}
-              </Button>
-            </DialogFooter>
+              </SeccionPM>
+
+              {/* `type="button"` es obligatorio: el contenido es un <form>. */}
+              {editingProduct && (
+                <SeccionPM>
+                  <button
+                    type="button"
+                    onClick={() => setIsDeleting(editingProduct)}
+                    disabled={submitting}
+                    className="fila-ios"
+                    style={{ width: '100%', minHeight: 48, border: 'none', color: IOS_PM.rojo, fontSize: 16, textAlign: 'center' }}
+                  >
+                    Eliminar producto
+                  </button>
+                </SeccionPM>
+              )}
+            </div>
           </form>
         </DialogContent>
       </Dialog>
@@ -1244,5 +1160,60 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         </div>
       )}
     </div >
+  );
+}
+
+const textoBoton: React.CSSProperties = { background: 'none', border: 'none', padding: '6px 0', fontSize: 17, color: '#007AFF', cursor: 'pointer' };
+
+const inputPM: React.CSSProperties = {
+  flex: 1, minWidth: 0, height: 44, border: 'none', outline: 'none', background: 'transparent',
+  fontSize: 16, color: '#000', textAlign: 'right', padding: 0,
+};
+
+function SeccionPM({ titulo, pie, children }: { titulo?: string; pie?: string; children: React.ReactNode }) {
+  return (
+    <section style={{ marginBottom: 22 }}>
+      {titulo && (
+        <h3 style={{ fontSize: 13, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>{titulo}</h3>
+      )}
+      <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>{children}</div>
+      {pie && <p style={{ fontSize: 13, color: '#8E8E93', padding: '6px 16px 0', lineHeight: 1.35 }}>{pie}</p>}
+    </section>
+  );
+}
+
+/** Fila de formulario: etiqueta a la izquierda, control a la derecha. */
+function FilaPM({ etiqueta, htmlFor, separador, children }: { etiqueta?: string; htmlFor?: string; separador?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, minHeight: 44, padding: '0 16px' }}>
+      {etiqueta && <label htmlFor={htmlFor} style={{ fontSize: 16, color: '#000', flexShrink: 0 }}>{etiqueta}</label>}
+      {children}
+      {separador && <div style={{ position: 'absolute', left: 16, right: 0, bottom: 0, height: 0.5, background: 'rgba(60,60,67,0.18)' }} />}
+    </div>
+  );
+}
+
+/** Fila con selector nativo invisible encima: en el teléfono abre la ruedita de iOS. */
+function SelectorPM({ etiqueta, valor, texto, onCambio, separador, children }: {
+  etiqueta: string; valor: string; texto: string; onCambio: (v: string) => void; separador?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <label className="fila-ios" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '0 16px', cursor: 'pointer' }}>
+      <span style={{ fontSize: 16, color: '#000', flexShrink: 0 }}>{etiqueta}</span>
+      <span className="truncate" style={{ flex: 1, textAlign: 'right', fontSize: 16, color: '#8E8E93' }}>{texto}</span>
+      <ChevronsUpDown style={{ width: 15, height: 15, color: '#8E8E93', flexShrink: 0 }} />
+      <select value={valor} onChange={(e) => onCambio(e.target.value)} aria-label={etiqueta} style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 16 }}>
+        {children}
+      </select>
+      {separador && <div style={{ position: 'absolute', left: 16, right: 0, bottom: 0, height: 0.5, background: 'rgba(60,60,67,0.18)' }} />}
+    </label>
+  );
+}
+
+function ChevronRightPM() {
+  return (
+    <svg width="8" height="13" viewBox="0 0 8 13" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 1.5 6.5 6.5 1.5 11.5" fill="none" stroke="#C7C7CC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
