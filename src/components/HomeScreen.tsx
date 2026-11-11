@@ -3,7 +3,7 @@ import { User, Order } from '../App';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Package, Plus, User as UserIcon, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
+import { Package, Plus, User as UserIcon, Menu, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
@@ -271,6 +271,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
             </div>
             <motion.button
               onClick={onViewProfile}
+              aria-label="Abrir menú"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               className="w-11 h-11 rounded-full flex items-center justify-center relative overflow-hidden group"
@@ -280,7 +281,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 border: '1px solid rgba(255, 255, 255, 0.2)'
               }}
             >
-              <UserIcon className="w-5 h-5 text-white relative z-10" />
+              <Menu className="w-5 h-5 text-white relative z-10" />
               <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
             </motion.button>
           </div>

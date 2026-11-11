@@ -66,3 +66,20 @@ export async function initNative(): Promise<void> {
   // El botón atrás de Android se maneja en registerAndroidBackButton(), que se
   // llama desde App.tsx porque necesita el estado de navegación de React.
 }
+
+/**
+ * Cambia el color del contenido de la barra de estado (hora, batería) en la
+ * app nativa. `claro` = texto blanco para fondos oscuros (el azul de marca,
+ * default de la app); `oscuro` = texto negro para fondos claros, p. ej. el
+ * panel "Mi cuenta". En la PWA no hace nada.
+ */
+export async function estiloBarraDeEstado(contenido: 'claro' | 'oscuro'): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    const { StatusBar, Style } = await import('@capacitor/status-bar');
+    // Style.Dark = contenido claro (texto blanco); Style.Light = contenido oscuro.
+    await StatusBar.setStyle({ style: contenido === 'claro' ? Style.Dark : Style.Light });
+  } catch {
+    // Sin plugin o plataforma sin soporte: no es crítico.
+  }
+}

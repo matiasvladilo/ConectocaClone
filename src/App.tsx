@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoginScreen } from "./components/LoginScreen";
 import { HomeScreen } from "./components/HomeScreen";
@@ -189,9 +189,21 @@ export default function App() {
   // destino al que lleva el botón "volver" de casi todas las pantallas). Es un
   // retroceso de un nivel, suficiente para una navegación plana por estado.
   const esPantallaRaiz = currentScreen === "home" || currentScreen === "login";
+
+  // "Mi cuenta" ya no es una pantalla: es un panel que se desliza sobre la
+  // pantalla actual (como el de notificaciones). Se conserva "profile" como
+  // destino de navegación para no tocar los "volver" de cada sección: cuando
+  // algo navega a "profile", se redirige a la pantalla de origen y se abre el
+  // panel, así el usuario vuelve justo al menú desde el que entró.
+  const [perfilAbierto, setPerfilAbierto] = useState(false);
+
   useAndroidBackButton({
-    canExit: esPantallaRaiz,
-    onBack: esPantallaRaiz ? null : () => setCurrentScreen("home"),
+    canExit: esPantallaRaiz && !perfilAbierto,
+    onBack: perfilAbierto
+      ? () => setPerfilAbierto(false)
+      : esPantallaRaiz
+        ? null
+        : () => setCurrentScreen("home"),
   });
 
   // Debug: Log screen changes
@@ -335,8 +347,19 @@ export default function App() {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (currentScreen !== "profile") return;
+    setCurrentScreen(currentUser?.role === "dispatch" ? "production" : "home");
+    setPerfilAbierto(true);
+  }, [currentScreen, currentUser?.role]);
+
+  // Al cerrar sesión el panel no debe quedar abierto para el próximo usuario.
   useEffect(() => {
-    if (!isProfileVerified || currentScreen !== "profile" || currentUser?.role !== "admin" || !accessToken) {
+    if (!currentUser) setPerfilAbierto(false);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!isProfileVerified || !perfilAbierto || currentUser?.role !== "admin" || !accessToken) {
       setPendingComplaintsCount(undefined);
       return;
     }
@@ -362,7 +385,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [accessToken, currentScreen, currentUser?.role, isProfileVerified]);
+  }, [accessToken, perfilAbierto, currentUser?.role, isProfileVerified]);
 
   // Initialize audio on first user interaction
   useEffect(() => {
@@ -1665,7 +1688,7 @@ export default function App() {
               setCurrentScreen('newOrder');
             }
           }}
-          onViewProfile={() => setCurrentScreen("profile")}
+          onViewProfile={() => setPerfilAbierto(true)}
           onViewHistory={() => setCurrentScreen("history")}
           onGoToProduction={() => setCurrentScreen("production")}
           onGoToBakeryKDS={() => setCurrentScreen("bakeryKds")}
@@ -1719,17 +1742,11 @@ export default function App() {
           />
         )}
 
-      {currentScreen === "profile" && currentUser && (
+      {currentUser && (
         <UserProfile
           user={currentUser}
-          onBack={() => {
-            // Navegación diferenciada por rol
-            if (currentUser.role === "dispatch") {
-              setCurrentScreen("production");
-            } else {
-              setCurrentScreen("home");
-            }
-          }}
+          isOpen={perfilAbierto}
+          onClose={() => setPerfilAbierto(false)}
           onLogout={handleLogout}
           onUpdateProfile={handleUpdateProfile}
           onViewAnalytics={() => setCurrentScreen("analytics")}
@@ -1755,14 +1772,22 @@ export default function App() {
               ? () => setCurrentScreen("productionAreas")
               : undefined
           }
+          // Desde el panel, "volver" de estas dos pantallas tiene que
+          // reabrir el panel: se marca "profile" como origen explícito.
           onManageIngredients={
             currentUser.role === "admin" || currentUser.role === "production"
-              ? () => irAPantalla("ingredients")
+              ? () => {
+                  setPantallaAnterior("profile");
+                  setCurrentScreen("ingredients");
+                }
               : undefined
           }
           onManageProductIngredients={
             currentUser.role === "admin" || currentUser.role === "production"
-              ? () => irAPantalla("productIngredients")
+              ? () => {
+                  setPantallaAnterior("profile");
+                  setCurrentScreen("productIngredients");
+                }
               : undefined
           }
           accessToken={accessToken || undefined}

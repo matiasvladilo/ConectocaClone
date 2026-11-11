@@ -829,3 +829,16 @@ body {
 .cap-native body {
   background-color: #0c3c84;
 }
+
+/* Filas del panel "Mi cuenta" (estilo Ajustes de iOS). El resaltado al tocar
+   va por :active y no por whileTap de motion: el navegador cancela :active
+   cuando el gesto se convierte en scroll, así la fila no queda pegada en gris. */
+.fila-ios {
+  background: #fff;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s;
+}
+.fila-ios:active {
+  background: #e5e5ea;
+  transition: none;
+}

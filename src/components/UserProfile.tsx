@@ -1,23 +1,13 @@
 import { User } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Switch } from './ui/switch';
-import { Label } from './ui/label';
+import { Input } from './ui/input';
 import {
-  ArrowLeft,
-  User as UserIcon,
   Mail,
   Bell,
-  Shield,
   LogOut,
   Package,
   MapPin,
-  Edit,
-  Check,
-  X,
   BarChart3,
-  Sparkles,
-  Settings,
   Clock,
   Share2,
   Copy,
@@ -29,19 +19,34 @@ import {
   Loader2,
   Boxes,
   MessageSquare,
-  ChevronDown,
-  Truck
+  ChevronRight,
+  Truck,
+  X,
+  type LucideIcon,
 } from 'lucide-react';
-import { useState } from 'react';
-
-import { Badge } from './ui/badge';
-import { Input } from './ui/input';
+import { useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence, type PanInfo } from 'motion/react';
+import { version as versionApp } from '../../package.json';
+import { estiloBarraDeEstado } from '../utils/initNative';
+
+/**
+ * Panel "Mi cuenta": se abre desde el botón ☰ del inicio y se desliza desde la
+ * derecha, igual que el de notificaciones. Estilo Ajustes de iOS: listas
+ * agrupadas sobre fondo gris, íconos en cuadraditos de color y chevrons.
+ *
+ * Se cierra con la ✕, tocando el fondo oscurecido, deslizando a la derecha o
+ * con Escape. Tocar un acceso cierra el panel y navega a esa sección; al volver
+ * de la sección, App reabre el panel (ver `volverAlPerfil`).
+ *
+ * Nota: Tailwind está precompilado (src/index.css), así que casi todo el estilo
+ * nuevo va inline para no depender de clases que podrían no existir.
+ */
 
 interface UserProfileProps {
   user: User;
-  onBack: () => void;
+  isOpen: boolean;
+  onClose: () => void;
   onLogout: () => void;
   onUpdateProfile?: (updates: Partial<User>) => void;
   onViewAnalytics?: () => void;
@@ -57,7 +62,147 @@ interface UserProfileProps {
   accessToken?: string;
 }
 
-export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAnalytics, onViewDispatch, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+// Paleta de iOS (colores de sistema), para que los íconos se lean "Apple".
+const IOS = {
+  fondo: '#F2F2F7',
+  texto: '#1C1C1E',
+  secundario: '#8E8E93',
+  separador: '#E5E5EA',
+  chevron: '#C7C7CC',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  verde: '#34C759',
+  naranja: '#FF9500',
+  morado: '#AF52DE',
+  indigo: '#5856D6',
+  rosa: '#FF2D55',
+  amarillo: '#FFCC00',
+  turquesa: '#30B0C7',
+};
+
+function Grupo({ titulo, pie, children }: { titulo?: string; pie?: string; children: ReactNode }) {
+  return (
+    <section style={{ margin: '0 16px 24px' }}>
+      {titulo && (
+        <h3
+          style={{
+            fontSize: 13,
+            color: IOS.secundario,
+            textTransform: 'uppercase',
+            letterSpacing: '0.02em',
+            padding: '0 16px 6px',
+            fontWeight: 400,
+          }}
+        >
+          {titulo}
+        </h3>
+      )}
+      <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>{children}</div>
+      {pie && (
+        <p style={{ fontSize: 13, color: IOS.secundario, padding: '6px 16px 0', lineHeight: 1.35 }}>{pie}</p>
+      )}
+    </section>
+  );
+}
+
+function Separador() {
+  return <div style={{ height: 1, background: IOS.separador, marginLeft: 58 }} />;
+}
+
+function IconoCuadrado({ icono: Icono, color }: { icono: LucideIcon; color: string }) {
+  return (
+    <span
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: 8,
+        background: color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      <Icono style={{ width: 17, height: 17, color: '#fff' }} />
+    </span>
+  );
+}
+
+interface FilaProps {
+  icono: LucideIcon;
+  color: string;
+  label: string;
+  detalle?: ReactNode;
+  badge?: number;
+  onClick?: () => void;
+  chevron?: boolean;
+  derecha?: ReactNode;
+}
+
+function Fila({ icono, color, label, detalle, badge, onClick, chevron = true, derecha }: FilaProps) {
+  const contenido = (
+    <>
+      <IconoCuadrado icono={icono} color={color} />
+      <span style={{ flex: 1, minWidth: 0, fontSize: 16, color: IOS.texto }}>{label}</span>
+      {detalle !== undefined && (
+        <span
+          style={{
+            fontSize: 15,
+            color: IOS.secundario,
+            maxWidth: '50%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {detalle}
+        </span>
+      )}
+      {typeof badge === 'number' && badge > 0 && (
+        <span
+          style={{
+            minWidth: 22,
+            height: 22,
+            padding: '0 7px',
+            borderRadius: 11,
+            background: IOS.rojo,
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {badge}
+        </span>
+      )}
+      {derecha}
+      {chevron && onClick && <ChevronRight style={{ width: 18, height: 18, color: IOS.chevron, flexShrink: 0 }} />}
+    </>
+  );
+
+  const estilo: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    minHeight: 48,
+    padding: '9px 16px 9px 14px',
+    textAlign: 'left',
+  };
+
+  // Sin onClick es una fila informativa (fondo blanco fijo); con onClick el
+  // fondo lo pone la clase .fila-ios para que :active pueda resaltarla.
+  if (!onClick) return <div style={{ ...estilo, background: '#fff' }}>{contenido}</div>;
+  return (
+    <button type="button" onClick={onClick} className="fila-ios" style={estilo}>
+      {contenido}
+    </button>
+  );
+}
+
+export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, onViewAnalytics, onViewDispatch, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
@@ -78,6 +223,30 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
   const [inviteCode, setInviteCode] = useState<string>('');
   const [showInviteCode, setShowInviteCode] = useState(false);
   const [loadingInviteCode, setLoadingInviteCode] = useState(false);
+
+  // Escape cierra el panel (teclado físico / web de escritorio).
+  useEffect(() => {
+    if (!isOpen) return;
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', alTeclear);
+    return () => window.removeEventListener('keydown', alTeclear);
+  }, [isOpen, onClose]);
+
+  // El panel es claro: la hora/batería pasan a texto oscuro mientras está
+  // abierto y vuelven a blanco (sobre el azul de la app) al cerrarse.
+  useEffect(() => {
+    void estiloBarraDeEstado(isOpen ? 'oscuro' : 'claro');
+  }, [isOpen]);
+
+  // Al cerrar, descartar una edición de dirección a medio hacer.
+  useEffect(() => {
+    if (!isOpen) {
+      setIsEditingAddress(false);
+      setAddressValue(user.address || '');
+    }
+  }, [isOpen, user.address]);
 
   const handleSaveAddress = async () => {
     if (!onUpdateProfile) return;
@@ -188,10 +357,19 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
     }
   };
 
+  const handleTestNotification = async () => {
+    const { playNotificationSound, notifyNewOrder, initializeAudio } = await import('../utils/notificationSound');
+    await initializeAudio();
+    await playNotificationSound('new_order');
+    await notifyNewOrder('TEST-001', 'Cliente de Prueba');
+    toast.success('Notificación de prueba enviada — ¿escuchaste el sonido?', { duration: 5000 });
+  };
+
   const getRoleLabel = (role: string) => {
     const roleLabels: Record<string, string> = {
       admin: 'Administración',
       production: 'Producción',
+      dispatch: 'Despacho',
       local: 'Local',
       pastry: 'Pastelería',
       user: 'Usuario'
@@ -199,636 +377,345 @@ export function UserProfile({ user, onBack, onLogout, onUpdateProfile, onViewAna
     return roleLabels[role] || 'Usuario';
   };
 
-  const getRoleBadgeClass = (role: string) => {
-    const roleClasses: Record<string, string> = {
-      admin: 'bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 border-blue-200',
-      production: 'bg-gradient-to-r from-orange-50 to-amber-50 text-orange-700 border-orange-200',
-      local: 'bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border-green-200',
-      pastry: 'bg-gradient-to-r from-pink-50 to-fuchsia-50 text-pink-700 border-pink-200',
-      user: 'bg-gradient-to-r from-gray-50 to-slate-50 text-gray-700 border-gray-200'
-    };
-    return roleClasses[role] || 'bg-gray-50 text-gray-700 border-gray-200';
+  const iniciales = (user.name || user.email || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join('');
+
+  // Accesos a secciones. Permisos por rol idénticos a la versión anterior.
+  const esAdmin = user.role === 'admin';
+  const esAdminOProduccion = esAdmin || user.role === 'production';
+  const accesos = [
+    esAdmin && onViewDispatch && { label: 'Despacho', icon: Truck, color: IOS.azul, onClick: onViewDispatch },
+    esAdminOProduccion && onViewAnalytics && { label: 'Analíticas', icon: BarChart3, color: IOS.indigo, onClick: onViewAnalytics },
+    esAdminOProduccion && onViewDistribution && { label: 'Distribuidora', icon: Boxes, color: IOS.turquesa, onClick: onViewDistribution },
+    esAdmin && onViewComplaints && { label: 'Reclamos', icon: MessageSquare, color: IOS.rojo, onClick: onViewComplaints, badge: pendingComplaintsCount },
+    esAdmin && onManageAttendance && { label: 'Asistencia', icon: Clock, color: IOS.verde, onClick: onManageAttendance },
+  ].filter(Boolean) as { label: string; icon: LucideIcon; color: string; onClick: () => void; badge?: number }[];
+
+  const accesosProduccion = [
+    esAdmin && onManageProductionAreas && { label: 'Áreas de producción', icon: Factory, color: IOS.naranja, onClick: onManageProductionAreas },
+    esAdminOProduccion && onManageProducts && { label: 'Productos', icon: Package, color: IOS.amarillo, onClick: onManageProducts },
+    esAdminOProduccion && onManageIngredients && { label: 'Materia prima', icon: Warehouse, color: IOS.morado, onClick: onManageIngredients },
+    esAdminOProduccion && onManageProductIngredients && { label: 'Recetas', icon: ChefHat, color: IOS.rosa, onClick: onManageProductIngredients },
+  ].filter(Boolean) as { label: string; icon: LucideIcon; color: string; onClick: () => void }[];
+
+  // Tocar un acceso cierra el panel y navega; App lo reabre al volver.
+  const ir = (accion: () => void) => () => {
+    onClose();
+    accion();
   };
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case 'admin': return '👑';
-      case 'production': return '🏭';
-      case 'local': return '🏪';
-      default: return '👤';
-    }
+  const alSoltar = (_e: unknown, info: PanInfo) => {
+    if (info.offset.x > 100 || info.velocity.x > 500) onClose();
   };
+
+  const filaInterruptor = (id: string, label: string, checked: boolean, onChange: (v: boolean) => void, icono: LucideIcon, color: string) => (
+    <label htmlFor={id} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 48, padding: '9px 16px 9px 14px', cursor: 'pointer' }}>
+      <IconoCuadrado icono={icono} color={color} />
+      <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>{label}</span>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </label>
+  );
 
   return (
-    <div
-      className="min-h-screen relative overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
-    >
-      {/* Decorative background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-      </div>
-
-      {/* Header */}
-      <div
-        className="relative z-10 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
-        }}
-      >
-        <div className="max-w-md mx-auto px-6 py-5">
-          <div className="flex items-center gap-3">
-            <motion.button
-              onClick={onBack}
-              whileHover={{ scale: 1.1, x: -4 }}
-              whileTap={{ scale: 0.95 }}
-              className="w-11 h-11 flex items-center justify-center rounded-full"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-            >
-              <ArrowLeft className="w-5 h-5 text-white" />
-            </motion.button>
-            <div>
-              <h1 className="text-white tracking-wide flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 600 }}>
-                <Settings className="w-5 h-5" />
-                Mi Perfil
-              </h1>
-              <p className="text-blue-100 text-xs">
-                Administra tu cuenta
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-md mx-auto px-6 py-6 space-y-5 relative z-10">
-        {/* User Info Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <Card
-            className="border-2 shadow-lg"
-            style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
-          >
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4 mb-6">
-                <motion.div
-                  className="relative"
-                  whileHover={{ scale: 1.05 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div
-                    className="w-20 h-20 rounded-full flex items-center justify-center relative overflow-hidden"
-                    style={{
-                      background: 'linear-gradient(135deg, #0059FF 0%, #0047BA 100%)',
-                      boxShadow: '0 8px 24px rgba(0, 89, 255, 0.3)'
-                    }}
-                  >
-                    <UserIcon className="w-10 h-10 text-white relative z-10" />
-                    <div className="absolute inset-0 bg-white/10 animate-pulse" />
-                  </div>
-                  <div
-                    className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center text-lg"
-                    style={{
-                      background: 'linear-gradient(135deg, #FFD43B 0%, #FFC700 100%)',
-                      border: '2px solid white',
-                      boxShadow: '0 2px 8px rgba(255, 212, 59, 0.4)'
-                    }}
-                  >
-                    {getRoleIcon(user.role)}
-                  </div>
-                </motion.div>
-                <div className="flex-1">
-                  <h2 className="text-[#0047BA]" style={{ fontSize: '20px', fontWeight: 600 }}>
-                    {user.name}
-                  </h2>
-                  <p className="text-gray-600 text-sm mt-0.5 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5" />
-                    {user.email}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {/* Email info */}
-                <div
-                  className="flex items-center gap-3 p-3.5 rounded-xl"
-                  style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                  >
-                    <Mail className="w-5 h-5 text-[#0059FF]" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600" style={{ fontWeight: 500 }}>Correo electrónico</p>
-                    <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>{user.email}</p>
-                  </div>
-                </div>
-
-                {/* Address editing */}
-                <div
-                  className="flex items-center gap-3 p-3.5 rounded-xl"
-                  style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                    style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                  >
-                    <MapPin className="w-5 h-5 text-[#0059FF]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-600 mb-1" style={{ fontWeight: 500 }}>
-                      Dirección de Despacho
-                    </p>
-                    {isEditingAddress ? (
-                      <Input
-                        type="text"
-                        value={addressValue}
-                        onChange={(e) => setAddressValue(e.target.value)}
-                        placeholder="Ingresa tu dirección completa"
-                        className="h-9 bg-white border-[#CBD5E1] focus:border-[#2563EB] text-sm"
-                        style={{ borderRadius: '8px' }}
-                        disabled={isSaving}
-                      />
-                    ) : (
-                      <p className={`text-sm ${!user.address ? 'text-gray-400' : 'text-gray-800'}`} style={{ fontWeight: 500 }}>
-                        {user.address || 'Sin dirección registrada'}
-                      </p>
-                    )}
-                  </div>
-                  {isEditingAddress ? (
-                    <div className="flex gap-1">
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="w-9 h-9 flex items-center justify-center rounded-full"
-                        style={{ background: 'rgba(16, 185, 129, 0.1)' }}
-                        onClick={handleSaveAddress}
-                        disabled={isSaving}
-                      >
-                        <Check className="w-4 h-4 text-green-600" />
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="w-9 h-9 flex items-center justify-center rounded-full"
-                        style={{ background: 'rgba(239, 68, 68, 0.1)' }}
-                        onClick={handleCancelEdit}
-                        disabled={isSaving}
-                      >
-                        <X className="w-4 h-4 text-red-600" />
-                      </motion.button>
-                    </div>
-                  ) : (
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="w-9 h-9 flex items-center justify-center rounded-full"
-                      style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                      onClick={() => setIsEditingAddress(true)}
-                    >
-                      <Edit className="w-4 h-4 text-[#0059FF]" />
-                    </motion.button>
-                  )}
-                </div>
-
-                {/* Role badge */}
-                <div
-                  className="flex items-center gap-3 p-3.5 rounded-xl"
-                  style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                  >
-                    <Shield className="w-5 h-5 text-[#0059FF]" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-600 mb-1.5" style={{ fontWeight: 500 }}>Rol del usuario</p>
-                    <Badge
-                      className={`${getRoleBadgeClass(user.role)} border px-3 py-1 flex items-center gap-2 w-fit`}
-                      style={{ fontSize: '12px', fontWeight: 500 }}
-                    >
-                      <span>{getRoleIcon(user.role)}</span>
-                      <span>{getRoleLabel(user.role)}</span>
-                    </Badge>
-                  </div>
-                </div>
-
-                {/* Production special access */}
-                {user.role === 'production' && (
-                  <motion.div
-                    className="flex items-center gap-3 p-3.5 rounded-xl border-2"
-                    style={{
-                      background: 'linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)',
-                      borderColor: '#FB923C'
-                    }}
-                    initial={{ scale: 0.95 }}
-                    animate={{ scale: 1 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center"
-                      style={{ background: 'rgba(251, 146, 60, 0.2)' }}
-                    >
-                      <Package className="w-5 h-5 text-orange-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-orange-700" style={{ fontWeight: 600 }}>
-                        Acceso especial
-                      </p>
-                      <p className="text-sm text-orange-800" style={{ fontWeight: 500 }}>
-                        Panel de producción activado
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Accesos a secciones: grilla compacta de 2 columnas. Antes era una
-            pila de botones de ancho completo con degradados de colores distintos,
-            que ocupaba casi toda la pantalla. Cada acceso conserva su color solo
-            en el ícono, y los permisos por rol son los mismos de antes. */}
-        {(() => {
-          const esAdmin = user.role === 'admin';
-          const esAdminOProduccion = esAdmin || user.role === 'production';
-          const accesos = [
-            esAdmin && onViewDispatch && { label: 'Despacho', icon: Truck, color: '#0047BA', onClick: onViewDispatch },
-            esAdminOProduccion && onViewAnalytics && { label: 'Analíticas', icon: BarChart3, color: '#0059FF', onClick: onViewAnalytics },
-            esAdminOProduccion && onViewDistribution && { label: 'Distribuidora', icon: Boxes, color: '#0047BA', onClick: onViewDistribution },
-            esAdmin && onViewComplaints && { label: 'Reclamos', icon: MessageSquare, color: '#DC2626', onClick: onViewComplaints, badge: pendingComplaintsCount },
-            esAdmin && onManageAttendance && { label: 'Asistencia', icon: Clock, color: '#059669', onClick: onManageAttendance },
-            esAdmin && onManageProductionAreas && { label: 'Áreas de producción', icon: Factory, color: '#F97316', onClick: onManageProductionAreas },
-            esAdminOProduccion && onManageProducts && { label: 'Productos', icon: Package, color: '#D99A00', onClick: onManageProducts },
-            esAdminOProduccion && onManageIngredients && { label: 'Materia prima', icon: Warehouse, color: '#7C3AED', onClick: onManageIngredients },
-            esAdminOProduccion && onManageProductIngredients && { label: 'Recetas', icon: ChefHat, color: '#DB2777', onClick: onManageProductIngredients },
-          ].filter(Boolean) as { label: string; icon: typeof Package; color: string; onClick: () => void; badge?: number }[];
-
-          if (accesos.length === 0) return null;
-
-          return (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-              className="grid grid-cols-2 gap-3"
-            >
-              {accesos.map(({ label, icon: Icon, color, onClick, badge }) => (
-                <motion.button
-                  key={label}
-                  type="button"
-                  onClick={onClick}
-                  whileTap={{ scale: 0.97 }}
-                  className="relative flex items-center gap-3 p-3 bg-white text-left hover:bg-gray-50 transition-colors"
-                  style={{ borderRadius: '14px', border: '1px solid #E0EDFF', boxShadow: '0 1px 3px rgba(0, 71, 186, 0.06)' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center"
-                    style={{ background: `${color}1A`, flexShrink: 0 }}
-                  >
-                    <Icon className="w-5 h-5" style={{ color }} />
-                  </div>
-                  <span className="text-sm text-gray-800 leading-tight" style={{ fontWeight: 600 }}>
-                    {label}
-                  </span>
-                  {typeof badge === 'number' && badge > 0 && (
-                    <Badge className="absolute top-2 right-2 bg-red-600 text-white">{badge}</Badge>
-                  )}
-                </motion.button>
-              ))}
-            </motion.div>
-          );
-        })()}
-
-        {/* Notifications Settings: cerrado por defecto para que los botones de
-            secciones sean lo primero que se ve; se despliega tocando el encabezado. */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
-          <Card
-            className="border-2 shadow-lg"
-            style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
-          >
-            <CardHeader
-              role="button"
-              tabIndex={0}
-              aria-expanded={showNotificationSettings}
-              onClick={() => setShowNotificationSettings(v => !v)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setShowNotificationSettings(v => !v);
-                }
-              }}
-              className="cursor-pointer select-none"
-            >
-              <div className="flex items-center gap-2.5">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center"
-                  style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                >
-                  <Bell className="w-5 h-5 text-[#0059FF]" />
-                </div>
-                <div>
-                  <CardTitle className="text-[#0047BA]" style={{ fontSize: '16px', fontWeight: 600 }}>
-                    Preferencias de Notificaciones
-                  </CardTitle>
-                  <CardDescription className="text-xs mt-0.5">
-                    Configura cómo deseas recibir actualizaciones
-                  </CardDescription>
-                </div>
-                <ChevronDown
-                  className="w-5 h-5 text-gray-400 ml-auto transition-transform"
-                  style={{ transform: showNotificationSettings ? 'rotate(180deg)' : undefined }}
-                />
-              </div>
-            </CardHeader>
-            {showNotificationSettings && (
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors">
-                <Label htmlFor="email-notifications" className="cursor-pointer flex-1">
-                  <div>
-                    <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>
-                      Notificaciones por correo
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Recibe actualizaciones por email
-                    </p>
-                  </div>
-                </Label>
-                <Switch
-                  id="email-notifications"
-                  checked={emailNotifications}
-                  onCheckedChange={setEmailNotifications}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors">
-                <Label htmlFor="push-notifications" className="cursor-pointer flex-1">
-                  <div>
-                    <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>
-                      Notificaciones push
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Alertas en tiempo real
-                    </p>
-                  </div>
-                </Label>
-                <Switch
-                  id="push-notifications"
-                  checked={pushNotifications}
-                  onCheckedChange={setPushNotifications}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl hover:bg-blue-50 transition-colors border border-blue-100">
-                <Label htmlFor="sound-notifications" className="cursor-pointer flex-1">
-                  <div className="flex items-center gap-2">
-                    <Volume2 className="w-4 h-4 text-blue-600" />
-                    <div>
-                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>
-                        Notificaciones sonoras
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Sonido al recibir pedidos nuevos
-                      </p>
-                    </div>
-                  </div>
-                </Label>
-                <Switch
-                  id="sound-notifications"
-                  checked={soundNotifications}
-                  onCheckedChange={handleSoundNotificationsChange}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl hover:bg-blue-50 transition-colors border border-blue-100">
-                <Label htmlFor="browser-notifications" className="cursor-pointer flex-1">
-                  <div className="flex items-center gap-2">
-                    <Monitor className="w-4 h-4 text-blue-600" />
-                    <div>
-                      <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>
-                        Notificaciones del navegador
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Notificaciones incluso con la app minimizada
-                      </p>
-                    </div>
-                  </div>
-                </Label>
-                <Switch
-                  id="browser-notifications"
-                  checked={browserNotifications}
-                  onCheckedChange={handleBrowserNotificationsChange}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors">
-                <Label htmlFor="order-updates" className="cursor-pointer flex-1">
-                  <div>
-                    <p className="text-sm text-gray-800" style={{ fontWeight: 500 }}>
-                      Actualizaciones de pedidos
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Cambios en el estado de tus pedidos
-                    </p>
-                  </div>
-                </Label>
-                <Switch
-                  id="order-updates"
-                  checked={orderUpdates}
-                  onCheckedChange={setOrderUpdates}
-                />
-              </div>
-
-              {/* Test Notification Button */}
-              {(user.role === 'production' || user.role === 'admin') && (
-                <div className="pt-2">
-                  <Button
-                    onClick={async () => {
-                      console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: purple; font-size: 14px; font-weight: bold');
-                      console.log('%c🎵 PRUEBA DE SONIDO MANUAL', 'background: purple; color: white; font-size: 20px; font-weight: bold; padding: 10px');
-                      console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: purple; font-size: 14px; font-weight: bold');
-
-                      const { playNotificationSound, notifyNewOrder, initializeAudio } = await import('../utils/notificationSound');
-
-                      // Initialize audio first
-                      console.log('[TEST] Inicializando audio...');
-                      await initializeAudio();
-
-                      // Play sound and show notification
-                      console.log('[TEST] Reproduciendo sonido...');
-                      await playNotificationSound('new_order');
-
-                      console.log('[TEST] Mostrando notificación del navegador...');
-                      await notifyNewOrder('TEST-001', 'Cliente de Prueba');
-
-                      toast.success('🔊 Notificación de prueba enviada - ¿Escuchaste el sonido?', {
-                        duration: 5000
-                      });
-                    }}
-                    variant="outline"
-                    className="w-full border-blue-200 text-blue-700 hover:bg-blue-50"
-                  >
-                    <Bell className="w-4 h-4 mr-2" />
-                    🔊 Probar notificaciones AHORA
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-            )}
-          </Card>
-        </motion.div>
-
-        {/* Admin Invite Code Card */}
-        {user.role === 'admin' && (
+    <>
+      {/* Fondo oscurecido */}
+      <AnimatePresence>
+        {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.15 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
+            onClick={onClose}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Panel */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mi cuenta"
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            drag={isEditingAddress ? false : 'x'}
+            dragDirectionLock
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={{ left: 0, right: 0.6 }}
+            onDragEnd={alSoltar}
+            className="fixed top-0 right-0 h-full shadow-2xl z-50 flex flex-col"
+            style={{ width: 'min(100%, 420px)', background: IOS.fondo, touchAction: 'pan-y' }}
           >
-            <Card
-              className="border-2 shadow-lg"
-              style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
+            {/* Encabezado */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 16px 12px 20px',
+                paddingTop: 'max(env(safe-area-inset-top), 20px)',
+              }}
             >
-              <CardHeader>
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(139, 92, 246, 0.1)' }}
-                  >
-                    <Share2 className="w-5 h-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-[#0047BA]" style={{ fontSize: '16px', fontWeight: 600 }}>
-                      Código de Invitación
-                    </CardTitle>
-                    <CardDescription className="text-xs mt-0.5">
-                      Comparte este código para agregar miembros
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {!showInviteCode ? (
-                  <Button
-                    onClick={handleGenerateInviteCode}
-                    disabled={loadingInviteCode}
-                    className="w-full h-11"
+              <h2 style={{ fontSize: 30, fontWeight: 700, color: IOS.texto, letterSpacing: '-0.01em' }}>Mi cuenta</h2>
+              <motion.button
+                type="button"
+                onClick={onClose}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Cerrar"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  background: '#E3E3E8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X style={{ width: 17, height: 17, color: '#3C3C43' }} />
+              </motion.button>
+            </div>
+
+            {/* Contenido desplazable */}
+            <div className="flex-1 overflow-y-auto" style={{ paddingTop: 8, paddingBottom: 'max(env(safe-area-inset-bottom), 24px)' }}>
+              {/* Tarjeta de cuenta */}
+              <Grupo>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
+                  <span
                     style={{
-                      background: 'linear-gradient(90deg, #8B5CF6 0%, #7C3AED 100%)',
-                      borderRadius: '10px',
-                      fontSize: '14px',
-                      fontWeight: 600
+                      width: 60,
+                      height: 60,
+                      borderRadius: 30,
+                      background: 'linear-gradient(135deg, #0A84FF 0%, #0047BA 100%)',
+                      color: '#fff',
+                      fontSize: 22,
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
                     }}
                   >
-                    <div className="flex items-center gap-2 text-white">
-                      <Share2 className="w-4 h-4" />
-                      {loadingInviteCode ? 'Obteniendo...' : 'Mostrar Código de Invitación'}
-                    </div>
-                  </Button>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <div
-                      className="p-4 rounded-xl border-2"
+                    {iniciales}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ fontSize: 20, fontWeight: 600, color: IOS.texto, lineHeight: 1.2 }}>{user.name}</p>
+                    <p
                       style={{
-                        background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
-                        borderColor: '#C4B5FD'
+                        fontSize: 14,
+                        color: IOS.secundario,
+                        marginTop: 2,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      <p className="text-xs text-purple-700 mb-2" style={{ fontWeight: 600 }}>
-                        Tu código de invitación:
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="flex-1 px-4 py-3 rounded-lg text-center"
-                          style={{
-                            background: 'white',
-                            border: '2px dashed #8B5CF6'
-                          }}
-                        >
-                          <p className="text-purple-700 tracking-widest" style={{ fontSize: '20px', fontWeight: 700 }}>
-                            {inviteCode}
-                          </p>
-                        </div>
-                        <motion.button
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={handleCopyInviteCode}
-                          className="w-11 h-11 flex items-center justify-center rounded-lg"
-                          style={{ background: 'rgba(139, 92, 246, 0.1)' }}
-                        >
-                          <Copy className="w-5 h-5 text-purple-600" />
-                        </motion.button>
-                      </div>
-                      <p className="text-xs text-purple-600 mt-3 text-center">
-                        Los nuevos miembros pueden usar este código para unirse a tu negocio
-                      </p>
+                      {user.email}
+                    </p>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        marginTop: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#0047BA',
+                        background: '#E5EEFF',
+                        borderRadius: 999,
+                        padding: '2px 9px',
+                      }}
+                    >
+                      {getRoleLabel(user.role)}
+                    </span>
+                  </div>
+                </div>
+              </Grupo>
+
+              {/* Accesos */}
+              {accesos.length > 0 && (
+                <Grupo titulo="Gestión">
+                  {accesos.map((a, i) => (
+                    <div key={a.label}>
+                      {i > 0 && <Separador />}
+                      <Fila icono={a.icon} color={a.color} label={a.label} badge={a.badge} onClick={ir(a.onClick)} />
                     </div>
-                  </motion.div>
+                  ))}
+                </Grupo>
+              )}
+
+              {accesosProduccion.length > 0 && (
+                <Grupo titulo="Producción">
+                  {accesosProduccion.map((a, i) => (
+                    <div key={a.label}>
+                      {i > 0 && <Separador />}
+                      <Fila icono={a.icon} color={a.color} label={a.label} onClick={ir(a.onClick)} />
+                    </div>
+                  ))}
+                </Grupo>
+              )}
+
+              {/* Cuenta */}
+              <Grupo titulo="Cuenta">
+                <Fila icono={Mail} color={IOS.azul} label="Correo" detalle={user.email} chevron={false} />
+                <Separador />
+                {isEditingAddress ? (
+                  <div style={{ padding: '10px 16px 12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                      <IconoCuadrado icono={MapPin} color={IOS.verde} />
+                      <span style={{ fontSize: 16, color: IOS.texto }}>Dirección de despacho</span>
+                    </div>
+                    <Input
+                      type="text"
+                      value={addressValue}
+                      onChange={(e) => setAddressValue(e.target.value)}
+                      placeholder="Calle, número, comuna"
+                      autoFocus
+                      disabled={isSaving}
+                      style={{ borderRadius: 10, fontSize: 16 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, marginTop: 10 }}>
+                      <button type="button" onClick={handleCancelEdit} disabled={isSaving} style={{ fontSize: 16, color: IOS.azul }}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveAddress}
+                        disabled={isSaving}
+                        style={{ fontSize: 16, color: IOS.azul, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        {isSaving && <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} />}
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <Fila
+                    icono={MapPin}
+                    color={IOS.verde}
+                    label="Dirección"
+                    detalle={user.address || 'Agregar'}
+                    onClick={onUpdateProfile ? () => setIsEditingAddress(true) : undefined}
+                  />
                 )}
-              </CardContent>
-            </Card>
+                {esAdmin && (
+                  <>
+                    <Separador />
+                    {showInviteCode ? (
+                      <Fila
+                        icono={Share2}
+                        color={IOS.morado}
+                        label="Código de invitación"
+                        detalle={
+                          <span style={{ color: IOS.texto, fontWeight: 600, letterSpacing: '0.08em' }}>{inviteCode}</span>
+                        }
+                        chevron={false}
+                        derecha={<Copy style={{ width: 17, height: 17, color: IOS.azul }} />}
+                        onClick={handleCopyInviteCode}
+                      />
+                    ) : (
+                      <Fila
+                        icono={Share2}
+                        color={IOS.morado}
+                        label="Código de invitación"
+                        detalle={loadingInviteCode ? 'Cargando…' : 'Mostrar'}
+                        onClick={loadingInviteCode ? undefined : handleGenerateInviteCode}
+                      />
+                    )}
+                  </>
+                )}
+              </Grupo>
+
+              {/* Notificaciones: plegado por defecto. Los switches conservan el
+                  comportamiento anterior (las notificaciones se revisan aparte). */}
+              <Grupo titulo="Notificaciones">
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationSettings((v) => !v)}
+                  aria-expanded={showNotificationSettings}
+                  className="fila-ios"
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 48, padding: '9px 16px 9px 14px', textAlign: 'left' }}
+                >
+                  <IconoCuadrado icono={Bell} color={IOS.rojo} />
+                  <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>Preferencias</span>
+                  <ChevronRight
+                    style={{
+                      width: 18,
+                      height: 18,
+                      color: IOS.chevron,
+                      transition: 'transform 0.2s',
+                      transform: showNotificationSettings ? 'rotate(90deg)' : undefined,
+                    }}
+                  />
+                </button>
+                {showNotificationSettings && (
+                  <>
+                    <Separador />
+                    {filaInterruptor('sound-notifications', 'Sonido', soundNotifications, handleSoundNotificationsChange, Volume2, IOS.rosa)}
+                    <Separador />
+                    {filaInterruptor('browser-notifications', 'Notificaciones del sistema', browserNotifications, handleBrowserNotificationsChange, Monitor, IOS.azul)}
+                    <Separador />
+                    {filaInterruptor('push-notifications', 'Notificaciones push', pushNotifications, setPushNotifications, Bell, IOS.naranja)}
+                    <Separador />
+                    {filaInterruptor('email-notifications', 'Correo', emailNotifications, setEmailNotifications, Mail, IOS.azul)}
+                    <Separador />
+                    {filaInterruptor('order-updates', 'Estado de pedidos', orderUpdates, setOrderUpdates, Package, IOS.verde)}
+                    {(user.role === 'production' || user.role === 'admin') && (
+                      <>
+                        <Separador />
+                        <button
+                          type="button"
+                          onClick={handleTestNotification}
+                          className="fila-ios"
+                          style={{ width: '100%', minHeight: 48, padding: '0 16px', fontSize: 16, color: IOS.azul, textAlign: 'left' }}
+                        >
+                          Probar notificación
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </Grupo>
+
+              {/* Cerrar sesión */}
+              <Grupo>
+                <button
+                  type="button"
+                  className="fila-ios"
+                  disabled={isLoggingOut}
+                  onClick={async () => {
+                    setIsLoggingOut(true);
+                    await onLogout();
+                  }}
+                  style={{
+                    width: '100%',
+                    minHeight: 48,
+                    fontSize: 16,
+                    color: IOS.rojo,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  {isLoggingOut ? <Loader2 className="animate-spin" style={{ width: 17, height: 17 }} /> : <LogOut style={{ width: 17, height: 17 }} />}
+                  {isLoggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+                </button>
+              </Grupo>
+
+              <p style={{ textAlign: 'center', fontSize: 12, color: IOS.secundario, paddingBottom: 8 }}>
+                La Oca · versión {versionApp}
+              </p>
+            </div>
           </motion.div>
         )}
-
-        {/* Logout Button */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: user.role === 'admin' ? 0.4 : 0.2 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <Button
-            onClick={async () => {
-              setIsLoggingOut(true);
-              await onLogout();
-            }}
-            disabled={isLoggingOut}
-            variant="outline"
-            className="w-full h-12 border-2 hover:bg-red-50 hover:border-red-300 transition-colors group"
-            style={{
-              borderRadius: '12px',
-              fontSize: '15px',
-              fontWeight: 600,
-              borderColor: '#E5E7EB'
-            }}
-          >
-            <div className="flex items-center gap-2 text-gray-700 group-hover:text-red-600 transition-colors">
-              {isLoggingOut
-                ? <Loader2 className="w-5 h-5 animate-spin" />
-                : <LogOut className="w-5 h-5" />
-              }
-              {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar Sesión'}
-            </div>
-          </Button>
-        </motion.div>
-      </div>
-    </div>
+      </AnimatePresence>
+    </>
   );
 }
