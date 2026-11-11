@@ -1682,6 +1682,29 @@ export default function App() {
       {/* Audio Initializer for Dispatch (who receives orders) */}
       <AudioInitializer userRole={currentUser?.role} />
 
+      {/* Fondo fijo detrás de la barra de estado (hora, notch). Sin esto, al
+          scrollear el contenido pasa por debajo de la hora y queda ilegible.
+          Solo en pantallas con encabezado azul (el texto de la barra es
+          blanco); mide 0 donde no hay safe-area (navegador común). z-30: por
+          encima de los encabezados sticky (z-20) y por debajo de los paneles
+          laterales y diálogos (z-40/z-50), que manejan su propia barra. */}
+      {currentUser && ["home", "history", "newOrder", "orderDetail"].includes(currentScreen) && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, zIndex: 30,
+            height: "env(safe-area-inset-top)",
+            // Mismo degradado a 135° que los encabezados, dimensionado al alto
+            // típico de un encabezado (~250px): la franja muestra justo su
+            // parte superior y no se nota costura.
+            background: "linear-gradient(135deg, #0047BA 0%, #0078FF 100%)",
+            backgroundSize: "100% 250px",
+            backgroundRepeat: "no-repeat",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
       {/* Notifications Panel */}
       <NotificationsPanel
         notifications={safeNotifications}

@@ -1,9 +1,4 @@
 import { Order } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Badge } from './ui/badge';
-import { Separator } from './ui/separator';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from './ui/alert-dialog';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -12,25 +7,42 @@ import { DeliveryGuide } from './DeliveryGuide';
 import {
   ArrowLeft,
   Package,
-  Calendar,
-  Hash,
-  User,
   Clock,
   CheckCircle2,
+  Check,
   Truck,
-  ShoppingCart,
-  DollarSign,
   ChevronDown,
-  FileText,
   Trash2,
-  MessageSquare,
   Printer,
   X,
   Edit
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { EditOrderDialog } from './EditOrderDialog';
 import { canEditOrder } from '../utils/orderPermissions';
+
+// Paleta de sistema de iOS (misma familia que "Mi cuenta", Historial y Nuevo pedido).
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+};
+
+const COLOR_ESTADO: Record<string, string> = {
+  pending: '#FF9500',
+  in_progress: '#007AFF',
+  completed: '#34C759',
+  dispatched: '#5856D6',
+  delivered: '#30B0C7',
+  cancelled: '#FF3B30',
+};
+
+// "2,5" en vez de "2.5000000001".
+const fmtCantidad = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(n || 0);
 
 interface OrderDetailProps {
   order: Order;
@@ -96,7 +108,9 @@ const statusSteps = [
 ];
 
 export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole, accessToken, onRefresh }: OrderDetailProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  // Detalle de pasos del progreso: plegado por defecto; la barra de puntos
+  // ya da el avance de un vistazo.
+  const [progresoAbierto, setProgresoAbierto] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showDeliveryGuide, setShowDeliveryGuide] = useState(false);
@@ -128,466 +142,257 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
   const StatusIcon = config.icon;
   const currentStepIndex = statusSteps.findIndex(step => step.key === order.status);
 
-  return (
-    <div
-      className="min-h-screen max-h-screen overflow-y-auto relative"
-      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
-    >
-      {/* Decorative background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-      </div>
+  const colorEstado = COLOR_ESTADO[order.status] || IOS.secundario;
+  const cancelado = order.status === 'cancelled';
+  const productos = order.products || [];
 
-      {/* Header - Sticky */}
+  const fechaPedido = new Date(order.createdAt || order.date);
+  const fechaEntrega = order.deadline ? new Date(order.deadline.slice(0, 10) + 'T12:00:00') : null;
+  const fmtFecha = (d: Date) =>
+    d.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '');
+  const fmtHora = (d: Date) => d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  const cambiarEstado = async (newStatus: string) => {
+    if (!onStatusChange || newStatus === order.status) return;
+    const etiqueta = statusConfig[newStatus]?.label || newStatus;
+    if (!window.confirm(`¿Cambiar el estado a "${etiqueta}"?`)) return;
+    setIsUpdating(true);
+    try {
+      const progress = { in_progress: 25, completed: 50, dispatched: 75, delivered: 100 }[newStatus as 'in_progress'] ?? 0;
+      await onStatusChange(order.id, newStatus, progress);
+      toast.success(`Estado actualizado a ${etiqueta}`);
+    } catch (error) {
+      console.error('Error changing status:', error);
+      toast.error('Error al actualizar');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const marcarRecibido = async () => {
+    if (!onStatusChange) return;
+    setIsUpdating(true);
+    try {
+      await onStatusChange(order.id, 'delivered', 100);
+      toast.success('Pedido marcado como recibido');
+      onBack();
+    } catch (error) {
+      console.error('Error updating status:', error);
+      toast.error('Error al actualizar estado');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const separador = (inset = 16) => <div style={{ height: 0.5, background: IOS.separador, marginLeft: inset }} />;
+  const encabezado = (texto: string) => (
+    <p style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '22px 16px 6px' }}>{texto}</p>
+  );
+  const fila = (etiqueta: string, valor: React.ReactNode) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 44, padding: '10px 16px' }}>
+      <span style={{ fontSize: 16, color: IOS.texto, flexShrink: 0 }}>{etiqueta}</span>
+      <span className="min-w-0 truncate" style={{ marginLeft: 'auto', fontSize: 16, color: IOS.secundario, textAlign: 'right' }}>{valor}</span>
+    </div>
+  );
+  const botonAccion = (estilo: 'primario' | 'tintado' | 'destructivo'): React.CSSProperties => ({
+    width: '100%', height: 50, borderRadius: 14, border: 'none', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    fontSize: 17, fontWeight: 600,
+    background: estilo === 'primario' ? IOS.azul : estilo === 'tintado' ? IOS.tarjeta : IOS.tarjeta,
+    color: estilo === 'primario' ? '#fff' : estilo === 'destructivo' ? '#FF3B30' : IOS.azul,
+  });
+
+  return (
+    <div className="min-h-screen max-h-screen overflow-y-auto" style={{ background: IOS.fondo }}>
+      {/* Encabezado compacto */}
       <div
-        className="sticky top-0 z-20 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
-        }}
+        className="sticky top-0"
+        style={{ zIndex: 20, background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}
       >
-        <div className="max-w-md mx-auto px-6 py-4">
-          <div className="flex items-center gap-3">
-            <motion.button
-              onClick={onBack}
-              whileHover={{ scale: 1.1, x: -4 }}
-              whileTap={{ scale: 0.95 }}
-              className="w-11 h-11 flex items-center justify-center rounded-full"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-            >
-              <ArrowLeft className="w-5 h-5 text-white" />
-            </motion.button>
-            <div>
-              <h1 className="text-white tracking-wide flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 600 }}>
-                <FileText className="w-5 h-5" />
-                Detalle del Pedido
-              </h1>
-              <p className="text-blue-100 text-xs">
-                Seguimiento completo
-              </p>
-            </div>
+        <div className="max-w-md mx-auto" style={{ padding: '8px 16px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Volver"
+            style={{
+              width: 36, height: 36, borderRadius: 18, flexShrink: 0, border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+            }}
+          >
+            <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>
+              Pedido #{order.id.slice(0, 8).toUpperCase()}
+            </h1>
+            <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+              {fmtFecha(fechaPedido)}, {fmtHora(fechaPedido)}
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="max-w-md mx-auto px-6 py-4 space-y-4 relative z-10 pb-6">
-        {/* Status Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <Card
-            className="border-2 shadow-lg overflow-hidden"
-            style={{
-              borderRadius: '16px',
-              borderLeftWidth: '6px',
-              borderLeftColor: order.status === 'pending' ? '#F59E0B' :
-                order.status === 'in_progress' ? '#0059FF' :
-                  order.status === 'completed' ? '#10B981' :
-                    order.status === 'dispatched' ? '#6366F1' :
-                      order.status === 'delivered' ? '#14B8A6' : '#6B7280',
-              borderTopColor: '#E0EDFF',
-              borderRightColor: '#E0EDFF',
-              borderBottomColor: '#E0EDFF'
-            }}
+      <div className="max-w-md mx-auto" style={{ padding: '16px 16px 40px' }}>
+        {/* Estado + progreso (desplegable) */}
+        <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => !cancelado && setProgresoAbierto(!progresoAbierto)}
+            aria-expanded={progresoAbierto}
+            className="w-full"
+            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'none', border: 'none', cursor: cancelado ? 'default' : 'pointer', textAlign: 'left' }}
           >
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h2 className="text-[#0047BA]" style={{ fontSize: '20px', fontWeight: 600 }}>
-                    {order.productName}
-                  </h2>
-                  <p className="text-gray-600 text-sm mt-1">{config.description}</p>
-                </div>
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: order.status === 'pending' ? 'rgba(245, 158, 11, 0.1)' :
-                      order.status === 'in_progress' ? 'rgba(0, 89, 255, 0.1)' :
-                        order.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' :
-                          order.status === 'dispatched' ? 'rgba(99, 102, 241, 0.1)' :
-                            order.status === 'delivered' ? 'rgba(20, 184, 166, 0.1)' : 'rgba(107, 114, 128, 0.1)'
-                  }}
-                >
-                  <StatusIcon
-                    className="w-6 h-6"
-                    style={{
-                      color: order.status === 'pending' ? '#F59E0B' :
-                        order.status === 'in_progress' ? '#0059FF' :
-                          order.status === 'completed' ? '#10B981' :
-                            order.status === 'dispatched' ? '#6366F1' :
-                              order.status === 'delivered' ? '#14B8A6' : '#6B7280'
-                    }}
-                  />
-                </div>
-              </div>
-              <Badge className={`${config.bgColor} ${config.color} border px-3 py-1.5 flex items-center gap-2 w-fit`} style={{ fontSize: '13px', fontWeight: 500 }}>
-                <StatusIcon className="w-4 h-4" />
-                {config.label}
-              </Badge>
-            </CardContent>
-          </Card>
-        </motion.div>
+            <span style={{ width: 40, height: 40, borderRadius: 10, background: colorEstado, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <StatusIcon style={{ width: 22, height: 22, color: '#fff' }} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span style={{ display: 'block', fontSize: 19, fontWeight: 700, color: IOS.texto }}>{config.label}</span>
+              <span style={{ display: 'block', fontSize: 14, color: IOS.secundario }}>{config.description}</span>
+            </span>
+            {!cancelado && (
+              <ChevronDown
+                style={{
+                  width: 18, height: 18, color: '#C7C7CC', flexShrink: 0,
+                  transform: progresoAbierto ? 'rotate(180deg)' : 'none', transition: 'transform 0.25s',
+                }}
+              />
+            )}
+          </button>
 
-        {/* Progress Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
-          <Card
-            className="border-2 shadow-lg"
-            style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
-          >
-            <CardContent className="p-6">
-              <div className="mb-6">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-sm text-gray-700" style={{ fontWeight: 500 }}>Progreso del pedido</span>
-                  <span className="text-[#0059FF]" style={{ fontSize: '16px', fontWeight: 600 }}>{order.progress}%</span>
-                </div>
-                <div
-                  className="w-full rounded-full h-3 overflow-hidden"
-                  style={{ background: 'rgba(0, 71, 186, 0.1)' }}
-                >
-                  <motion.div
-                    className="h-3 rounded-full"
-                    style={{
-                      background: order.status === 'delivered'
-                        ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)' // Green for delivered
-                        : order.status === 'dispatched'
-                          ? 'linear-gradient(90deg, #6366f1 0%, #4f46e5 100%)' // Indigo for dispatched
-                          : order.status === 'in_progress'
-                            ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)' // Blue for progress
-                            : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)', // Amber for pending
-                      width: `${order.progress}%`
-                    }}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${order.progress}%` }}
-                    transition={{ duration: 1, delay: 0.3 }}
-                  />
-                </div>
-              </div>
-
-              {/* Status Steps */}
-              <div className="space-y-4">
-                {statusSteps.map((step, index) => {
-                  const isCompleted = index <= currentStepIndex;
-                  const isCurrent = index === currentStepIndex;
-
-                  return (
-                    <motion.div
-                      key={step.key}
-                      className="flex items-center gap-3"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.4 + (index * 0.1) }}
-                    >
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300`}
-                        style={{
-                          background: isCompleted
-                            ? 'linear-gradient(135deg, #0059FF 0%, #0047BA 100%)'
-                            : 'rgba(229, 231, 235, 1)',
-                          boxShadow: isCompleted ? '0 4px 12px rgba(0, 89, 255, 0.3)' : 'none'
-                        }}
-                      >
-                        {isCompleted ? (
-                          <CheckCircle2 className="w-5 h-5 text-white" />
-                        ) : (
-                          <div className="w-3 h-3 bg-gray-400 rounded-full" />
-                        )}
-                      </div>
-                      <span
-                        className={`text-sm transition-colors`}
-                        style={{
-                          color: isCurrent ? '#0047BA' : isCompleted ? '#374151' : '#9CA3AF',
-                          fontWeight: isCurrent ? 600 : 500
-                        }}
-                      >
-                        {step.label}
-                      </span>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* Order Details - Collapsible */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-        >
-          <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-            <Card
-              className="overflow-hidden border-2 shadow-lg"
-              style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
-            >
-              <CollapsibleTrigger asChild>
-                <motion.div
-                  className="p-6 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-indigo-50/50 transition-all"
-                  whileHover={{ backgroundColor: 'rgba(239, 246, 255, 0.5)' }}
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[#0047BA] flex items-center gap-2" style={{ fontSize: '16px', fontWeight: 600 }}>
-                      <ShoppingCart className="w-5 h-5" />
-                      Información del Pedido
-                    </h3>
-                    <motion.div
-                      animate={{ rotate: isOpen ? 180 : 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="w-9 h-9 rounded-full flex items-center justify-center"
-                      style={{ background: 'rgba(0, 89, 255, 0.1)' }}
-                    >
-                      <ChevronDown className="w-5 h-5 text-[#0059FF]" />
-                    </motion.div>
+          {/* Pasos en miniatura: siempre visibles, dan el avance de un vistazo */}
+          {!cancelado && (
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px 14px' }}>
+              {statusSteps.map((step, i) => {
+                const hecho = i <= currentStepIndex;
+                return (
+                  <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: i === 0 ? '0 0 auto' : 1 }}>
+                    {i > 0 && <div style={{ flex: 1, height: 3, borderRadius: 2, background: hecho ? colorEstado : '#E5E5EA' }} />}
+                    <div style={{ width: 10, height: 10, borderRadius: 5, flexShrink: 0, background: hecho ? colorEstado : '#E5E5EA' }} />
                   </div>
+                );
+              })}
+            </div>
+          )}
 
-                  {/* Preview when collapsed */}
-                  {!isOpen && (
-                    <div className="mt-5 grid grid-cols-2 gap-3">
-                      <div
-                        className="p-3 rounded-xl"
-                        style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Hash className="w-3.5 h-3.5 text-[#0059FF]" />
-                          <p className="text-xs text-gray-600" style={{ fontWeight: 500 }}>ID del Pedido</p>
-                        </div>
-                        <p className="text-xs text-gray-800 font-mono" style={{ fontWeight: 500 }}>
-                          {order.id.slice(0, 8).toUpperCase()}
-                        </p>
-                      </div>
-
-                      <div
-                        className="p-3 rounded-xl"
-                        style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <User className="w-3.5 h-3.5 text-[#0059FF]" />
-                          <p className="text-xs text-gray-600" style={{ fontWeight: 500 }}>Cliente</p>
-                        </div>
-                        <p className="text-xs text-gray-800 truncate" style={{ fontWeight: 500 }}>
-                          {order.customerName}
-                        </p>
-                      </div>
-
-                      <div
-                        className="p-3 rounded-xl col-span-2"
-                        style={{ background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F2FF 100%)' }}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Calendar className="w-3.5 h-3.5 text-[#0059FF]" />
-                          <p className="text-xs text-gray-600" style={{ fontWeight: 500 }}>Fecha de Pedido</p>
-                        </div>
-                        <p className="text-xs text-gray-800" style={{ fontWeight: 500 }}>
-                          {new Date(order.createdAt || order.date).toLocaleString('es-CL', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
-
-                      <div
-                        className="p-4 rounded-xl col-span-2 border-2"
-                        style={{
-                          background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
-                          borderColor: '#0059FF'
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="w-5 h-5 text-[#0059FF]" />
-                            <span className="text-sm text-[#0047BA]" style={{ fontWeight: 600 }}>Total</span>
-                          </div>
-                          <span className="text-[#0047BA]" style={{ fontSize: '18px', fontWeight: 600 }}>
-                            {formatCLP(order.total || 0)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              </CollapsibleTrigger>
-
-              <CollapsibleContent>
-                <CardContent className="pt-0 pb-6 px-6">
-                  <Separator className="mb-5" />
-
-                  {/* Products Detail */}
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-sm text-gray-700" style={{ fontWeight: 600 }}>
-                        {order.products && order.products.length > 0
-                          ? `${order.products.length} ${order.products.length === 1 ? 'producto' : 'productos'}`
-                          : '1 producto'}
-                      </span>
-                    </div>
-
-                    {order.products && order.products.length > 0 ? (
-                      <div className="space-y-3">
-                        {order.products.map((product, index) => (
-                          <motion.div
-                            key={index}
-                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors"
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: index * 0.1 }}
-                          >
-                            {/* Product Image */}
-                            <div
-                              className="w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center"
-                              style={{ background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)' }}
-                            >
-                              <Package className="w-7 h-7 text-[#0059FF]" />
-                            </div>
-
-                            {/* Product Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-gray-900" style={{ fontWeight: 500 }}>
-                                {product.quantity}x {product.name}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-0.5">
-                                ${product.price.toLocaleString('es-CL', { minimumFractionDigits: 2 })} c/u
-                              </p>
-                            </div>
-
-                            {/* Price */}
-                            <div className="text-right flex-shrink-0">
-                              <p className="text-sm text-[#0047BA]" style={{ fontWeight: 600 }}>
-                                ${(product.price * product.quantity).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </p>
-                            </div>
-                          </motion.div>
-                        ))}
-
-                        <Separator className="my-4" />
-
-                        {/* Total */}
-                        <div
-                          className="flex items-center justify-between p-4 rounded-xl border-2"
-                          style={{
-                            background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
-                            borderColor: '#0059FF'
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="w-5 h-5 text-[#0059FF]" />
-                            <span className="text-[#0047BA]" style={{ fontWeight: 600 }}>Total del Pedido</span>
-                          </div>
-                          <span className="text-[#0047BA]" style={{ fontSize: '20px', fontWeight: 600 }}>
-                            ${order.total ? order.total.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%)' }}>
-                          <div className="w-14 h-14 bg-gray-200 rounded-xl flex-shrink-0 flex items-center justify-center">
-                            <Package className="w-7 h-7 text-gray-400" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm text-gray-900" style={{ fontWeight: 500 }}>
-                              {order.quantity}x {order.productName}
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-400 text-center mt-3">
-                          Pedido creado antes de la actualización del sistema
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Notes Section */}
-                    {order.notes && order.notes.trim() && (
-                      <>
-                        <Separator className="my-5" />
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4 text-[#0059FF]" />
-                            <span className="text-sm text-gray-700" style={{ fontWeight: 600 }}>
-                              Observaciones
-                            </span>
-                          </div>
+          <AnimatePresence initial={false}>
+            {progresoAbierto && !cancelado && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                style={{ overflow: 'hidden' }}
+              >
+                {separador()}
+                <div style={{ padding: '6px 16px 10px' }}>
+                  {statusSteps.map((step, i) => {
+                    const hecho = i <= currentStepIndex;
+                    const actual = i === currentStepIndex;
+                    return (
+                      <div key={step.key} style={{ display: 'flex', alignItems: 'stretch', gap: 12 }}>
+                        {/* Línea de tiempo */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 22 }}>
+                          <div style={{ flex: 1, width: 2, background: i === 0 ? 'transparent' : (hecho ? colorEstado : '#E5E5EA') }} />
                           <div
-                            className="p-4 rounded-xl border-2"
                             style={{
-                              background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
-                              borderColor: '#FCD34D'
+                              width: 22, height: 22, borderRadius: 11, flexShrink: 0,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: hecho ? colorEstado : '#E5E5EA',
                             }}
                           >
-                            <p className="text-sm text-gray-800" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                              {order.notes}
-                            </p>
+                            {hecho && <Check style={{ width: 13, height: 13, color: '#fff' }} />}
                           </div>
+                          <div style={{ flex: 1, width: 2, background: i === statusSteps.length - 1 ? 'transparent' : (i < currentStepIndex ? colorEstado : '#E5E5EA') }} />
                         </div>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Card>
-          </Collapsible>
-        </motion.div>
+                        <span style={{ padding: '10px 0', fontSize: 16, fontWeight: actual ? 600 : 400, color: hecho ? IOS.texto : IOS.secundario }}>
+                          {step.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-        {/* Actions */}
-        <motion.div
-          className="space-y-3"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.3 }}
-        >
-          {/* Admin Status Management - Allow manually changing status */}
-          {['admin', 'production', 'dispatch'].includes(userRole || '') && onStatusChange && (
-            <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-sm mb-3">
-              <p className="text-sm font-medium text-gray-700 mb-2">Gestión de Estado (Admin)</p>
-              <div className="flex gap-2">
-                <select
-                  className="flex-1 h-10 rounded-md border border-gray-300 px-3 py-1 text-sm bg-white text-black"
-                  value={order.status}
-                  onChange={async (e) => {
-                    const newStatus = e.target.value as any;
-                    const confirmChange = window.confirm(`¿Cambiar estado a "${newStatus}"?`);
-                    if (!confirmChange) return;
-
-                    setIsUpdating(true);
-                    try {
-                      // Determines progress based on status
-                      let progress = 0;
-                      if (newStatus === 'in_progress') progress = 25;
-                      if (newStatus === 'completed') progress = 50;
-                      if (newStatus === 'dispatched') progress = 75;
-                      if (newStatus === 'delivered') progress = 100;
-                      if (newStatus === 'cancelled') progress = 0;
-
-                      await onStatusChange(order.id, newStatus, progress);
-                      toast.success(`Estado actualizado a ${newStatus}`);
-                    } catch (error) {
-                      console.error('Error changing status:', error);
-                      toast.error('Error al actualizar');
-                    } finally {
-                      setIsUpdating(false);
-                    }
+        {/* Productos */}
+        {encabezado(productos.length > 0 ? `${productos.length} ${productos.length === 1 ? 'producto' : 'productos'}` : 'Producto')}
+        <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+          {productos.length > 0 ? productos.map((product, i) => (
+            <div key={i}>
+              {i > 0 && separador()}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                <span
+                  style={{
+                    minWidth: 34, height: 26, borderRadius: 7, padding: '0 6px', flexShrink: 0,
+                    background: IOS.relleno, color: IOS.texto, fontSize: 14, fontWeight: 600,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}
+                >
+                  {fmtCantidad(product.quantity)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span style={{ display: 'block', fontSize: 16, color: IOS.texto }}>{product.name}</span>
+                  <span style={{ display: 'block', fontSize: 13, color: IOS.secundario }}>{formatCLP(product.price)} c/u</span>
+                </span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: IOS.texto, flexShrink: 0 }}>
+                  {formatCLP(product.price * product.quantity)}
+                </span>
+              </div>
+            </div>
+          )) : (
+            <div style={{ padding: '12px 16px' }}>
+              <p style={{ fontSize: 16, color: IOS.texto }}>{fmtCantidad(order.quantity)} × {order.productName}</p>
+              <p style={{ fontSize: 13, color: IOS.secundario }}>Pedido creado antes de la actualización del sistema</p>
+            </div>
+          )}
+          {separador(0)}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px' }}>
+            <span style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Total</span>
+            <span style={{ marginLeft: 'auto', fontSize: 20, fontWeight: 700, color: IOS.texto }}>{formatCLP(order.total || 0)}</span>
+          </div>
+        </div>
+
+        {/* Observaciones */}
+        {order.notes && order.notes.trim() && (
+          <>
+            {encabezado('Observaciones')}
+            <div style={{ background: IOS.tarjeta, borderRadius: 12, padding: '12px 16px' }}>
+              <p style={{ fontSize: 16, color: IOS.texto, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>{order.notes}</p>
+            </div>
+          </>
+        )}
+
+        {/* Datos */}
+        {encabezado('Información')}
+        <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+          {fila('Local', order.customerName || '—')}
+          {separador()}
+          {fila('Entrega', fechaEntrega ? fmtFecha(fechaEntrega) : '—')}
+          {separador()}
+          {fila('Pedido el', `${fmtFecha(fechaPedido)}, ${fmtHora(fechaPedido)}`)}
+          {separador()}
+          {fila('N.º de pedido', <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15 }}>{order.id.slice(0, 8).toUpperCase()}</span>)}
+        </div>
+
+        {/* Cambio manual de estado (admin / producción / despacho) */}
+        {['admin', 'production', 'dispatch'].includes(userRole || '') && onStatusChange && (
+          <>
+            {encabezado('Gestión')}
+            <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+              <label style={{ position: 'relative', display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 16px', gap: 12 }}>
+                <span style={{ fontSize: 16, color: IOS.texto }}>Estado</span>
+                <span style={{ marginLeft: 'auto', fontSize: 16, color: IOS.azul, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {isUpdating ? 'Actualizando…' : config.label}
+                  <ChevronDown style={{ width: 15, height: 15 }} />
+                </span>
+                <select
+                  aria-label="Cambiar estado"
+                  value={order.status}
                   disabled={isUpdating}
+                  onChange={(e) => cambiarEstado(e.target.value)}
+                  style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%' }}
                 >
                   <option value="pending">Pendiente</option>
                   <option value="in_progress">En Preparación</option>
@@ -596,155 +401,56 @@ export function OrderDetail({ order, onBack, onDelete, onStatusChange, userRole,
                   <option value="delivered">Recibido/Entregado</option>
                   <option value="cancelled">Cancelado</option>
                 </select>
-              </div>
+              </label>
             </div>
-          )}
-          {/* Print Delivery Guide Button - Only for completed or delivered orders */}
-          {/* Edit Order Button */}
-          {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
-            <motion.div whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={() => setEditingOrder(order)}
-                className="w-full h-12 relative overflow-hidden group mb-3"
-                style={{
-                  background: 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(245, 158, 11, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-2 relative z-10 text-white">
-                  <Edit className="w-4 h-4" />
-                  Editar Pedido
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-[#D97706] to-[#B45309] opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
+          </>
+        )}
 
-          {/* Print Delivery Guide Button - For completed/dispatched orders. Visible to production/dispatch/admin */}
-          {['completed', 'dispatched', 'delivered'].includes(order.status) && ['production', 'dispatch', 'admin'].includes(userRole || '') && (
-            <motion.div whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={() => setShowDeliveryGuide(true)}
-                className="w-full h-12 relative overflow-hidden group"
-                style={{
-                  background: 'linear-gradient(90deg, #10B981 0%, #059669 100%)',
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-2 relative z-10 text-white">
-                  <Printer className="w-4 h-4" />
-                  Imprimir Guía de Despacho
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-[#059669] to-[#047857] opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
-
-          {/* Recibido Button - Only for DISPATCHED orders and LOCAL users */}
+        {/* Acciones */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 24 }}>
           {order.status === 'dispatched' && userRole === 'local' && onStatusChange && (
-            <motion.div whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={async () => {
-                  setIsUpdating(true);
-                  try {
-                    // Change status to delivered (entregado)
-                    await onStatusChange(order.id, 'delivered', 100);
-                    toast.success('Pedido marcado como recibido');
-                    onBack();
-                  } catch (error) {
-                    console.error('Error updating status:', error);
-                    toast.error('Error al actualizar estado');
-                  } finally {
-                    setIsUpdating(false);
-                  }
-                }}
-                disabled={isUpdating}
-                className="w-full h-12 relative overflow-hidden group"
-                style={{
-                  background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(0, 89, 255, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-2 relative z-10 text-white">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {isUpdating ? 'Actualizando...' : 'Recibido'}
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
+            <button type="button" onClick={marcarRecibido} disabled={isUpdating} style={{ ...botonAccion('primario'), opacity: isUpdating ? 0.6 : 1 }}>
+              <CheckCircle2 style={{ width: 19, height: 19 }} />
+              {isUpdating ? 'Actualizando…' : 'Marcar como recibido'}
+            </button>
           )}
-
-          <motion.div whileTap={{ scale: 0.98 }}>
-            <Button
-              onClick={onBack}
-              className="w-full h-12 relative overflow-hidden group"
-              style={{
-                background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: 600,
-                boxShadow: '0 4px 14px rgba(0, 89, 255, 0.3)'
-              }}
-            >
-              <div className="flex items-center gap-2 relative z-10 text-white">
-                <ArrowLeft className="w-4 h-4" />
-                Volver al Listado
-              </div>
-              <div className="absolute inset-0 bg-gradient-to-r from-[#006DFF] to-[#0059FF] opacity-0 group-hover:opacity-100 transition-opacity" />
-            </Button>
-          </motion.div>
-
-          {/* Delete Button */}
+          {canEdit && ['pending', 'in_progress', 'completed'].includes(order.status) && (
+            <button type="button" onClick={() => setEditingOrder(order)} style={botonAccion('tintado')}>
+              <Edit style={{ width: 18, height: 18 }} />
+              Editar pedido
+            </button>
+          )}
+          {['completed', 'dispatched', 'delivered'].includes(order.status) && ['production', 'dispatch', 'admin'].includes(userRole || '') && (
+            <button type="button" onClick={() => setShowDeliveryGuide(true)} style={botonAccion('tintado')}>
+              <Printer style={{ width: 18, height: 18 }} />
+              Imprimir guía de despacho
+            </button>
+          )}
           {onDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <motion.div whileTap={{ scale: 0.98 }}>
-                  <Button
-                    variant="outline"
-                    className="w-full h-12 border-2 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400 hover:text-red-700"
-                    style={{
-                      borderRadius: '12px',
-                      fontSize: '15px',
-                      fontWeight: 600
-                    }}
-                    disabled={isDeleting}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Trash2 className="w-4 h-4" />
-                      {isDeleting ? 'Eliminando...' : 'Eliminar Pedido'}
-                    </div>
-                  </Button>
-                </motion.div>
+                <button type="button" disabled={isDeleting} style={botonAccion('destructivo')}>
+                  <Trash2 style={{ width: 18, height: 18 }} />
+                  {isDeleting ? 'Eliminando…' : 'Eliminar pedido'}
+                </button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                  <AlertDialogTitle>¿Eliminar este pedido?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta acción no se puede deshacer. El pedido será eliminado permanentemente y el stock de los productos será restaurado.
+                    Esta acción no se puede deshacer. El pedido se elimina y el stock de los productos se restaura.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                  >
+                  <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white">
                     Eliminar
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
           )}
-        </motion.div>
+        </div>
       </div>
 
       {/* Delivery Guide Dialog */}
