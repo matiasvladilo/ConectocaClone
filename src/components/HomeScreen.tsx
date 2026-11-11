@@ -3,7 +3,7 @@ import { User, Order } from '../App';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Package, Plus, User as UserIcon, Menu, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
+import { Package, Plus, User as UserIcon, Menu, Bell, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, History, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
@@ -19,6 +19,8 @@ interface HomeScreenProps {
   onViewOrder: (order: Order) => void;
   onNewOrder: () => void;
   onViewProfile: () => void;
+  onOpenNotifications?: () => void;
+  unreadNotifications?: number;
   onViewHistory?: () => void;
   onGoToProduction?: () => void;
   onGoToDashboard?: () => void;
@@ -74,7 +76,7 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
 
 const SCROLL_KEY = 'ordersScrollPosition';
 
-export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, onUpdateOrderStatus, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
+export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfile, onOpenNotifications, unreadNotifications, onViewHistory, onGoToProduction, onGoToBakeryKDS, onGoToDashboard, onManageProducts, onUpdateOrderStatus, pagination, onPageChange, isLoading = false, accessToken }: HomeScreenProps) {
   // Control segmentado de la lista de pedidos (estilo iOS). Reemplaza al
   // botón "Mostrar/Ocultar Futuros", que mezclaba los pedidos de días
   // siguientes arriba de los de hoy.
@@ -269,6 +271,44 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
                 </p>
               </div>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {onOpenNotifications && (
+              <motion.button
+                onClick={onOpenNotifications}
+                aria-label={unreadNotifications ? `Notificaciones, ${unreadNotifications} sin leer` : 'Notificaciones'}
+                whileTap={{ scale: 0.95 }}
+                className="w-11 h-11 rounded-full flex items-center justify-center relative"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <Bell className="w-5 h-5 text-white" />
+                {!!unreadNotifications && unreadNotifications > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: -6,
+                      right: -8,
+                      minWidth: 20,
+                      height: 20,
+                      padding: '0 5px',
+                      borderRadius: 10,
+                      background: '#FF3B30',
+                      color: '#fff',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: '20px',
+                      textAlign: 'center',
+                      boxShadow: '0 0 0 2px #0060E0',
+                    }}
+                  >
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
+              </motion.button>
+            )}
             <motion.button
               onClick={onViewProfile}
               aria-label="Abrir menú"
@@ -284,6 +324,7 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
               <Menu className="w-5 h-5 text-white relative z-10" />
               <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
             </motion.button>
+            </div>
           </div>
 
           <motion.div

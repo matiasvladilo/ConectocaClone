@@ -2255,6 +2255,68 @@ app.delete("/make-server-6d979413/orders/:id", async (c) => {
 
 // ─── NOTIFICATIONS ROUTES ─────────────────────────────────────────────────────
 
+// ─── Preferencias de notificaciones por categoría ─────────────────────────────
+// Misma lógica que src/utils/preferenciasNotificaciones.ts (el cliente). Las de
+// estado de pedido comparten type 'order_updated'; la etapa sale del título.
+function categoriaDeNotificacion(type: string, title: string): string | null {
+  switch (type) {
+    case 'order_created': return 'pedido_nuevo';
+    case 'order_completed': return 'estado_listo';
+    case 'order_cancelled': return 'estado_cancelado';
+    case 'product_updated': return 'precio';
+    case 'product_created': return 'producto_nuevo';
+    case 'warning':
+    case 'error': return 'stock';
+    case 'attendance_check_in':
+    case 'attendance_check_out': return 'asistencia';
+    case 'order_updated': {
+      const t = (title || '').toLowerCase();
+      if (t.includes('despachado')) return 'estado_despachado';
+      if (t.includes('recibido') || t.includes('entregado')) return 'estado_recibido';
+      if (t.includes('listo')) return 'estado_listo';
+      if (t.includes('cancelado')) return 'estado_cancelado';
+      return 'estado_preparacion';
+    }
+    default: return null;
+  }
+}
+
+async function silenciadasDe(userId: string): Promise<string[]> {
+  const { data } = await supabaseAdmin
+    .from('profiles')
+    .select('notificaciones_silenciadas')
+    .eq('id', userId)
+    .maybeSingle();
+  return Array.isArray(data?.notificaciones_silenciadas) ? data.notificaciones_silenciadas : [];
+}
+
+// Traduce categorías silenciadas a filtros de PostgREST para listar/contar.
+const TIPOS_POR_CATEGORIA: Record<string, string[]> = {
+  pedido_nuevo: ['order_created'],
+  estado_listo: ['order_completed'],
+  estado_cancelado: ['order_cancelled'],
+  precio: ['product_updated'],
+  producto_nuevo: ['product_created'],
+  stock: ['warning', 'error'],
+  asistencia: ['attendance_check_in', 'attendance_check_out'],
+};
+const TITULOS_POR_CATEGORIA: Record<string, string[]> = {
+  estado_despachado: ['%despachado%'],
+  estado_recibido: ['%recibido%', '%entregado%'],
+  estado_preparacion: ['%preparaci%', '%pendiente%'],
+};
+// deno-lint-ignore no-explicit-any
+function excluirSilenciadas(query: any, silenciadas: string[]) {
+  const tipos = silenciadas.flatMap((c) => TIPOS_POR_CATEGORIA[c] ?? []);
+  if (tipos.length > 0) query = query.not('type', 'in', `(${tipos.join(',')})`);
+  for (const patron of silenciadas.flatMap((c) => TITULOS_POR_CATEGORIA[c] ?? [])) {
+    query = query.not('title', 'ilike', patron);
+  }
+  return query;
+}
+
+const ultimaLimpiezaNotificaciones = new Map<string, number>();
+
 app.get('/make-server-6d979413/notifications', async (c) => {
   const { error, userId } = await verifyAuth(c.req.header('Authorization'));
   if (error) {
@@ -2263,13 +2325,47 @@ app.get('/make-server-6d979413/notifications', async (c) => {
   }
 
   try {
-    const { data: notifications } = await supabaseAdmin
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    // Antes devolvía la bandeja entera (había usuarios con ~4.800 filas) y el
+    // cliente la pide cada 5 s. Ahora: solo las más recientes + el total real de
+    // no leídas para el badge, y limpieza de las viejas en el camino.
+    const limitParam = Number(c.req.query('limit'));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 50;
 
-    return c.json({ data: (notifications || []).map(toNotification) });
+    const ahora = Date.now();
+    const hace30 = new Date(ahora - 30 * 86400000).toISOString();
+    const hace90 = new Date(ahora - 90 * 86400000).toISOString();
+    // Leídas de más de 30 días y cualquiera de más de 90: fuera. A lo sumo una
+    // vez por hora por usuario (en memoria de la instancia; si se reinicia, se
+    // repite y no pasa nada). Si falla, la respuesta sigue igual.
+    if (ahora - (ultimaLimpiezaNotificaciones.get(userId!) ?? 0) > 3600000) {
+      ultimaLimpiezaNotificaciones.set(userId!, ahora);
+      const { error: e } = await supabaseAdmin
+        .from('notifications')
+        .delete()
+        .eq('user_id', userId)
+        .or(`and(read.eq.true,created_at.lt.${hace30}),created_at.lt.${hace90}`);
+      if (e) console.warn('Limpieza de notificaciones falló:', e.message);
+    }
+
+    const silenciadas = await silenciadasDe(userId!);
+    const [{ data: notifications }, { count: unreadCount }] = await Promise.all([
+      excluirSilenciadas(
+        supabaseAdmin.from('notifications').select('*').eq('user_id', userId),
+        silenciadas,
+      )
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      excluirSilenciadas(
+        supabaseAdmin
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('read', false),
+        silenciadas,
+      ),
+    ]);
+
+    return c.json({ data: (notifications || []).map(toNotification), unreadCount: unreadCount ?? 0 });
   } catch (err: any) {
     console.error('Error fetching notifications:', err);
     return c.json({ error: 'Failed to fetch notifications' }, 500);
@@ -2320,6 +2416,12 @@ app.post('/make-server-6d979413/notifications', async (c) => {
       }
 
       targetId = targetUserId;
+    }
+
+    // El destinatario apagó esta categoría: no se crea (no es un error).
+    const categoria = categoriaDeNotificacion(notifType, title);
+    if (categoria && (await silenciadasDe(targetId)).includes(categoria)) {
+      return c.json({ data: null, silenciada: true }, 200);
     }
 
     const { data: notification, error: insertErr } = await supabaseAdmin
@@ -2948,7 +3050,9 @@ app.put('/make-server-6d979413/ingredients/:id', async (c) => {
         .from('profiles')
         .select('id')
         .eq('business_id', profile.businessId)
-        .in('role', ['admin', 'production', 'pastry']);
+        .in('role', ['admin', 'production', 'pastry'])
+        // Quien apagó "Stock bajo" en sus preferencias no recibe el aviso.
+        .not('notificaciones_silenciadas', 'cs', '{stock}');
 
       const title = newStock === 0 ? 'Stock Agotado de Materia Prima' : 'Stock Bajo de Materia Prima';
       const message = newStock === 0
@@ -3532,7 +3636,8 @@ app.patch('/make-server-6d979413/production-orders/:orderId/status', async (c) =
           .from('profiles')
           .select('id')
           .eq('business_id', profile.businessId)
-          .in('role', ['admin', 'production', 'pastry']);
+          .in('role', ['admin', 'production', 'pastry'])
+          .not('notificaciones_silenciadas', 'cs', '{stock}');
 
         const notifRows = [];
         for (const ing of lowStockIngredients) {

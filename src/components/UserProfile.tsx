@@ -29,6 +29,8 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
 import { version as versionApp } from '../../package.json';
 import { estiloBarraDeEstado } from '../utils/initNative';
+import { isNativePlatform } from '../utils/platform';
+import { seccionesParaRol } from '../utils/preferenciasNotificaciones';
 
 /**
  * Panel "Mi cuenta": se abre desde el botón ☰ del inicio y se desliza desde la
@@ -60,6 +62,9 @@ interface UserProfileProps {
   onManageIngredients?: () => void;
   onManageProductIngredients?: () => void;
   accessToken?: string;
+  /** Categorías de notificación apagadas (ver utils/preferenciasNotificaciones). */
+  notificacionesSilenciadas?: string[];
+  onCambiarNotificacionesSilenciadas?: (lista: string[]) => void;
 }
 
 // Paleta de iOS (colores de sistema), para que los íconos se lean "Apple".
@@ -202,20 +207,22 @@ function Fila({ icono, color, label, detalle, badge, onClick, chevron = true, de
   );
 }
 
-export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, onViewAnalytics, onViewDispatch, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken }: UserProfileProps) {
+export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, onViewAnalytics, onViewDispatch, onViewDistribution, onViewComplaints, pendingComplaintsCount, onManageAttendance, onManageProducts, onManageProductionAreas, onManageIngredients, onManageProductIngredients, accessToken, notificacionesSilenciadas = [], onCambiarNotificacionesSilenciadas }: UserProfileProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [pushNotifications, setPushNotifications] = useState(true);
   const [soundNotifications, setSoundNotifications] = useState(() => {
     // Load from localStorage
     const saved = localStorage.getItem('soundNotifications');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  // Los avisos del navegador solo existen en la PWA/web (en la app nativa no hay
+  // `window.Notification`; el push nativo es otra fase). El switch refleja el
+  // permiso real: encendido solo si hay permiso Y el usuario no lo apagó.
+  const avisosDisponibles = !isNativePlatform() && typeof window !== 'undefined' && 'Notification' in window;
   const [browserNotifications, setBrowserNotifications] = useState(() => {
+    if (!avisosDisponibles || Notification.permission !== 'granted') return false;
     const saved = localStorage.getItem('browserNotifications');
     return saved !== null ? JSON.parse(saved) : true;
   });
-  const [orderUpdates, setOrderUpdates] = useState(true);
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressValue, setAddressValue] = useState(user.address || '');
@@ -282,9 +289,11 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
         if (permission === 'granted') {
           setBrowserNotifications(true);
           localStorage.setItem('browserNotifications', JSON.stringify(true));
-          toast.success('Notificaciones del navegador activadas');
+          toast.success('Avisos activados');
         } else {
-          toast.error('Permiso de notificaciones denegado');
+          toast.error('El navegador bloqueó los avisos', {
+            description: 'Actívalos en los ajustes del sitio de tu navegador.',
+          });
         }
       } else {
         toast.error('Tu navegador no soporta notificaciones');
@@ -292,7 +301,7 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
     } else {
       setBrowserNotifications(false);
       localStorage.setItem('browserNotifications', JSON.stringify(false));
-      toast.success('Notificaciones del navegador desactivadas');
+      toast.success('Avisos desactivados');
     }
   };
 
@@ -419,6 +428,13 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </label>
   );
+
+  const seccionesAvisos = onCambiarNotificacionesSilenciadas ? seccionesParaRol(user.role) : [];
+  const alternarCategoria = (clave: string, activa: boolean) => {
+    if (!onCambiarNotificacionesSilenciadas) return;
+    const resto = notificacionesSilenciadas.filter((c) => c !== clave);
+    onCambiarNotificacionesSilenciadas(activa ? resto : [...resto, clave]);
+  };
 
   return (
     <>
@@ -632,8 +648,8 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                 )}
               </Grupo>
 
-              {/* Notificaciones: plegado por defecto. Los switches conservan el
-                  comportamiento anterior (las notificaciones se revisan aparte). */}
+              {/* Notificaciones: plegado por defecto. Solo ajustes que funcionan
+                  de verdad (ver docs/notificaciones-diagnostico.md). */}
               <Grupo titulo="Notificaciones">
                 <button
                   type="button"
@@ -658,14 +674,12 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                   <>
                     <Separador />
                     {filaInterruptor('sound-notifications', 'Sonido', soundNotifications, handleSoundNotificationsChange, Volume2, IOS.rosa)}
-                    <Separador />
-                    {filaInterruptor('browser-notifications', 'Notificaciones del sistema', browserNotifications, handleBrowserNotificationsChange, Monitor, IOS.azul)}
-                    <Separador />
-                    {filaInterruptor('push-notifications', 'Notificaciones push', pushNotifications, setPushNotifications, Bell, IOS.naranja)}
-                    <Separador />
-                    {filaInterruptor('email-notifications', 'Correo', emailNotifications, setEmailNotifications, Mail, IOS.azul)}
-                    <Separador />
-                    {filaInterruptor('order-updates', 'Estado de pedidos', orderUpdates, setOrderUpdates, Package, IOS.verde)}
+                    {avisosDisponibles && <Separador />}
+                    {avisosDisponibles && (
+                      <>
+                        {filaInterruptor('browser-notifications', 'Avisos del navegador', browserNotifications, handleBrowserNotificationsChange, Monitor, IOS.azul)}
+                      </>
+                    )}
                     {(user.role === 'production' || user.role === 'admin') && (
                       <>
                         <Separador />
@@ -682,6 +696,29 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                   </>
                 )}
               </Grupo>
+
+              {/* Qué avisos recibir, por categoría. Van como listas propias
+                  (estilo Ajustes) debajo de Preferencias cuando está abierto. */}
+              {showNotificationSettings && seccionesAvisos.map((seccion) => (
+                <Grupo key={seccion.titulo} titulo={seccion.titulo} pie={seccion.pie}>
+                  {seccion.opciones.map((op, i) => (
+                    <div key={op.clave}>
+                      {i > 0 && <div style={{ height: 1, background: IOS.separador, marginLeft: 16 }} />}
+                      <label
+                        htmlFor={`aviso-${op.clave}`}
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 48, padding: '9px 16px', cursor: 'pointer' }}
+                      >
+                        <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>{op.label}</span>
+                        <Switch
+                          id={`aviso-${op.clave}`}
+                          checked={!notificacionesSilenciadas.includes(op.clave)}
+                          onCheckedChange={(v) => alternarCategoria(op.clave, v)}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </Grupo>
+              ))}
 
               {/* Cerrar sesión */}
               <Grupo>

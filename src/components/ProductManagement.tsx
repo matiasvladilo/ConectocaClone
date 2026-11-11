@@ -314,6 +314,9 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         if ('price' in productData && editingProduct.price !== productData.price) {
           businessAPI.getMembers(accessToken).then(({ members }) => {
             const promises = members
+              // A todos: cada uno decide en Mi cuenta → Notificaciones si quiere
+              // este aviso (por defecto solo los locales). El servidor no crea
+              // el aviso para quien lo tiene apagado y la app lo oculta.
               .filter(m => m.id !== currentUserId)
               .map(m => notificationsAPI.create(accessToken, {
                 title: 'Cambio de Precio',
@@ -339,6 +342,7 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
         // Notify creation
         businessAPI.getMembers(accessToken).then(({ members }) => {
           const promises = members
+            // A todos; cada uno decide si lo recibe (ver cambio de precio, arriba).
             .filter(m => m.id !== currentUserId)
             .map(m => notificationsAPI.create(accessToken, {
               title: 'Nuevo Producto',

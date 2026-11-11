@@ -208,44 +208,42 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
 
 /**
  * Show browser notification
+ *
+ * Solo si el usuario ya dio permiso (desde "Mi cuenta → Preferencias"): pedirlo
+ * acá saltaría un diálogo del sistema sin que el usuario haya tocado nada, y
+ * Safari directamente lo ignora fuera de un gesto.
+ *
+ * Se muestra vía service worker cuando hay uno (Chrome en Android no permite
+ * `new Notification()` y lanza "Illegal constructor"); si no, con el
+ * constructor clásico (escritorio). En la app nativa no existe
+ * `window.Notification`, así que no hace nada.
  */
 export const showBrowserNotification = async (
   title: string,
   options?: NotificationOptions
-): Promise<Notification | null> => {
-  console.log('[BROWSER_NOTIF] Mostrando notificación:', title);
-  
-  // Check if browser notifications are enabled
-  const browserNotifEnabled = isBrowserNotificationEnabled();
-  
-  if (!browserNotifEnabled) {
-    console.log('[BROWSER_NOTIF] Notificaciones del navegador deshabilitadas');
-    return null;
-  }
+): Promise<void> => {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!isBrowserNotificationEnabled()) return;
 
-  const hasPermission = await requestNotificationPermission();
-  
-  if (hasPermission) {
-    try {
-      const notification = new Notification(title, {
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-96x96.png',
-        vibrate: [200, 100, 200],
-        ...options,
-      });
+  const opciones: NotificationOptions = {
+    icon: '/icon-192.png',
+    badge: '/favicon-32x32.png',
+    ...options,
+  };
 
-      console.log('[BROWSER_NOTIF] ✓ Notificación mostrada');
-
-      // Auto-close after 5 seconds
-      setTimeout(() => notification.close(), 5000);
-
-      return notification;
-    } catch (error) {
-      console.error('[BROWSER_NOTIF] Error mostrando notificación:', error);
+  try {
+    const registro = 'serviceWorker' in navigator
+      ? await navigator.serviceWorker.getRegistration()
+      : undefined;
+    if (registro) {
+      await registro.showNotification(title, opciones);
+      return;
     }
+    const aviso = new Notification(title, opciones);
+    setTimeout(() => aviso.close(), 5000);
+  } catch (error) {
+    console.error('[BROWSER_NOTIF] Error mostrando notificación:', error);
   }
-  
-  return null;
 };
 
 /**

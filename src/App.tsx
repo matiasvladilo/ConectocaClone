@@ -37,10 +37,13 @@ import {
   type Notification,
 } from "./utils/api";
 import { toast } from "sonner";
-import { Bell } from "lucide-react";
-import { Badge } from "./components/ui/badge";
-import { motion, AnimatePresence } from "motion/react";
 import { notifyNewOrder, notifyOrderUpdate, playNotificationSound } from "./utils/notificationSound";
+import {
+  cargarSilenciadas,
+  categoriaDeEstado,
+  estaSilenciada,
+  guardarSilenciadas,
+} from "./utils/preferenciasNotificaciones";
 import { ComplaintsPanel } from "./features/complaints/ComplaintsPanel";
 import { complaintsAPI } from "./features/complaints/api";
 import {
@@ -196,10 +199,13 @@ export default function App() {
   // algo navega a "profile", se redirige a la pantalla de origen y se abre el
   // panel, así el usuario vuelve justo al menú desde el que entró.
   const [perfilAbierto, setPerfilAbierto] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   useAndroidBackButton({
-    canExit: esPantallaRaiz && !perfilAbierto,
-    onBack: perfilAbierto
+    canExit: esPantallaRaiz && !perfilAbierto && !notificationsOpen,
+    onBack: notificationsOpen
+      ? () => setNotificationsOpen(false)
+      : perfilAbierto
       ? () => setPerfilAbierto(false)
       : esPantallaRaiz
         ? null
@@ -232,8 +238,14 @@ export default function App() {
   const [notifications, setNotifications] = useState<
     Notification[]
   >([]);
-  const [notificationsOpen, setNotificationsOpen] =
-    useState(false);
+  // Total real de no leídas (lo da el servidor): la lista trae solo las 50
+  // más recientes, así que contarlas acá subestimaría el badge.
+  const [unreadCount, setUnreadCount] = useState(0);
+  // Categorías de notificación que el usuario apagó (Mi cuenta → Notificaciones).
+  // Ref espejo porque el polling corre en un setInterval con closures viejas.
+  const [silenciadas, setSilenciadas] = useState<string[]>([]);
+  const silenciadasRef = useRef<string[]>([]);
+  silenciadasRef.current = silenciadas;
 
   // Use ref instead of state to avoid closure issues with setInterval
   const hasLoadedInitialOrders = useRef(false);
@@ -420,6 +432,7 @@ export default function App() {
       // Clear notifications when logged out
       console.log('[POLLING] No accessToken or currentUser, skipping polling');
       setNotifications([]);
+      setUnreadCount(0);
       return;
     }
 
@@ -447,6 +460,45 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, [accessToken, currentUser, ordersPagination]);
+
+  // Preferencias de notificaciones: se leen al entrar con un usuario.
+  useEffect(() => {
+    if (!currentUser?.id || !isProfileVerified) {
+      setSilenciadas([]);
+      return;
+    }
+    let activo = true;
+    cargarSilenciadas(currentUser.id)
+      .then((lista) => {
+        if (!activo) return;
+        silenciadasRef.current = lista;
+        setSilenciadas(lista);
+        loadNotifications();
+      })
+      .catch((error) => console.warn("No se pudieron leer las preferencias de notificaciones", error));
+    return () => {
+      activo = false;
+    };
+    // loadNotifications se recrea en cada render; basta con el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, isProfileVerified]);
+
+  const handleCambiarSilenciadas = async (lista: string[]) => {
+    if (!currentUser?.id) return;
+    const anterior = silenciadas;
+    silenciadasRef.current = lista;
+    setSilenciadas(lista);
+    loadNotifications();
+    try {
+      await guardarSilenciadas(currentUser.id, lista);
+    } catch (error) {
+      console.error("Error guardando preferencias de notificaciones:", error);
+      silenciadasRef.current = anterior;
+      setSilenciadas(anterior);
+      loadNotifications();
+      toast.error("No se pudo guardar el cambio");
+    }
+  };
 
   // Refresco proactivo de sesión al volver a la app (foco / pestaña visible).
   // En PWA/móvil el timer de auto-refresh de Supabase no corre mientras la app está
@@ -788,7 +840,10 @@ export default function App() {
           newOrderIds: newOrders.map(o => o.id.substring(0, 8))
         });
 
-        if (newOrders.length > 0) {
+        if (newOrders.length > 0 && silenciadasRef.current.includes('pedido_nuevo')) {
+          // Avisos de pedidos nuevos apagados: solo registrar que ya se vieron.
+          newOrders.forEach(order => initialOrderIds.current.add(order.id));
+        } else if (newOrders.length > 0) {
           // Add new order IDs to the set so we don't notify again
           newOrders.forEach(order => initialOrderIds.current.add(order.id));
           console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: orange; font-weight: bold');
@@ -962,7 +1017,8 @@ export default function App() {
       if (oldOrder.status !== newOrder.status) {
         // Notify about status change (only for non-production/non-admin users or specific statuses)
         if (currentUser?.role !== "production" && currentUser?.role !== "admin" &&
-          (newOrder.status === "completed" || newOrder.status === "in_progress" || newOrder.status === "dispatched")) {
+          (newOrder.status === "completed" || newOrder.status === "in_progress" || newOrder.status === "dispatched") &&
+          !silenciadasRef.current.includes(categoriaDeEstado(newOrder.status))) {
           playNotificationSound('order_update');
 
           const statusText = newOrder.status === "completed"
@@ -999,16 +1055,28 @@ export default function App() {
     // Only load if we have a valid session
     if (!accessToken || !currentUser) {
       setNotifications([]);
+      setUnreadCount(0);
       return;
     }
 
     try {
-      const fetchedNotifications =
-        await notificationsAPI.getAll(accessToken);
-      // Ensure we always set an array, even if the response is undefined/null
-      const notificationsArray = Array.isArray(fetchedNotifications)
-        ? fetchedNotifications
-        : [];
+      const LIMITE = 50;
+      const { items: recibidas, unreadCount: totalServidor, completa } =
+        await notificationsAPI.getRecent(accessToken, LIMITE);
+      // Ocultar las categorías silenciadas. El servidor nuevo ya las excluye de
+      // la lista y del total. El viejo manda la bandeja entera: se filtra y se
+      // cuenta sobre todo, y recién después se recorta a las más recientes.
+      const visibles = recibidas.filter(
+        (n) => !estaSilenciada(n, silenciadasRef.current),
+      );
+      const notificationsArray = visibles.slice(0, LIMITE);
+      const totalNoLeidas = completa
+        ? visibles.filter((n) => !n.read).length
+        : Math.max(
+          0,
+          totalServidor -
+            recibidas.filter((n) => !n.read && estaSilenciada(n, silenciadasRef.current)).length,
+        );
 
       // Detect new warning/error notifications for stock alerts
       if (previousNotificationIds.current.size > 0) {
@@ -1038,6 +1106,7 @@ export default function App() {
       previousNotificationIds.current = new Set(notificationsArray.map(n => n.id));
 
       setNotifications(notificationsArray);
+      setUnreadCount(totalNoLeidas);
     } catch (error: any) {
       // Check if it's an auth error (401, Invalid JWT, expired)
       if (
@@ -1058,6 +1127,7 @@ export default function App() {
 
       // Set empty array on error to prevent crashes
       setNotifications([]);
+      setUnreadCount(0);
     }
   };
 
@@ -1069,6 +1139,9 @@ export default function App() {
         accessToken,
         notificationId,
       );
+      if (notifications.some((n) => n.id === notificationId && !n.read)) {
+        setUnreadCount((c) => Math.max(0, c - 1));
+      }
       setNotifications((prev) =>
         Array.isArray(prev)
           ? prev.map((n) =>
@@ -1096,9 +1169,7 @@ export default function App() {
           ? prev.map((n) => ({ ...n, read: true }))
           : [],
       );
-      toast.success(
-        "Todas las notificaciones marcadas como leídas",
-      );
+      setUnreadCount(0);
     } catch (error) {
       console.error(
         "Error marking all notifications as read:",
@@ -1118,6 +1189,9 @@ export default function App() {
         accessToken,
         notificationId,
       );
+      if (notifications.some((n) => n.id === notificationId && !n.read)) {
+        setUnreadCount((c) => Math.max(0, c - 1));
+      }
       setNotifications((prev) =>
         Array.isArray(prev)
           ? prev.filter((n) => n.id !== notificationId)
@@ -1140,6 +1214,11 @@ export default function App() {
         setSelectedOrder(order);
         setCurrentScreen("orderDetail");
         setNotificationsOpen(false);
+      } else {
+        // La lista de pedidos está paginada: uno antiguo puede no estar cargado.
+        toast("Ese pedido no está en la lista actual", {
+          description: "Búscalo en el historial de pedidos.",
+        });
       }
     }
   };
@@ -1238,6 +1317,7 @@ export default function App() {
       setOrders([]);
       setIsInitialOrdersLoading(false);
       setNotifications([]);
+      setUnreadCount(0);
       setPendingComplaintId(null);
       setPendingComplaintsCount(undefined);
       setIsProfileVerified(false);
@@ -1257,6 +1337,7 @@ export default function App() {
       setAccessToken(null);
       setOrders([]);
       setNotifications([]);
+      setUnreadCount(0);
       setPendingComplaintId(null);
       setPendingComplaintsCount(undefined);
       setIsProfileVerified(false);
@@ -1578,9 +1659,6 @@ export default function App() {
     return Array.isArray(notifications) ? notifications : [];
   }, [notifications]);
 
-  const unreadCount = useMemo(() => {
-    return safeNotifications.filter((n) => !n.read).length;
-  }, [safeNotifications]);
 
   if (loading) {
     return (
@@ -1604,61 +1682,6 @@ export default function App() {
       {/* Audio Initializer for Dispatch (who receives orders) */}
       <AudioInitializer userRole={currentUser?.role} />
 
-      {/* Notifications Bell (only when logged in) */}
-      <AnimatePresence>
-        {currentUser && currentScreen !== "login" && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-            drag
-            dragConstraints={{ left: -window.innerWidth + 100, right: 0, top: -window.innerHeight + 100, bottom: 0 }}
-            dragElastic={0.1}
-            dragMomentum={false}
-            onClick={() => setNotificationsOpen(true)}
-            className="fixed bottom-6 right-6 z-30 w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-full flex items-center justify-center shadow-2xl transition-colors cursor-grab active:cursor-grabbing"
-          >
-            <motion.div
-              animate={
-                unreadCount > 0
-                  ? {
-                    rotate: [0, -15, 15, -15, 0],
-                  }
-                  : {}
-              }
-              transition={{
-                duration: 0.5,
-                repeat: unreadCount > 0 ? Infinity : 0,
-                repeatDelay: 3,
-              }}
-            >
-              <Bell className="w-6 h-6 text-white" />
-            </motion.div>
-            {unreadCount > 0 && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="absolute -top-1 -right-1"
-              >
-                <Badge className="w-6 h-6 flex items-center justify-center p-0 bg-red-500 text-white border-2 border-white shadow-lg">
-                  <motion.span
-                    animate={{ scale: [1, 1.2, 1] }}
-                    transition={{
-                      duration: 1,
-                      repeat: Infinity,
-                    }}
-                  >
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </motion.span>
-                </Badge>
-              </motion.div>
-            )}
-          </motion.button>
-        )}
-      </AnimatePresence>
-
       {/* Notifications Panel */}
       <NotificationsPanel
         notifications={safeNotifications}
@@ -1668,6 +1691,7 @@ export default function App() {
         onMarkAllAsRead={handleMarkAllAsRead}
         onDelete={handleDeleteNotification}
         onNotificationClick={handleNotificationClick}
+        unreadCount={unreadCount}
       />
 
       {currentScreen === "login" && (
@@ -1689,6 +1713,8 @@ export default function App() {
             }
           }}
           onViewProfile={() => setPerfilAbierto(true)}
+          onOpenNotifications={() => setNotificationsOpen(true)}
+          unreadNotifications={unreadCount}
           onViewHistory={() => setCurrentScreen("history")}
           onGoToProduction={() => setCurrentScreen("production")}
           onGoToBakeryKDS={() => setCurrentScreen("bakeryKds")}
@@ -1749,6 +1775,8 @@ export default function App() {
           onClose={() => setPerfilAbierto(false)}
           onLogout={handleLogout}
           onUpdateProfile={handleUpdateProfile}
+          notificacionesSilenciadas={silenciadas}
+          onCambiarNotificacionesSilenciadas={handleCambiarSilenciadas}
           onViewAnalytics={() => setCurrentScreen("analytics")}
           onViewDispatch={
             currentUser.role === "admin" ? () => setCurrentScreen("production") : undefined

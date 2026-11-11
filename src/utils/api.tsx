@@ -510,10 +510,20 @@ export interface Notification {
 
 // Notifications API
 export const notificationsAPI = {
-  getAll: async (token: string): Promise<Notification[]> => {
-    const response = await fetchAPI('/notifications', {}, token);
-    // Return the data array or empty array if not present
-    return response?.data || [];
+  /**
+   * Las más recientes (`limit`) + el total real de no leídas.
+   *
+   * `completa: true` = respondió el servidor viejo, que ignora `limit`, manda la
+   * bandeja entera y no trae `unreadCount`: en ese caso quien llama debe filtrar
+   * (preferencias) y contar sobre `items` completos, y recién después recortar.
+   */
+  getRecent: async (token: string, limit = 50): Promise<{ items: Notification[]; unreadCount: number; completa: boolean }> => {
+    const response = await fetchAPI(`/notifications?limit=${limit}`, {}, token);
+    const items: Notification[] = Array.isArray(response?.data) ? response.data : [];
+    if (typeof response?.unreadCount === 'number') {
+      return { items: items.slice(0, limit), unreadCount: response.unreadCount, completa: false };
+    }
+    return { items, unreadCount: items.filter((n) => !n.read).length, completa: true };
   },
 
   create: async (token: string, notification: {
