@@ -57,7 +57,9 @@
       outDir: 'build',
     },
     server: {
-      port: 3000,
+      // Respeta el puerto que asigne el entorno (PORT); 3000 sigue siendo el
+      // default cuando se corre `npm run dev` a mano.
+      port: Number(process.env.PORT) || 3000,
       open: true,
     },
   });
