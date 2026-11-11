@@ -670,10 +670,8 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
             {/* Desde 1024px la imagen y el texto crecen y aparece el botón de
                 Stock: necesita @media, que el Tailwind precompilado no trae. */}
             <style>{`
-              .tarjeta-producto-img { height: 120px; }
               .tarjeta-producto-stock-btn { display: none; }
               @media (min-width: 1024px) {
-                .tarjeta-producto-img { height: 200px; }
                 .tarjeta-producto-stock-btn { display: flex; }
               }
             `}</style>
@@ -701,9 +699,11 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
                     className="fila-ios"
                     style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
                   >
-                    <div className="tarjeta-producto-img" style={{ width: '100%', background: '#F7F7F9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    {/* Cuadrado que la foto llena (cover): con contain, cada foto dejaba
+                        franjas grises distintas según su forma y la grilla se veía despareja. */}
+                    <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                       {product.imageUrl ? (
-                        <img src={product.imageUrl} alt={product.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                        <img src={product.imageUrl} alt={product.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                       ) : (
                         <Package style={{ width: 30, height: 30, color: '#C7C7CC' }} />
                       )}
