@@ -440,11 +440,12 @@ async function sesionConPermiso(c: any, permiso: Permiso): Promise<Sesion> {
  * admin ya existente. Esa es la diferencia entre "elegir cómo trabajo" y
  * "elegir qué permisos tengo", que es lo que A-02 permitía confundir.
  */
-const ROLES_AUTOSERVICIO = new Set(['local', 'worker', 'user']);
+// 'worker' salió en nov. 2026 junto con el módulo de asistencia.
+const ROLES_AUTOSERVICIO = new Set(['local', 'user']);
 
 /** Roles que un admin puede otorgar a un miembro de su negocio. */
 const ROLES_ASIGNABLES_POR_ADMIN = new Set([
-  'admin', 'production', 'dispatch', 'pastry', 'local', 'worker', 'user',
+  'admin', 'production', 'dispatch', 'pastry', 'local', 'user',
 ]);
 
 /**

@@ -107,7 +107,7 @@ export function PWAHead() {
     // Description
     const description = document.createElement('meta');
     description.name = 'description';
-    description.content = 'CONECTOCA - Gestión de pedidos, producción y asistencia de personal';
+    description.content = 'CONECTOCA - Gestión de pedidos y producción';
     description.setAttribute('data-pwa-meta', 'true');
     head.appendChild(description);
 

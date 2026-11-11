@@ -225,7 +225,7 @@ export const authAPI = {
     // A-02: solo roles de autoservicio. El servidor ignora cualquier otro valor
     // (ROLES_AUTOSERVICIO en el Edge Function) y cae a 'user'; el tipo acotado
     // está para que un llamador nuevo no vuelva a intentarlo sin darse cuenta.
-    role: 'local' | 'worker' | 'user',
+    role: 'local' | 'user',
     businessAction: 'create' | 'join',
     businessName?: string,
     businessCode?: string
