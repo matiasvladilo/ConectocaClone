@@ -3,15 +3,10 @@ import { createPortal } from 'react-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
-import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Switch } from './ui/switch';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Calendar as CalendarComponent } from './ui/calendar';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -30,10 +25,9 @@ import {
   AlertCircle,
   ChevronUp,
   ChevronDown,
-  PackagePlus,
-  Tag,
   Search,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
@@ -49,6 +43,17 @@ import { projectId } from '../utils/supabase/info';
 const ImageCropDialog = lazy(() =>
   import('./ImageCropDialog').then((m) => ({ default: m.ImageCropDialog }))
 );
+
+// Paleta de sistema de iOS (misma familia que "Mi cuenta" e Historial).
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+};
 
 interface NewOrderFormProps {
   onBack: () => void;
@@ -106,8 +111,8 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   const [imagePreview, setImagePreview] = useState<string>('');
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [summaryExpanded, setSummaryExpanded] = useState(true);
-  const [cartPreviewOpen, setCartPreviewOpen] = useState(false);
+  // El resumen arranca plegado (barra inferior): desplegado tapaba el catálogo.
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   // 'all' = toda la categoría padre elegida, incluidas sus subcategorías.
   const [selectedSubcategoryFilter, setSelectedSubcategoryFilter] = useState<string>('all');
@@ -325,14 +330,6 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
       console.error('Error restocking product:', error);
       toast.error('Error al reabastecer stock');
     }
-  };
-
-  const handleQuantityChange = (productId: string, value: string) => {
-    const num = parseInt(value) || 0;
-    setProductQuantities(prev => ({
-      ...prev,
-      [productId]: Math.max(0, num)
-    }));
   };
 
   const handleAddToCart = (product: Product, quantity?: number) => {
@@ -679,609 +676,542 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
     setSelectedSubcategoryFilter('all');
   };
 
+  // Productos que pasan búsqueda + categoría.
+  const productosVisibles = products.filter((product) => {
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch =
+      product.name.toLowerCase().includes(searchLower) ||
+      (product.description && product.description.toLowerCase().includes(searchLower));
+    if (!matchesSearch) return false;
+    if (selectedCategoryFilter === 'all') return true;
+    if (selectedCategoryFilter === 'uncategorized') return !product.categoryId;
+    // Una subcategoría elegida filtra solo por ella; el padre trae todo lo suyo
+    // más lo de sus subcategorías.
+    if (subcategoriaActiva) return product.categoryId === subcategoriaActiva;
+    return idsDelFiltro !== null && !!product.categoryId && idsDelFiltro.has(product.categoryId);
+  });
+
+  const unidadesEnCarrito = cart.reduce((s, i) => s + i.quantity, 0);
+
+  // Control − cantidad + (estilo UIStepper). La cantidad se puede tipear: se
+  // guarda el texto mientras se edita (decimalInputs) y se confirma con
+  // handleSetCartQuantity, igual que antes en el resumen. En el mínimo, el "−"
+  // pasa a ser un tacho y saca el producto del pedido.
+  const renderStepper = (item: CartItem, grande = false) => {
+    const permiteDecimal = !!(item as any).allowDecimal;
+    const minimo = permiteDecimal ? 0.5 : 1;
+    const enMinimo = item.quantity <= minimo;
+    const enTope = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock;
+    const alto = grande ? 34 : 32;
+    const boton = (deshabilitado: boolean): React.CSSProperties => ({
+      width: alto, height: alto, border: 'none', borderRadius: alto / 2, flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'transparent', cursor: deshabilitado ? 'default' : 'pointer',
+      color: deshabilitado ? '#C7C7CC' : IOS.azul,
+    });
+    return (
+      <div
+        className="quantity-controls"
+        onClick={(e) => e.stopPropagation()}
+        style={{ display: 'flex', alignItems: 'center', borderRadius: alto / 2, background: IOS.relleno }}
+      >
+        <button
+          type="button"
+          aria-label={enMinimo ? `Quitar ${item.name}` : `Restar ${item.name}`}
+          onClick={() => enMinimo ? handleRemoveFromCart(item.id) : handleUpdateCartQuantity(item.id, -1)}
+          style={{ ...boton(false), color: enMinimo ? '#FF3B30' : IOS.azul }}
+        >
+          {enMinimo ? <Trash2 style={{ width: 15, height: 15 }} /> : <Minus style={{ width: 16, height: 16 }} />}
+        </button>
+        <input
+          type="text"
+          inputMode={permiteDecimal ? 'decimal' : 'numeric'}
+          aria-label={`Cantidad de ${item.name}`}
+          value={decimalInputs[item.id] ?? String(item.quantity)}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => {
+            const raw = e.target.value.replace(',', '.');
+            if (!(permiteDecimal ? /^\d*\.?\d*$/ : /^\d*$/).test(raw)) return;
+            setDecimalInputs(prev => ({ ...prev, [item.id]: raw }));
+            const parsed = parseFloat(raw);
+            if (!isNaN(parsed) && parsed > 0) handleSetCartQuantity(item.id, raw);
+          }}
+          onBlur={() => setDecimalInputs(prev => { const n = { ...prev }; delete n[item.id]; return n; })}
+          style={{
+            width: grande ? 44 : 36, minWidth: 0, textAlign: 'center', border: 'none', outline: 'none',
+            background: 'transparent', fontSize: 16, fontWeight: 600,
+            color: enTope ? '#FF9500' : IOS.texto, padding: 0,
+          }}
+        />
+        <button
+          type="button"
+          aria-label={`Sumar ${item.name}`}
+          disabled={enTope}
+          onClick={() => handleUpdateCartQuantity(item.id, 1)}
+          style={boton(enTope)}
+        >
+          <Plus style={{ width: 16, height: 16 }} />
+        </button>
+      </div>
+    );
+  };
+
+  const chip = (activo: boolean): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap',
+    height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+    fontSize: 14, fontWeight: activo ? 600 : 500,
+    background: activo ? IOS.azul : IOS.tarjeta,
+    color: activo ? '#fff' : IOS.texto,
+    boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+  });
+
+  const fechaEntregaTexto = (() => {
+    if (!deadlineDate) return 'Elegir fecha';
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const d = new Date(deadlineDate); d.setHours(0, 0, 0, 0);
+    const dias = Math.round((d.getTime() - hoy.getTime()) / 86400000);
+    const fecha = deadlineDate.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '');
+    if (dias === 0) return `Hoy, ${fecha}`;
+    if (dias === 1) return `Mañana, ${fecha}`;
+    return fecha.charAt(0).toUpperCase() + fecha.slice(1);
+  })();
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-800 text-white shadow-xl sticky top-0 z-10" style={{ paddingTop: 'max(env(safe-area-inset-top), 20px)' }}>
-        <div className="max-w-6xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-10 h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </motion.button>
-              <div>
-                <span className="tracking-wider">Nuevo Pedido</span>
-                <p className="text-xs text-blue-200 opacity-80">Selecciona productos para tu pedido</p>
-              </div>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado compacto */}
+      <div
+        className="sticky top-0"
+        style={{
+          zIndex: 10,
+          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
+          paddingTop: 'max(env(safe-area-inset-top), 16px)',
+        }}
+      >
+        <div className="max-w-6xl mx-auto" style={{ padding: '8px 16px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Volver"
+              style={{
+                width: 36, height: 36, borderRadius: 18, flexShrink: 0, border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+              }}
+            >
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>
+                Nuevo pedido
+              </h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {cart.length === 0
+                  ? 'Elegí los productos'
+                  : `${cart.length} ${cart.length === 1 ? 'producto' : 'productos'} · ${formatCLP(calculateTotal())}`}
+              </p>
             </div>
+            {/* Carrito: abre el resumen */}
+            <button
+              type="button"
+              aria-label={`Ver pedido (${cart.length} productos)`}
+              onClick={() => cart.length > 0 && setSummaryExpanded(true)}
+              style={{
+                position: 'relative', width: 36, height: 36, borderRadius: 18, flexShrink: 0, border: 'none',
+                cursor: cart.length > 0 ? 'pointer' : 'default',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+              }}
+            >
+              <ShoppingCart style={{ width: 19, height: 19, color: '#fff' }} />
+              {cart.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                    background: '#FF3B30', color: '#fff', fontSize: 11, fontWeight: 600,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  {cart.length}
+                </span>
+              )}
+            </button>
+          </div>
 
-            {/* Cart Preview Popover */}
-            <Popover open={cartPreviewOpen} onOpenChange={setCartPreviewOpen}>
-              <PopoverTrigger asChild>
-                <button className="flex items-center gap-2 bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full transition-colors relative">
-                  <ShoppingCart className="w-4 h-4" />
-                  <span className="text-sm">{cart.length} productos</span>
-                  {cart.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-500 text-blue-900 rounded-full text-xs flex items-center justify-center">
-                      {cart.length}
-                    </span>
-                  )}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-0" align="end">
-                <div className="bg-white rounded-lg shadow-xl">
-                  <div className="p-4 bg-blue-600 text-white rounded-t-lg">
-                    <div className="flex items-center gap-2">
-                      <ShoppingCart className="w-5 h-5" />
-                      <h3>Carrito de Compras</h3>
-                    </div>
-                    <p className="text-xs text-blue-100 mt-1">
-                      {cart.length} {cart.length === 1 ? 'producto' : 'productos'}
-                    </p>
-                  </div>
-
-                  {cart.length > 0 ? (
-                    <div className="max-h-96 overflow-y-auto">
-                      <div className="p-4 space-y-3">
-                        {cart.map((item) => (
-                          <div key={item.id} className="flex items-start gap-3 p-2 hover:bg-gray-50 rounded-lg transition-colors">
-                            <div className="w-12 h-12 bg-gray-200 rounded overflow-hidden flex-shrink-0">
-                              <ImageWithFallback
-                                src={item.image}
-                                alt={item.name}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-sm text-gray-900 line-clamp-1">{item.name}</h4>
-                              <p className="text-xs text-gray-500">
-                                {item.quantity} × {formatCLP(getItemUnitPrice(item))}
-                              </p>
-                              <p className="text-xs text-blue-700 mt-1">
-                                {formatCLP(getItemTotal(item))}
-                              </p>
-                            </div>
-
-                            <button
-                              onClick={() => handleRemoveFromCart(item.id)}
-                              className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-100 text-red-600 transition-colors flex-shrink-0"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-
-                      <Separator />
-
-                      <div className="p-4 bg-gray-50">
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-gray-700">Total</span>
-                          <span className="text-blue-700">
-                            ${calculateTotal().toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
-
-                        <Button
-                          onClick={() => {
-                            setCartPreviewOpen(false);
-                            setSummaryExpanded(true);
-                          }}
-                          className="w-full bg-yellow-500 hover:bg-yellow-600 text-blue-900 gap-2"
-                        >
-                          Ver Resumen Completo
-                          <ChevronDown className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-8 text-center">
-                      <ShoppingCart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500 text-sm">Tu carrito está vacío</p>
-                      <p className="text-gray-400 text-xs mt-1">
-                        Agrega productos para comenzar
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
+          {/* Búsqueda */}
+          <div style={{ position: 'relative', marginTop: 12 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 17, height: 17, color: 'rgba(255,255,255,0.75)' }} />
+            <input
+              type="search"
+              placeholder="Buscar productos"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="buscador-sobre-azul"
+              style={{
+                width: '100%', height: 38, borderRadius: 10, border: 'none', outline: 'none',
+                background: 'rgba(255,255,255,0.18)', padding: '0 34px', fontSize: 16, color: '#fff',
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                aria-label="Borrar búsqueda"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  width: 20, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <X style={{ width: 12, height: 12, color: '#fff' }} />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto p-4 space-y-6 pb-32">
-        {/* Product Catalog */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              <Package className="w-5 h-5 text-blue-600" />
-              <h2 className="text-gray-800 font-semibold">Catálogo de Productos</h2>
-            </div>
-
-            {/* Search Bar */}
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Buscar por nombre o descripción..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 bg-white"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-4">
-            {/* Category Filter */}
-            {categories.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => handleSeleccionarCategoria('all')}
-                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'all'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                  >
-                    Todas
-                  </button>
-                  {categoriasRaiz.map((cat) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => handleSeleccionarCategoria(cat.id)}
-                      className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${selectedCategoryFilter === cat.id
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                        }`}
-                    >
-                      <div
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                      {cat.name}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => handleSeleccionarCategoria('uncategorized')}
-                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${selectedCategoryFilter === 'uncategorized'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                  >
-                    Sin categoría
-                  </button>
-                </div>
-                {subcategoriasVisibles.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    <button
-                      onClick={() => setSelectedSubcategoryFilter('all')}
-                      className={`px-3 py-1 rounded-lg text-sm transition-colors ${subcategoriaActiva === null
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                        }`}
-                    >
-                      Todo {categories.find(c => c.id === selectedCategoryFilter)?.name}
-                    </button>
-                    {subcategoriasVisibles.map((sub) => (
-                      <button
-                        key={sub.id}
-                        onClick={() => setSelectedSubcategoryFilter(sub.id)}
-                        className={`px-3 py-1 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${subcategoriaActiva === sub.id
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                      >
-                        <div
-                          className="w-2.5 h-2.5 rounded-full"
-                          style={{ backgroundColor: sub.color }}
-                        />
-                        {sub.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 2 columnas desde el celular más angosto (antes era 1 por fila, "una por
-              pantalla"), subiendo a 3-4 en pantallas más grandes. */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {products
-              .filter((product: any) => {
-                // Fila de Búsqueda de Texto
-                const searchLower = searchQuery.toLowerCase();
-                const matchesSearch =
-                  product.name.toLowerCase().includes(searchLower) ||
-                  (product.description && product.description.toLowerCase().includes(searchLower));
-
-                if (!matchesSearch) return false;
-
-                // Fila de Categoría
-                if (selectedCategoryFilter === 'all') return true;
-                if (selectedCategoryFilter === 'uncategorized') return !product.categoryId;
-                // Una subcategoría elegida filtra solo por ella; el padre trae
-                // todo lo suyo más lo de sus subcategorías.
-                if (subcategoriaActiva) return product.categoryId === subcategoriaActiva;
-                return idsDelFiltro !== null && !!product.categoryId && idsDelFiltro.has(product.categoryId);
-              })
-              .map((product) => {
-                const productStock = product.stock ?? 0;
-                const isUnlimitedProduct = product.trackStock === false || productStock === -1;
-                const isOutOfStock = !isUnlimitedProduct && productStock <= 0;
-                const cartItem = cart.find(item => item.id === product.id);
-                const remainingStock = isUnlimitedProduct ? Infinity : productStock - (cartItem?.quantity || 0);
-
+      <div className="max-w-6xl mx-auto" style={{ padding: '12px 16px', paddingBottom: cart.length > 0 ? 'calc(110px + env(safe-area-inset-bottom))' : 32 }}>
+        {/* Categorías (y subcategorías del padre elegido) en carriles deslizables */}
+        {categories.length > 0 && (
+          <>
+            <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px', padding: '0 16px 2px' }}>
+              <button type="button" aria-pressed={selectedCategoryFilter === 'all'} onClick={() => handleSeleccionarCategoria('all')} style={chip(selectedCategoryFilter === 'all')}>
+                Todas
+              </button>
+              {categoriasRaiz.map((cat) => {
+                const activo = selectedCategoryFilter === cat.id;
                 return (
-                  <Card
-                    key={product.id}
-                    className={`overflow-hidden transition-all ${isOutOfStock
-                      ? 'opacity-60 cursor-not-allowed'
-                      : 'hover:shadow-lg hover:scale-[1.02] cursor-pointer'
-                      }`}
-                  >
-                    {/* Clickable area - entire card except edit button */}
-                    <div
-                      onClick={(e) => {
-                        // Only trigger if not clicking on edit button or input fields
-                        if (!isOutOfStock &&
-                          e.target instanceof Element &&
-                          !e.target.closest('button.edit-btn') &&
-                          !e.target.closest('.quantity-controls')) {
-                          handleAddToCart(product, 1);
-                        }
-                      }}
-                    >
-                      {/* `sm:h-48` no existe en el CSS precompilado de este proyecto y
-                          nunca se aplicó (verificado: 0 matches) — la imagen siempre
-                          quedó en h-40. Se reemplaza por h-28, el mismo alto ya probado
-                          en la grilla compacta de Gestión de Productos. */}
-                      <div className="relative w-full h-28 bg-gray-100/50 flex items-center justify-center overflow-hidden group shrink-0">
-                        <ImageWithFallback
-                          src={product.image}
-                          alt={product.name}
-                          className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
-                        />
-                        {isOutOfStock && (
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                            <Badge variant="destructive" className="text-sm">
-                              Sin Stock
-                            </Badge>
-                          </div>
-                        )}
-                        {!isOutOfStock && (
-                          <div className="absolute top-2 left-2 w-8 h-8 bg-yellow-500/90 group-hover:bg-yellow-500 rounded-full flex items-center justify-center shadow-md transition-all z-[5]">
-                            <ShoppingCart className="w-4 h-4 text-blue-900" />
-                          </div>
-                        )}
-                        {userRole !== 'local' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditProduct(product);
-                            }}
-                            className="edit-btn absolute top-2 right-2 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-md transition-colors z-[5]"
-                          >
-                            <Edit className="w-4 h-4 text-blue-600" />
-                          </button>
-                        )}
-                      </div>
-
-                      <CardContent className="p-2 space-y-2">
-                        <div>
-                          <h3 className="text-gray-900 text-sm line-clamp-2 leading-tight mb-1">{product.name}</h3>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-blue-700 text-sm">${product.price.toFixed(2)}</span>
-                          <Badge
-                            variant={isOutOfStock ? "destructive" : (!isUnlimitedProduct && remainingStock < 10) ? "outline" : "secondary"}
-                            className="text-xs"
-                          >
-                            {isUnlimitedProduct ? '∞' : (isOutOfStock ? 'Sin stock' : `Stock: ${productStock}`)}
-                          </Badge>
-                        </div>
-
-                        <div className="space-y-2 quantity-controls" onClick={(e) => e.stopPropagation()}>
-                          <Label htmlFor={`qty-${product.id}`} className="text-xs text-gray-600">
-                            Cantidad
-                          </Label>
-                          <div className="flex gap-2">
-                            <Input
-                              id={`qty-${product.id}`}
-                              type="number"
-                              min="0"
-                              max={remainingStock > 0 ? remainingStock : undefined}
-                              value={productQuantities[product.id] || ''}
-                              onChange={(e) => handleQuantityChange(product.id, e.target.value)}
-                              placeholder="0"
-                              className="flex-1"
-                              disabled={isOutOfStock}
-                            />
-                            <Button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAddToCart(product);
-                              }}
-                              disabled={isOutOfStock}
-                              className="bg-yellow-500 hover:bg-yellow-600 text-blue-900 gap-1 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <Plus className="w-4 h-4" />
-                              Agregar
-                            </Button>
-                          </div>
-                          {!isUnlimitedProduct && !isOutOfStock && remainingStock < productStock && (
-                            <p className="text-xs text-orange-600">
-                              {remainingStock} disponibles (ya tienes {cartItem?.quantity} en el carrito)
-                            </p>
-                          )}
-                        </div>
-                      </CardContent>
-                    </div>
-                  </Card>
+                  <button key={cat.id} type="button" aria-pressed={activo} onClick={() => handleSeleccionarCategoria(cat.id)} style={chip(activo)}>
+                    {!activo && <span style={{ width: 7, height: 7, borderRadius: 4, background: cat.color }} />}
+                    {cat.name}
+                  </button>
                 );
               })}
-          </div>
-        </div>
+              <button type="button" aria-pressed={selectedCategoryFilter === 'uncategorized'} onClick={() => handleSeleccionarCategoria('uncategorized')} style={chip(selectedCategoryFilter === 'uncategorized')}>
+                Sin categoría
+              </button>
+            </div>
+            {subcategoriasVisibles.length > 0 && (
+              <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '8px -16px 0', padding: '0 16px 2px' }}>
+                <button type="button" aria-pressed={subcategoriaActiva === null} onClick={() => setSelectedSubcategoryFilter('all')} style={{ ...chip(subcategoriaActiva === null), height: 28, fontSize: 13 }}>
+                  Todo {categories.find(c => c.id === selectedCategoryFilter)?.name}
+                </button>
+                {subcategoriasVisibles.map((sub) => {
+                  const activo = subcategoriaActiva === sub.id;
+                  return (
+                    <button key={sub.id} type="button" aria-pressed={activo} onClick={() => setSelectedSubcategoryFilter(sub.id)} style={{ ...chip(activo), height: 28, fontSize: 13 }}>
+                      {!activo && <span style={{ width: 7, height: 7, borderRadius: 4, background: sub.color }} />}
+                      {sub.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
 
-        {/* Order Summary - Collapsible */}
-        {cart.length > 0 && createPortal(
-          <div style={{
-            position: 'fixed',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 99999,
-            width: '100%',
-            pointerEvents: 'none' // Allow clicks to pass through the wrapper
-          }}>
-            <motion.div
-              style={{ pointerEvents: 'auto' }} // Re-enable pointer events for the footer content
-              className="bg-white border-t-2 border-blue-600 shadow-lg rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
-              initial={false}
-            >
-              {/* Collapsed Header - Always Visible */}
-              <div
-                onClick={() => setSummaryExpanded(!summaryExpanded)}
-                className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-              >
-                <div className="max-w-6xl mx-auto flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <ShoppingCart className="w-5 h-5 text-blue-600" />
-                    <div>
-                      <h3 className="text-gray-900">Resumen del Pedido</h3>
-                      <p className="text-xs text-gray-500">
-                        {cart.length} {cart.length === 1 ? 'ítem' : 'ítems'}
-                      </p>
-                    </div>
+        {/* Encabezado de sección */}
+        <p style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '18px 16px 6px' }}>
+          {isLoadingProducts ? 'Cargando productos…' : `${productosVisibles.length} ${productosVisibles.length === 1 ? 'producto' : 'productos'}`}
+        </p>
+
+        {isLoadingProducts ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: IOS.secundario }} />
+          </div>
+        ) : productosVisibles.length === 0 ? (
+          <div style={{ background: IOS.tarjeta, borderRadius: 12, padding: '40px 24px', textAlign: 'center' }}>
+            <Package style={{ width: 36, height: 36, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Sin productos</p>
+            <p style={{ fontSize: 15, color: IOS.secundario, marginTop: 4 }}>
+              {searchQuery ? `No hay resultados para "${searchQuery}".` : 'No hay productos en esta categoría.'}
+            </p>
+          </div>
+        ) : (
+          /* 2 columnas en celular, 3-4 en pantallas más grandes. */
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4" style={{ gap: 10 }}>
+            {productosVisibles.map((product) => {
+              const productStock = product.stock ?? 0;
+              const isUnlimitedProduct = product.trackStock === false || productStock === -1;
+              const isOutOfStock = !isUnlimitedProduct && productStock <= 0;
+              const cartItem = cart.find(item => item.id === product.id);
+              const stockBajo = !isUnlimitedProduct && !isOutOfStock && productStock < 10;
+
+              return (
+                <div
+                  key={product.id}
+                  style={{
+                    background: IOS.tarjeta, borderRadius: 14, overflow: 'hidden',
+                    display: 'flex', flexDirection: 'column',
+                    boxShadow: cartItem ? `0 0 0 2px ${IOS.azul}` : 'none',
+                  }}
+                >
+                  {/* Imagen: tocarla agrega 1. El alto va inline: la regla global
+                      `img { height: auto }` de globals.css (sin @layer) le gana a h-full. */}
+                  <div
+                    onClick={() => { if (!isOutOfStock) handleAddToCart(product, 1); }}
+                    style={{ position: 'relative', height: 120, background: '#F2F2F7', cursor: isOutOfStock ? 'default' : 'pointer', flexShrink: 0 }}
+                  >
+                    <ImageWithFallback src={product.image} alt={product.name} className="w-full h-full object-cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    {isOutOfStock && (
+                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '4px 10px', borderRadius: 12 }}>
+                          Sin stock
+                        </span>
+                      </div>
+                    )}
+                    {cartItem && (
+                      <span
+                        style={{
+                          position: 'absolute', top: 8, left: 8, minWidth: 24, height: 24, borderRadius: 12, padding: '0 7px',
+                          background: IOS.azul, color: '#fff', fontSize: 13, fontWeight: 700,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        {cartItem.quantity}
+                      </span>
+                    )}
+                    {userRole !== 'local' && (
+                      <button
+                        type="button"
+                        aria-label={`Editar ${product.name}`}
+                        onClick={(e) => { e.stopPropagation(); handleEditProduct(product); }}
+                        style={{
+                          position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, border: 'none', cursor: 'pointer',
+                          background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <Edit style={{ width: 14, height: 14, color: IOS.azul }} />
+                      </button>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500">Total</p>
-                      <p className="text-blue-700">
-                        ${calculateTotal().toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
+                  <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                    <p className="line-clamp-2" style={{ fontSize: 14, fontWeight: 600, color: IOS.texto, lineHeight: 1.25 }}>
+                      {product.name}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 'auto' }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: IOS.texto }}>{formatCLP(product.price)}</span>
+                      <span style={{ fontSize: 12, color: isOutOfStock ? '#FF3B30' : stockBajo ? '#FF9500' : IOS.secundario }}>
+                        {isUnlimitedProduct ? '' : isOutOfStock ? 'Agotado' : `${productStock} disp.`}
+                      </span>
                     </div>
-                    {summaryExpanded ? (
-                      <ChevronDown className="w-5 h-5 text-blue-600" />
+                    {cartItem ? (
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>{renderStepper(cartItem)}</div>
                     ) : (
-                      <ChevronUp className="w-5 h-5 text-blue-600" />
+                      <button
+                        type="button"
+                        disabled={isOutOfStock}
+                        onClick={() => handleAddToCart(product, 1)}
+                        style={{
+                          height: 32, borderRadius: 16, border: 'none', cursor: isOutOfStock ? 'default' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                          fontSize: 15, fontWeight: 600,
+                          background: isOutOfStock ? IOS.relleno : 'rgba(0,122,255,0.12)',
+                          color: isOutOfStock ? '#C7C7CC' : IOS.azul,
+                        }}
+                      >
+                        <Plus style={{ width: 16, height: 16 }} />
+                        Agregar
+                      </button>
                     )}
                   </div>
                 </div>
-              </div>
+              );
+            })}
+          </div>
+        )}
 
-              {/* Expanded Content */}
-              <AnimatePresence>
-                {summaryExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: 'easeInOut' }}
-                    className="overflow-hidden"
-                  >
-                    <Separator />
-
-                    <div className="p-6 space-y-4 max-w-6xl mx-auto">
-                      {/* Product List */}
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {cart.map((item) => {
-                          const isNearLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock * 0.8;
-                          const atLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock;
-                          const previewVigente = lotPreviews[item.id]?.quantity === item.quantity ? lotPreviews[item.id] : null;
-                          const precioMixto = previewVigente !== null && previewVigente.precioUnitario !== item.price;
-
-                          return (
-                            <div key={item.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                              <div className="w-16 h-16 bg-white rounded overflow-hidden flex-shrink-0">
-                                <ImageWithFallback
-                                  src={item.image}
-                                  alt={item.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-
-                              <div className="flex-1 min-w-0">
-                                <h4 className="text-sm text-gray-900 mb-1">{item.name}</h4>
-                                <p className="text-xs text-gray-500">
-                                  {formatCLP(getItemUnitPrice(item))} x {item.quantity} = {formatCLP(getItemTotal(item))}
-                                </p>
-                                {precioMixto && (
-                                  <p className="text-xs text-blue-600 mt-0.5">
-                                    Cruza stock de distinto costo: precio promedio para esta cantidad
-                                  </p>
-                                )}
-                                {atLimit && (
-                                  <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
-                                    <AlertCircle className="w-3 h-3" />
-                                    Stock máximo alcanzado
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => handleUpdateCartQuantity(item.id, -1)}
-                                  className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
-                                >
-                                  <Minus className="w-3 h-3" />
-                                </button>
-                                {(item as any).allowDecimal ? (
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={decimalInputs[item.id] ?? item.quantity}
-                                    onChange={(e) => {
-                                      const raw = e.target.value.replace(',', '.');
-                                      if (!/^[\d]*\.?[\d]*$/.test(raw)) return;
-                                      setDecimalInputs(prev => ({ ...prev, [item.id]: raw }));
-                                      const parsed = parseFloat(raw);
-                                      if (!isNaN(parsed) && parsed > 0) {
-                                        handleSetCartQuantity(item.id, raw);
-                                      }
-                                    }}
-                                    onBlur={() => {
-                                      setDecimalInputs(prev => { const n = { ...prev }; delete n[item.id]; return n; });
-                                    }}
-                                    className={`text-sm w-14 text-center border rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 ${atLimit ? 'text-orange-600' : ''}`}
-                                  />
-                                ) : (
-                                  <span className={`text-sm w-8 text-center ${atLimit ? 'text-orange-600' : ''}`}>
-                                    {item.quantity}
-                                  </span>
-                                )}
-                                <button
-                                  onClick={() => handleUpdateCartQuantity(item.id, 1)}
-                                  disabled={atLimit}
-                                  className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${atLimit
-                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                    : 'bg-gray-200 hover:bg-gray-300'
-                                    }`}
-                                >
-                                  <Plus className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={() => handleRemoveFromCart(item.id)}
-                                  className="w-7 h-7 flex items-center justify-center rounded-full bg-red-100 hover:bg-red-200 text-red-600 transition-colors ml-2"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <Separator />
-
-                      {/* Delivery Date */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-5 h-5 text-blue-600" />
-                          <Label className="text-sm text-gray-700">
-                            Fecha límite de entrega
-                          </Label>
+        {/* Resumen del pedido: barra inferior + hoja que se despliega */}
+        {cart.length > 0 && createPortal(
+          <>
+            <AnimatePresence>
+              {summaryExpanded && (
+                <motion.div
+                  key="fondo"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setSummaryExpanded(false)}
+                  style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 99998 }}
+                />
+              )}
+            </AnimatePresence>
+            <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 99999 }}>
+              <div
+                className="max-w-6xl mx-auto"
+                style={{
+                  background: summaryExpanded ? IOS.fondo : 'rgba(249,249,249,0.94)',
+                  backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                  borderTopLeftRadius: summaryExpanded ? 14 : 0, borderTopRightRadius: summaryExpanded ? 14 : 0,
+                  borderTop: summaryExpanded ? 'none' : `0.5px solid ${IOS.separador}`,
+                  paddingBottom: 'env(safe-area-inset-bottom)',
+                  boxShadow: summaryExpanded ? '0 -8px 30px rgba(0,0,0,0.12)' : 'none',
+                }}
+              >
+                <AnimatePresence initial={false}>
+                  {summaryExpanded && (
+                    <motion.div
+                      key="hoja"
+                      initial={{ height: 0 }}
+                      animate={{ height: 'auto' }}
+                      exit={{ height: 0 }}
+                      transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+                      style={{ overflow: 'hidden' }}
+                    >
+                      <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '8px 16px 4px' }}>
+                        {/* Tirador + título */}
+                        <div style={{ width: 36, height: 5, borderRadius: 3, background: '#C7C7CC', margin: '0 auto 10px' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                          <p style={{ fontSize: 20, fontWeight: 700, color: IOS.texto }}>Tu pedido</p>
+                          <button
+                            type="button"
+                            aria-label="Cerrar resumen"
+                            onClick={() => setSummaryExpanded(false)}
+                            style={{
+                              marginLeft: 'auto', width: 30, height: 30, borderRadius: 15, border: 'none', cursor: 'pointer',
+                              background: IOS.relleno, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                          >
+                            <X style={{ width: 16, height: 16, color: IOS.secundario }} />
+                          </button>
                         </div>
-                        <div className="relative group">
-                          <div className="w-full flex items-center justify-center py-3 px-4 border-2 border-emerald-100 rounded-2xl bg-[#f2fbf5] group-hover:bg-[#e6f7ec] group-hover:border-emerald-200 transition-all duration-200 shadow-sm">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="w-5 h-5 text-emerald-600" />
-                              <span className="text-sm font-semibold text-emerald-800">
-                                {deadlineDate ? (
-                                  `Para el ${deadlineDate.toLocaleDateString('es-CL', {
-                                    weekday: 'long',
-                                    day: 'numeric',
-                                    month: 'long'
-                                  })}`
-                                ) : (
-                                  <span className="text-emerald-600/70 font-normal">Selecciona una fecha</span>
-                                )}
-                              </span>
+
+                        {/* Productos */}
+                        <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' }}>
+                          {cart.map((item, i) => {
+                            const atLimit = item.trackStock !== false && item.stock !== -1 && item.quantity >= item.stock;
+                            const previewVigente = lotPreviews[item.id]?.quantity === item.quantity ? lotPreviews[item.id] : null;
+                            const precioMixto = previewVigente !== null && previewVigente.precioUnitario !== item.price;
+                            return (
+                              <div key={item.id}>
+                                {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 68 }} />}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px' }}>
+                                  <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', background: IOS.fondo, flexShrink: 0 }}>
+                                    <ImageWithFallback src={item.image} alt={item.name} className="w-full h-full object-cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate" style={{ fontSize: 15, fontWeight: 600, color: IOS.texto }}>{item.name}</p>
+                                    <p style={{ fontSize: 13, color: IOS.secundario }}>
+                                      {formatCLP(getItemTotal(item))}
+                                      {item.quantity !== 1 && ` · ${formatCLP(getItemUnitPrice(item))} c/u`}
+                                    </p>
+                                    {precioMixto && (
+                                      <p style={{ fontSize: 12, color: IOS.azul }}>Precio promedio por stock de distinto costo</p>
+                                    )}
+                                    {atLimit && (
+                                      <p style={{ fontSize: 12, color: '#FF9500', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <AlertCircle style={{ width: 12, height: 12 }} />
+                                        Máximo disponible
+                                      </p>
+                                    )}
+                                  </div>
+                                  {renderStepper(item, true)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Entrega + observaciones */}
+                        <div style={{ background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden', marginTop: 16 }}>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', minHeight: 48, padding: '0 16px', gap: 12 }}>
+                            <span style={{ width: 30, height: 30, borderRadius: 7, background: '#34C759', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <Calendar style={{ width: 17, height: 17, color: '#fff' }} />
+                            </span>
+                            <span style={{ fontSize: 16, color: IOS.texto }}>Entrega</span>
+                            <span style={{ marginLeft: 'auto', fontSize: 15, padding: '5px 10px', borderRadius: 7, background: IOS.relleno, color: IOS.azul }}>
+                              {fechaEntregaTexto}
+                            </span>
+                            <input
+                              type="date"
+                              aria-label="Fecha de entrega"
+                              value={deadline}
+                              min={today}
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                setDeadline(e.target.value);
+                                setDeadlineDate(new Date(e.target.value + 'T00:00:00'));
+                              }}
+                              onClick={(e) => {
+                                try { (e.target as HTMLInputElement).showPicker(); } catch { /* sin showPicker */ }
+                              }}
+                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                            />
+                          </div>
+                          <div style={{ height: 0.5, background: IOS.separador, marginLeft: 58 }} />
+                          <div style={{ display: 'flex', gap: 12, padding: '12px 16px' }}>
+                            <span style={{ width: 30, height: 30, borderRadius: 7, background: '#FF9500', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <FileText style={{ width: 17, height: 17, color: '#fff' }} />
+                            </span>
+                            <div className="flex-1">
+                              <textarea
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                                placeholder="Observaciones (opcional)"
+                                maxLength={500}
+                                rows={2}
+                                style={{
+                                  width: '100%', border: 'none', outline: 'none', resize: 'none', background: 'transparent',
+                                  fontSize: 16, color: IOS.texto, padding: '4px 0 0', lineHeight: 1.35,
+                                }}
+                              />
+                              {notes.length > 400 && (
+                                <p style={{ fontSize: 12, color: IOS.secundario, textAlign: 'right' }}>{notes.length}/500</p>
+                              )}
                             </div>
                           </div>
-                          <input
-                            type="date"
-                            value={deadline}
-                            min={today}
-                            onChange={(e) => {
-                              setDeadline(e.target.value);
-                              setDeadlineDate(new Date(e.target.value + 'T00:00:00'));
-                            }}
-                            onClick={(e) => {
-                              try {
-                                (e.target as HTMLInputElement).showPicker();
-                              } catch (err) {
-                                // Fallback for browsers without showPicker
-                              }
-                            }}
-                            className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
-                          />
                         </div>
                       </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                      {/* Notes */}
-                      <div className="space-y-2">
-                        <Label className="text-sm text-gray-700">Observaciones (opcional)</Label>
-                        <Textarea
-                          value={notes}
-                          onChange={(e) => setNotes(e.target.value)}
-                          placeholder="Agrega notas o instrucciones especiales para este pedido..."
-                          className="min-h-[80px] border-blue-200 focus:border-blue-500 resize-none"
-                          maxLength={500}
-                        />
-                        <p className="text-xs text-gray-500 text-right">{notes.length}/500 caracteres</p>
-                      </div>
-
-                      {/* Total */}
-                      <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg">
-                        <span className="text-blue-900">Total</span>
-                        <span className="text-blue-900">
-                          ${calculateTotal().toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex gap-3">
-                        <Button
-                          onClick={onBack}
-                          variant="outline"
-                          className="flex-1"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          onClick={handleConfirmOrder}
-                          disabled={isSubmitting}
-                          className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-blue-900 gap-2 disabled:opacity-50"
-                        >
-                          {isSubmitting ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Confirmando...
-                            </>
-                          ) : (
-                            <>
-                              <ShoppingCart className="w-4 h-4" />
-                              Confirmar Pedido
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          </div>,
+                {/* Barra siempre visible: total + acción principal */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSummaryExpanded(!summaryExpanded)}
+                    aria-expanded={summaryExpanded}
+                    style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  >
+                    <p style={{ fontSize: 13, color: IOS.secundario, display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {cart.length} {cart.length === 1 ? 'producto' : 'productos'}
+                      {unidadesEnCarrito !== cart.length && ` · ${Math.round(unidadesEnCarrito * 100) / 100} unid.`}
+                      {summaryExpanded ? <ChevronDown style={{ width: 14, height: 14 }} /> : <ChevronUp style={{ width: 14, height: 14 }} />}
+                    </p>
+                    <p style={{ fontSize: 20, fontWeight: 700, color: IOS.texto, letterSpacing: -0.3 }}>
+                      {formatCLP(calculateTotal())}
+                    </p>
+                  </button>
+                  {summaryExpanded ? (
+                    <button
+                      type="button"
+                      onClick={() => { handleConfirmOrder().catch(() => { /* el error ya se avisó */ }); }}
+                      disabled={isSubmitting}
+                      style={{
+                        height: 50, padding: '0 22px', borderRadius: 14, border: 'none', cursor: isSubmitting ? 'default' : 'pointer',
+                        background: IOS.azul, color: '#fff', fontSize: 17, fontWeight: 600, opacity: isSubmitting ? 0.6 : 1,
+                        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+                      }}
+                    >
+                      {isSubmitting ? <Loader2 className="animate-spin" style={{ width: 18, height: 18 }} /> : null}
+                      {isSubmitting ? 'Enviando…' : 'Confirmar pedido'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSummaryExpanded(true)}
+                      style={{
+                        height: 50, padding: '0 22px', borderRadius: 14, border: 'none', cursor: 'pointer',
+                        background: IOS.azul, color: '#fff', fontSize: 17, fontWeight: 600, flexShrink: 0,
+                      }}
+                    >
+                      Revisar pedido
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>,
           document.body
         )}
       </div>
