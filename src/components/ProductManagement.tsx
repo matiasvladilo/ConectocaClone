@@ -26,10 +26,10 @@ import {
   AlertTriangle,
   Filter,
   Barcode,
-  Camera
+  Camera,
+  ChevronsUpDown
 } from 'lucide-react';
 import { toast } from 'sonner';
-import logo from '../assets/logo-icon.png';
 import { formatCLP, parseCLP, formatCLPInput } from '../utils/format';
 import { agruparPorPadre, idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { ImageUpload } from './ImageUpload';
@@ -71,6 +71,22 @@ const emptyForm: ProductFormData = {
   productionAreaId: '',
   unlimitedStock: false,
   allowDecimal: false
+};
+
+const IOS_PM = {
+  fondo: '#F2F2F7',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+};
+
+const botonRedondoPM: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
 };
 
 export function ProductManagement({ accessToken, onBack, onManageCategories }: ProductManagementProps) {
@@ -515,10 +531,14 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
     ? products
     : products.filter(p => !!p.categoryId && idsDelFiltro.has(p.categoryId));
 
+  // Bajo = sobre 0 pero en o bajo su mínimo (10 si no tiene uno cargado, igual
+  // que Distribuidora). Antes era `stock < 10` fijo e incluía los agotados, así
+  // que un producto sin stock contaba dos veces.
+  const conStock = (p: Product) => !p.unlimitedStock && p.stock !== -1;
   const stats = {
     total: productosDeLaCategoria.length,
-    lowStock: productosDeLaCategoria.filter(p => !p.unlimitedStock && p.stock !== -1 && p.stock < 10).length,
-    outOfStock: productosDeLaCategoria.filter(p => !p.unlimitedStock && p.stock === 0).length,
+    lowStock: productosDeLaCategoria.filter(p => conStock(p) && p.stock > 0 && p.stock <= (p.minStock ?? 10)).length,
+    outOfStock: productosDeLaCategoria.filter(p => conStock(p) && p.stock <= 0).length,
     totalValue: productosDeLaCategoria.reduce((sum, p) => sum + (p.price * (p.unlimitedStock || p.stock === -1 ? 0 : p.stock)), 0)
   };
 
@@ -536,455 +556,189 @@ export function ProductManagement({ accessToken, onBack, onManageCategories }: P
   );
 
   return (
-    <div
-      className="min-h-screen relative overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
-    >
-      {/* Decorative background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-        <motion.div
-          className="absolute bottom-0 left-0 w-96 h-96 bg-yellow-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1.2, 1, 1.2],
-            opacity: [0.2, 0.4, 0.2]
-          }}
-          transition={{ duration: 10, repeat: Infinity }}
-        />
-      </div>
-
-      {/* Header */}
-      <div
-        className="relative z-10 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
-        }}
-      >
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-4">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1, x: -4 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-11 h-11 flex items-center justify-center rounded-full"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <ArrowLeft className="w-5 h-5 text-white" />
-              </motion.button>
-
-              <div className="flex items-center gap-3">
-                <motion.div
-                  whileHover={{ rotate: [0, -10, 10, -10, 0] }}
-                  transition={{ duration: 0.5 }}
-                >
-                  <img
-                    src={logo}
-                    alt="La Oca Logo"
-                    className="w-12 h-12 object-contain relative z-10"
-                    style={{ imageRendering: 'crisp-edges' }}
-                  />
-                </motion.div>
-                <div>
-                  <h1 className="text-white tracking-wide flex items-center gap-2" style={{ fontSize: '24px', fontWeight: 600 }}>
-                    <Package className="w-6 h-6" />
-                    Gestión de Productos
-                  </h1>
-                  <p className="text-blue-100 text-sm">
-                    Administra el catálogo de productos
-                  </p>
-                </div>
-              </div>
+    <div className="min-h-screen" style={{ background: IOS_PM.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" style={botonRedondoPM}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Productos</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                {loading ? 'Cargando catálogo…' : `${products.length} en el catálogo`}
+              </p>
             </div>
-
-            <div className="grid grid-cols-2 sm:flex gap-2 w-full md:w-auto mt-2 md:mt-0">
-              <motion.button
-                onClick={onManageCategories}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-full px-2 sm:px-4 py-2.5 rounded-xl flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.3)',
-                  color: 'white'
-                }}
-              >
-                <Folder className="w-4 h-4 shrink-0" />
-                <span className="truncate">Categorías</span>
-              </motion.button>
-
-              <motion.button
-                onClick={() => handleOpenDialog()}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-full px-2 sm:px-4 py-2.5 rounded-xl flex items-center justify-center gap-1 sm:gap-2 shadow-lg text-xs sm:text-sm font-semibold"
-                style={{
-                  background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
-                  color: '#0047BA'
-                }}
-              >
-                <Plus className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                <span className="truncate">Nuevo Producto</span>
-              </motion.button>
-            </div>
+            <button type="button" onClick={onManageCategories} aria-label="Categorías" style={botonRedondoPM}>
+              <Folder style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
+            <button type="button" onClick={() => handleOpenDialog()} aria-label="Nuevo producto" style={{ ...botonRedondoPM, background: '#fff' }}>
+              <Plus style={{ width: 20, height: 20, color: '#0047BA' }} />
+            </button>
           </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
+          <div style={{ position: 'relative', marginTop: 12 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'rgba(255,255,255,0.75)' }} />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por nombre o SKU"
+              className="buscador-sobre-azul"
+              style={{ width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 16, padding: '0 40px 0 34px' }}
+            />
+            <button
+              type="button"
+              onClick={() => setSearchScannerOpen(true)}
+              aria-label="Buscar escaneando un código de barras"
+              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <div className="flex items-center gap-2 mb-1">
-                <Package className="w-4 h-4 text-blue-100" />
-                <span className="text-xs text-blue-100">Total Productos</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.total}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(255, 212, 59, 0.2)',
-                border: '1px solid rgba(255, 212, 59, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <BoxIcon className="w-4 h-4 text-yellow-200" />
-                <span className="text-xs text-yellow-100">Stock Bajo</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.lowStock}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(239, 68, 68, 0.2)',
-                border: '1px solid rgba(239, 68, 68, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Trash2 className="w-4 h-4 text-red-200" />
-                <span className="text-xs text-red-100">Sin Stock</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-                {stats.outOfStock}
-              </p>
-            </motion.div>
-
-            <motion.div
-              className="p-4 rounded-xl backdrop-blur-md"
-              style={{
-                background: 'rgba(16, 185, 129, 0.2)',
-                border: '1px solid rgba(16, 185, 129, 0.3)'
-              }}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.25 }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-green-200" />
-                <span className="text-xs text-green-100">Valor Total</span>
-              </div>
-              <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
-                {formatCLP(stats.totalValue)}
-              </p>
-            </motion.div>
+              <Camera style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5 relative z-10">
-        {/* Search */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <Card
-            className="border-2 shadow-lg"
-            style={{ borderRadius: '16px', borderColor: '#E0EDFF' }}
-          >
-            <CardContent className="p-4 flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  placeholder="Buscar por nombre, SKU, descripción o categoría..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-11 pr-11 h-11 bg-white border-[#CBD5E1]"
-                  style={{ borderRadius: '10px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setSearchScannerOpen(true)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-[#2563EB] hover:bg-blue-50 transition-colors"
-                  aria-label="Buscar escaneando un código de barras"
-                >
-                  <Camera className="w-5 h-5" />
-                </button>
+      <div className="max-w-7xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Resumen de la categoría elegida + selector de categoría. Los números
+            siguen al filtro de categoría (no al buscador), como antes. */}
+        <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '12px 0' }}>
+            {[
+              { titulo: 'Productos', valor: stats.total, color: IOS_PM.texto },
+              { titulo: 'Stock bajo', valor: stats.lowStock, color: stats.lowStock ? '#C93400' : IOS_PM.texto },
+              { titulo: 'Sin stock', valor: stats.outOfStock, color: stats.outOfStock ? IOS_PM.rojo : IOS_PM.texto },
+            ].map((m, i) => (
+              <div key={m.titulo} style={{ textAlign: 'center', borderLeft: i ? `0.5px solid ${IOS_PM.separador}` : undefined }}>
+                <p style={{ fontSize: 22, fontWeight: 700, color: m.color, fontVariantNumeric: 'tabular-nums' }}>{loading ? '—' : m.valor}</p>
+                <p style={{ fontSize: 12, color: IOS_PM.secundario }}>{m.titulo}</p>
               </div>
-              {/* `sm:w-auto` y `sm:shrink-0` no existen en el CSS precompilado
-                  (verificado: 0 matches), así que no se puede alternar el ancho
-                  por breakpoint con clases ni con `style` (los estilos inline de
-                  React no soportan media queries). En su lugar se usa el
-                  comportamiento por defecto del flex: el contenedor no fija
-                  "align-items", así que su valor inicial "stretch" ya estira
-                  este div a lo ancho completo cuando el layout es columna
-                  (celular, "flex-col") y "shrink-0" evita que se comprima
-                  cuando el layout es fila (escritorio, "sm:flex-row") — el
-                  mismo resultado que buscaba "w-full sm:w-auto sm:shrink-0". */}
-              <div className="shrink-0">
-                <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
-                  {/* El ancho va inline y no por `w-[...]`: las clases de valor
-                      arbitrario no existen en el CSS precompilado de este proyecto.
-                      Las que había acá antes (w-[130px] sm:w-[180px]) no hacían nada. */}
-                  <SelectTrigger
-                    className="h-11 bg-white border-[#CBD5E1] w-full"
-                    style={{ borderRadius: '10px', minWidth: '190px' }}
-                  >
-                    <div className="flex items-center gap-2 text-gray-600 overflow-hidden">
-                      <Filter className="w-4 h-4 shrink-0" />
-                      {/* "Categoría" no se trunca nunca: es lo que le dice al
-                          usuario qué hace este control. Se trunca solo el valor. */}
-                      <span className="font-medium text-sm shrink-0">Categoría</span>
-                      <span className="text-sm truncate">· {nombreDelFiltro}</span>
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas las categorías</SelectItem>
-                    {agruparPorPadre(categories).map(({ categoria, hijas }) => (
-                      <SelectGroup key={categoria.id}>
-                        <SelectItem value={categoria.id}>{categoria.name}</SelectItem>
-                        {hijas.map((hija) => (
-                          <SelectItem key={hija.id} value={hija.id} style={{ paddingLeft: '2.25rem' }}>
-                            {hija.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+            ))}
+          </div>
+          <div style={{ height: 0.5, background: IOS_PM.separador, marginLeft: 16 }} />
+          <label className="fila-ios" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, minHeight: 46, padding: '0 16px', cursor: 'pointer' }}>
+            <span style={{ fontSize: 16, color: IOS_PM.texto }}>Categoría</span>
+            <span className="truncate" style={{ flex: 1, textAlign: 'right', fontSize: 15, color: IOS_PM.secundario }}>{nombreDelFiltro}</span>
+            <ChevronsUpDown style={{ width: 15, height: 15, color: IOS_PM.secundario, flexShrink: 0 }} />
+            <select
+              value={selectedCategoryFilter}
+              onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+              aria-label="Categoría"
+              style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 16 }}
+            >
+              <option value="all">Todas las categorías</option>
+              {agruparPorPadre(categories).map(({ categoria, hijas }) => (
+                <optgroup key={categoria.id} label={categoria.name}>
+                  <option value={categoria.id}>{categoria.name} (todo)</option>
+                  {hijas.map((hija) => <option key={hija.id} value={hija.id}>{hija.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <div style={{ height: 0.5, background: IOS_PM.separador, marginLeft: 16 }} />
+          <div style={{ display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 16px' }}>
+            <span style={{ flex: 1, fontSize: 16, color: IOS_PM.texto }}>Valor en stock</span>
+            <span style={{ fontSize: 15, color: IOS_PM.secundario, fontVariantNumeric: 'tabular-nums' }}>{loading ? '—' : formatCLP(stats.totalValue)}</span>
+          </div>
+        </div>
 
-        {/* Products Grid */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="text-center">
-              <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-gray-600">Cargando productos...</p>
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+            <div className="animate-spin" style={{ width: 24, height: 24, borderRadius: 12, border: '2.5px solid #C7C7CC', borderTopColor: 'transparent' }} />
           </div>
         ) : filteredProducts.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card
-              className="border-2 border-dashed"
-              style={{ borderRadius: '16px', borderColor: '#CBD5E1' }}
-            >
-              <CardContent className="p-16 text-center">
-                <div
-                  className="w-20 h-20 mx-auto mb-5 rounded-full flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)' }}
-                >
-                  <Package className="w-10 h-10 text-blue-300" />
-                </div>
-                <p className="text-gray-600 mb-2" style={{ fontSize: '16px', fontWeight: 500 }}>
-                  {hayFiltroActivo ? 'No se encontraron productos' : 'No hay productos aún'}
-                </p>
-                <p className="text-gray-400 text-sm mb-4">
-                  {hayFiltroActivo ? 'Intenta con otra búsqueda o categoría' : 'Crea tu primer producto para comenzar'}
-                </p>
-                {!hayFiltroActivo && (
-                  <Button
-                    onClick={() => handleOpenDialog()}
-                    className="mt-2"
-                    style={{
-                      background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)',
-                      color: 'white'
-                    }}
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Crear Producto
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
+          <div style={{ background: '#fff', borderRadius: 12, padding: '40px 16px', textAlign: 'center' }}>
+            <Package style={{ width: 36, height: 36, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 16, fontWeight: 600, color: IOS_PM.texto }}>
+              {hayFiltroActivo ? 'No se encontraron productos' : 'No hay productos aún'}
+            </p>
+            <p style={{ fontSize: 14, color: IOS_PM.secundario, marginTop: 2 }}>
+              {hayFiltroActivo ? 'Prueba con otra búsqueda o categoría' : 'Crea tu primer producto para comenzar'}
+            </p>
+            {!hayFiltroActivo && (
+              <button type="button" onClick={() => handleOpenDialog()} style={{ marginTop: 14, height: 40, padding: '0 18px', borderRadius: 10, border: 'none', background: IOS_PM.azul, color: '#fff', fontSize: 15, fontWeight: 600 }}>
+                Crear producto
+              </button>
+            )}
+          </div>
         ) : (
           <>
-          {/* Estilo local para el desktop grande: subir tamaño de imagen/texto y mostrar
-              el botón de Stock solo desde 1024px necesita reglas @media que Tailwind no
-              tiene precompiladas acá (ver nota más abajo sobre clases arbitrarias que no
-              existen). Estas propiedades quedan TODAS acá adentro (no en `style` inline
-              del elemento): un `style` inline le gana en especificidad a cualquier clase
-              externa, así que si la altura o el tamaño de fuente quedaran mitad en
-              `style` y mitad acá, la regla de acá nunca se aplicaría. */}
-          <style>{`
-            .tarjeta-producto-img { height: 112px; }
-            .tarjeta-producto-nombre { font-size: 12px; font-weight: 600; min-height: 30px; }
-            .tarjeta-producto-precio { font-size: 13px; font-weight: 700; }
-            .tarjeta-producto-stock-btn { display: none; }
-            @media (min-width: 1024px) {
-              .tarjeta-producto-img { height: 220px; }
-              .tarjeta-producto-nombre { font-size: 15px; min-height: 38px; }
-              .tarjeta-producto-precio { font-size: 18px; }
-              .tarjeta-producto-stock-btn { display: inline-flex; }
-            }
-          `}</style>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
-            {filteredProducts.map((product, index) => {
-              const esIlimitado = product.unlimitedStock || product.stock === -1;
-              const colorEstado = esIlimitado ? '#6B7280'
-                : product.stock === 0 ? '#EF4444'
-                : product.stock < 10 ? '#F59E0B'
-                : '#10B981';
-
-              return (
-                <motion.div
-                  key={product.id}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  // El delay se acota: con 249 productos, escalonar cada uno
-                  // dejaría los últimos apareciendo más de 10 segundos después.
-                  transition={{ delay: Math.min(index * 0.02, 0.4) }}
-                >
-                  {/* Todo el cuadrado abre la ficha de solo lectura: los tres botones
-                      que había antes no entran en ~150px de ancho, así que Editar,
-                      Ajustar Stock y Eliminar viven ahora dentro de esa ficha. */}
-                  {/* La tarjeta reemplazó a tres botones (Editar/Ajustar Stock/Eliminar)
-                      que eran focuseables por naturaleza. Como ahora es la ÚNICA forma
-                      de llegar a esas acciones, necesita comportarse como un botón real
-                      para teclado y lectores de pantalla: rol, foco y activación con
-                      Enter/Espacio (el div no los da gratis). */}
-                  <Card
-                    onClick={() => setDetalleProduct(product)}
+            <p style={{ fontSize: 13, color: IOS_PM.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px' }}>
+              {filteredProducts.length === products.length ? `${filteredProducts.length} productos` : `${filteredProducts.length} de ${products.length} productos`}
+            </p>
+            {/* Desde 1024px la imagen y el texto crecen y aparece el botón de
+                Stock: necesita @media, que el Tailwind precompilado no trae. */}
+            <style>{`
+              .tarjeta-producto-img { height: 120px; }
+              .tarjeta-producto-stock-btn { display: none; }
+              @media (min-width: 1024px) {
+                .tarjeta-producto-img { height: 200px; }
+                .tarjeta-producto-stock-btn { display: flex; }
+              }
+            `}</style>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4" style={{ gap: 10 }}>
+              {filteredProducts.map((product) => {
+                const esIlimitado = product.unlimitedStock || product.stock === -1;
+                const minimo = product.minStock ?? 10;
+                const estado = esIlimitado ? 'ilimitado' : product.stock <= 0 ? 'agotado' : product.stock <= minimo ? 'bajo' : 'ok';
+                const colorEstado = estado === 'agotado' ? IOS_PM.rojo : estado === 'bajo' ? '#FF9500' : estado === 'ok' ? '#34C759' : IOS_PM.secundario;
+                const textoStock = esIlimitado ? 'Sin límite' : product.stock <= 0 ? 'Sin stock' : `${product.stock.toLocaleString('es-CL', { maximumFractionDigits: 2 })} en stock`;
+                return (
+                  // Toda la tarjeta abre la ficha (editar, ajustar stock y archivar
+                  // viven ahí). Botón real para teclado y lectores de pantalla.
+                  <div
+                    key={product.id}
                     role="button"
                     tabIndex={0}
+                    onClick={() => setDetalleProduct(product)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         setDetalleProduct(product);
                       }
                     }}
-                    className="border-2 hover:shadow-lg transition-all cursor-pointer h-full overflow-hidden"
-                    style={{
-                      borderRadius: '12px',
-                      borderTopWidth: '3px',
-                      borderTopColor: colorEstado,
-                      borderLeftColor: '#E0EDFF',
-                      borderRightColor: '#E0EDFF',
-                      borderBottomColor: '#E0EDFF'
-                    }}
+                    className="fila-ios"
+                    style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
                   >
-                    <CardContent className="p-2">
-                      {/* Altura fija y no `aspect-square`: esa clase NO existe en el
-                          CSS precompilado de este proyecto y no haría nada. */}
-                      {/* El fondo va inline: `bg-gray-100/50` (la que usaba la
-                          tarjeta vieja) NO existe en el CSS y nunca se aplicó. */}
-                      <div
-                        className="tarjeta-producto-img w-full rounded-lg mb-1 overflow-hidden flex items-center justify-center"
-                        style={{ background: 'rgba(243, 244, 246, 0.5)' }}
-                      >
-                        {product.imageUrl ? (
-                          <img
-                            src={product.imageUrl}
-                            alt={product.name}
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <Package className="w-8 h-8 text-blue-300" />
-                        )}
-                      </div>
-
-                      <h3 className="tarjeta-producto-nombre text-[#0047BA] line-clamp-2 leading-tight mb-1">
+                    <div className="tarjeta-producto-img" style={{ width: '100%', background: '#F7F7F9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {product.imageUrl ? (
+                        <img src={product.imageUrl} alt={product.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      ) : (
+                        <Package style={{ width: 30, height: 30, color: '#C7C7CC' }} />
+                      )}
+                    </div>
+                    <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: IOS_PM.texto, lineHeight: 1.25, minHeight: 32, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {product.name}
-                      </h3>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="tarjeta-producto-precio text-[#0047BA]">
-                          {formatCLP(product.price)}
-                        </span>
-                        {/* La etiqueta "Stock" va separada del número y en gris: sin ella,
-                            un número de 10px pelado no se leía como stock a simple vista.
-                            El número sube a text-xs (12px) para que se note más.
-                            No se muestra la etiqueta cuando el texto ya es "Sin stock":
-                            la palabra "stock" ya está ahí, y "Stock Sin stock" se lee mal. */}
-                        <span className="flex items-center gap-1 shrink-0 whitespace-nowrap">
-                          {!(!esIlimitado && product.stock === 0) && (
-                            <span className="text-[10px] text-gray-500">Stock</span>
-                          )}
-                          <span
-                            className="text-xs font-medium truncate"
-                            style={{ color: colorEstado }}
-                          >
-                            {esIlimitado ? '∞' : product.stock === 0 ? 'Sin stock' : product.stock}
-                          </span>
-                        </span>
-                      </div>
-
-                      {/* Solo visible desde 1024px (ver .tarjeta-producto-stock-btn más
-                          arriba): en celular el cuadrado sigue chico a propósito, y
-                          Ajustar Stock ya está a un toque de distancia dentro de la
-                          ficha de solo lectura (ver ProductDetailDialog).
-                          `stopPropagation` es obligatorio: el botón vive adentro de la
-                          tarjeta clickeable que abre esa ficha, y sin esto un click acá
-                          abriría los dos diálogos a la vez. */}
+                      </p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: IOS_PM.texto, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatCLP(product.price)}
+                      </p>
+                      <p style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: estado === 'agotado' ? IOS_PM.rojo : IOS_PM.secundario, marginTop: 2 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: 3, background: colorEstado, flexShrink: 0 }} />
+                        {textoStock}
+                      </p>
                       {!esIlimitado && (
                         <button
                           type="button"
                           onClick={(e) => {
+                            // Sin esto el click también abriría la ficha.
                             e.stopPropagation();
                             setStockProduct(product);
                           }}
-                          className="tarjeta-producto-stock-btn w-full items-center justify-center gap-1 mt-2 py-1 rounded-md border-[#0059FF] text-[#0059FF] hover:bg-blue-50 text-xs"
+                          className="tarjeta-producto-stock-btn"
+                          style={{ marginTop: 8, height: 30, borderRadius: 8, border: 'none', background: IOS_PM.relleno, color: IOS_PM.azul, fontSize: 13, fontWeight: 600, alignItems: 'center', justifyContent: 'center', gap: 6 }}
                         >
-                          <BoxIcon className="w-4 h-4" />
-                          Stock
+                          <BoxIcon style={{ width: 15, height: 15 }} />
+                          Ajustar stock
                         </button>
                       )}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
       </div>
