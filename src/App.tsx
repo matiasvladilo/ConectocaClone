@@ -25,6 +25,7 @@ import { AudioInitializer } from "./components/AudioInitializer";
 import { Toaster } from "./components/ui/sonner";
 import { createClient, setRememberSession } from "./utils/supabase/client";
 import { registerServiceWorker } from "./utils/registerServiceWorker";
+import { mapApiOrder } from "./utils/mapApiOrder";
 import {
   authAPI,
   ordersAPI,
@@ -835,50 +836,7 @@ export default function App() {
       setOrdersPagination(response.pagination);
 
       // Transform API orders to app format
-      const transformedOrders: Order[] = response.data.map(
-        (order: APIOrder) => {
-          const products = order.products || [];
-          // Resolve creation date: prefer createdAt, fallback to MongoDB ObjectId timestamp
-          let resolvedCreatedAt: string | undefined;
-          if (order.createdAt) {
-            const d = new Date(order.createdAt);
-            if (!isNaN(d.getTime())) resolvedCreatedAt = order.createdAt;
-          }
-          if (!resolvedCreatedAt && order.id && /^[0-9a-f]{24}$/i.test(order.id)) {
-            const ts = parseInt(order.id.slice(0, 8), 16) * 1000;
-            resolvedCreatedAt = new Date(ts).toISOString();
-          }
-          const safeDate = resolvedCreatedAt
-            ? new Date(resolvedCreatedAt).toISOString().split("T")[0]
-            : new Date().toISOString().split("T")[0];
-
-          return {
-            id: order.id || crypto.randomUUID(),
-            productName: products
-              .map((p) => p.name || 'Producto')
-              .join(", ") || 'Sin productos',
-            quantity: products.reduce(
-              (sum, p) => sum + (p.quantity || 0),
-              0,
-            ),
-            date: safeDate,
-            status: (order.status === 'entregado' ? 'delivered' :
-              order.status === 'despachado' ? 'dispatched' :
-                order.status || 'pending') as OrderStatus,
-            customerName: order.customerName || "",
-            deadline: order.deadline ? order.deadline.slice(0, 10) : safeDate,
-            progress: order.progress || 0,
-            products: products,
-            total: order.total || 0,
-            deliveryAddress:
-              order.deliveryAddress || "Sin dirección registrada",
-            userId: order.userId || '',
-            createdAt: resolvedCreatedAt,
-            notes: order.notes,
-            itemStatuses: order.itemStatuses || {},
-          };
-        }
-      );
+      const transformedOrders: Order[] = response.data.map(mapApiOrder);
       // Note: Sorting is now handled by backend
 
       // Check for new orders BEFORE checking if orders changed (for notifications)
