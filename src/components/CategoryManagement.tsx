@@ -1,27 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Category, categoriesAPI } from '../utils/api';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
-import { Label } from './ui/label';
-import { Badge } from './ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { motion } from 'motion/react';
-import {
-  ArrowLeft,
-  Plus,
-  Tag,
-  Edit,
-  Trash2,
-  Folder,
-  Sparkles,
-  Palette
-} from 'lucide-react';
+import { ArrowLeft, Plus, Tag, Folder, Check, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
-import logo from '../assets/logo-icon.png';
 import { agruparPorPadre, posiblesPadres, puedeTenerPadre } from '../utils/categoryTree';
 
 interface CategoryManagementProps {
@@ -145,6 +127,7 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
       await categoriesAPI.delete(accessToken, isDeleting.id);
       toast.success('Categoría eliminada exitosamente');
       setIsDeleting(null);
+      handleCloseDialog();
       loadCategories();
     } catch (error: any) {
       console.error('Error deleting category:', error);
@@ -152,278 +135,233 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
     }
   };
 
+  const separador = (sangria: number) => <div style={{ height: 0.5, background: IOS_C.separador, marginLeft: sangria }} />;
+
+  const filaCategoria = (c: Category, hija: boolean) => (
+    <button
+      type="button"
+      onClick={() => handleOpenDialog(c)}
+      className="fila-ios"
+      style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: hija ? 44 : 54, padding: hija ? '6px 16px 6px 52px' : '8px 16px', textAlign: 'left', border: 'none' }}
+    >
+      {hija ? (
+        <span style={{ width: 10, height: 10, borderRadius: 5, background: c.color || IOS_C.secundario, flexShrink: 0 }} />
+      ) : (
+        <span style={{ width: 30, height: 30, borderRadius: 8, background: c.color || '#0047BA', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Tag style={{ width: 16, height: 16, color: '#fff' }} />
+        </span>
+      )}
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span className="truncate" style={{ display: 'block', fontSize: hija ? 15 : 16, color: IOS_C.texto }}>{c.name}</span>
+        {!hija && c.description && (
+          <span className="truncate" style={{ display: 'block', fontSize: 12, color: IOS_C.secundario }}>{c.description}</span>
+        )}
+      </span>
+      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC', flexShrink: 0 }} />
+    </button>
+  );
+
+  const grupos = agruparPorPadre(categories);
+  const puedePadre = puedeTenerPadre(categories, editingCategory?.id);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-yellow-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button
-                onClick={onBack}
-                variant="ghost"
-                size="sm"
-                className="gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                Volver
-              </Button>
-              <div className="flex items-center gap-3">
-                <img src={logo} alt="La Oca" className="w-10 h-10" />
-                <div>
-                  <h1 className="text-gray-900">Gestión de Categorías</h1>
-                  <p className="text-xs text-gray-500">Organiza tus productos por categoría</p>
-                </div>
-              </div>
-            </div>
-            <Button
-              onClick={() => handleOpenDialog()}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Nueva Categoría
-            </Button>
+    <div className="min-h-screen" style={{ background: IOS_C.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button type="button" onClick={onBack} aria-label="Volver" style={botonRedondoC}>
+            <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Categorías</h1>
+            <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+              {loading ? 'Cargando…' : `${grupos.length} principales · ${categories.length - grupos.length} subcategorías`}
+            </p>
           </div>
+          <button type="button" onClick={() => handleOpenDialog()} aria-label="Nueva categoría" style={{ ...botonRedondoC, background: '#fff' }}>
+            <Plus style={{ width: 20, height: 20, color: '#0047BA' }} />
+          </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-3xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Card key={i} className="animate-pulse">
-                <CardContent className="p-6">
-                  <div className="h-20 bg-gray-200 rounded"></div>
-                </CardContent>
-              </Card>
-            ))}
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+            <div className="animate-spin" style={{ width: 24, height: 24, borderRadius: 12, border: '2.5px solid #C7C7CC', borderTopColor: 'transparent' }} />
           </div>
         ) : categories.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center py-16"
-          >
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-blue-100 mb-4">
-              <Folder className="w-10 h-10 text-blue-600" />
-            </div>
-            <h3 className="text-gray-900 mb-2">No hay categorías</h3>
-            <p className="text-gray-500 mb-6 max-w-md mx-auto">
-              Crea tu primera categoría para organizar tus productos
-            </p>
-            <Button
-              onClick={() => handleOpenDialog()}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Crear Categoría
-            </Button>
-          </motion.div>
-        ) : (
-          <div className="space-y-6">
-            {agruparPorPadre(categories).map(({ categoria, hijas }) => (
-              <div key={categoria.id}>
-                <Card className="hover:shadow-lg transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div
-                        className="w-12 h-12 rounded-lg flex items-center justify-center"
-                        style={{ backgroundColor: `${categoria.color}20` }}
-                      >
-                        <Tag className="w-6 h-6" style={{ color: categoria.color }} />
-                      </div>
-                      <div>
-                        <h3 className="text-gray-900">{categoria.name}</h3>
-                        {categoria.description && (
-                          <p className="text-xs text-gray-500 mt-1">{categoria.description}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button onClick={() => handleOpenDialog(categoria)} variant="outline" size="sm" className="flex-1 gap-2">
-                        <Edit className="w-3 h-3" />
-                        Editar
-                      </Button>
-                      <Button
-                        onClick={() => setIsDeleting(categoria)}
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Eliminar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* OJO: la indentación va por estilo inline. `pl-6`/`ml-4` NO existen
-                    en el CSS precompilado de este proyecto y no harían nada. */}
-                {hijas.length > 0 && (
-                  <div className="mt-2 space-y-2" style={{ paddingLeft: '2rem' }}>
-                    {hijas.map((hija) => (
-                      <Card key={hija.id}>
-                        <CardContent className="p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <Tag className="w-4 h-4" style={{ color: hija.color }} />
-                              <span className="text-sm text-gray-900">{hija.name}</span>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button onClick={() => handleOpenDialog(hija)} variant="outline" size="sm">
-                                <Edit className="w-3 h-3" />
-                              </Button>
-                              <Button
-                                onClick={() => setIsDeleting(hija)}
-                                variant="outline"
-                                size="sm"
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+          <div style={{ background: '#fff', borderRadius: 12, padding: '40px 16px', textAlign: 'center' }}>
+            <Folder style={{ width: 36, height: 36, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 16, fontWeight: 600, color: IOS_C.texto }}>No hay categorías</p>
+            <p style={{ fontSize: 14, color: IOS_C.secundario, marginTop: 2 }}>Crea la primera para organizar tus productos</p>
+            <button type="button" onClick={() => handleOpenDialog()} style={{ marginTop: 14, height: 40, padding: '0 18px', borderRadius: 10, border: 'none', background: IOS_C.azul, color: '#fff', fontSize: 15, fontWeight: 600 }}>
+              Crear categoría
+            </button>
           </div>
+        ) : (
+          <>
+            {grupos.map(({ categoria, hijas }) => (
+              <section key={categoria.id} style={{ marginBottom: 20 }}>
+                <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+                  {filaCategoria(categoria, false)}
+                  {hijas.map((h) => (
+                    <div key={h.id}>
+                      {separador(52)}
+                      {filaCategoria(h, true)}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+            <p style={{ fontSize: 13, color: IOS_C.secundario, padding: '0 16px', lineHeight: 1.35 }}>
+              Toca una categoría para editarla. Para crear una subcategoría, elige su categoría padre al crearla.
+            </p>
+          </>
         )}
       </div>
 
-      {/* Create/Edit Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-blue-600" />
-                {editingCategory ? 'Editar Categoría' : 'Nueva Categoría'}
+      {/* Crear / editar: hoja iOS (Cancelar / título / Guardar arriba) */}
+      <Dialog open={isDialogOpen} onOpenChange={(abierto) => { if (!abierto) handleCloseDialog(); }}>
+        <DialogContent
+          className="hoja-ios"
+          style={{
+            top: 'auto', bottom: 0, left: 0, right: 0, translate: 'none', margin: '0 auto',
+            width: '100%', maxWidth: 640, maxHeight: '92dvh', padding: 0, gap: 0, border: 'none',
+            borderRadius: '14px 14px 0 0', background: IOS_C.fondo, display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '14px 16px 10px', gap: 8 }}>
+              <button type="button" onClick={handleCloseDialog} disabled={submitting} style={{ ...textoBotonC, flex: 1, textAlign: 'left' }}>Cancelar</button>
+              <DialogTitle className="truncate" style={{ flex: 2, textAlign: 'center', fontSize: 17, fontWeight: 600, color: IOS_C.texto }}>
+                {editingCategory ? 'Editar categoría' : 'Nueva categoría'}
               </DialogTitle>
-              <DialogDescription>
-                {editingCategory
-                  ? 'Actualiza la información de la categoría'
-                  : 'Crea una nueva categoría para organizar tus productos'}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 py-4">
-              <div>
-                <Label htmlFor="name">Nombre *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ej: Electrónica"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="description">Descripción</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Describe esta categoría..."
-                  rows={3}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="parentId">Categoría padre</Label>
-                <Select
-                  value={formData.parentId || 'none'}
-                  onValueChange={(value: string) =>
-                    setFormData({ ...formData, parentId: value === 'none' ? '' : value })
-                  }
-                  disabled={!puedeTenerPadre(categories, editingCategory?.id)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Ninguna (categoría principal)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Ninguna (categoría principal)</SelectItem>
-                    {posiblesPadres(categories, editingCategory?.id).map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500 mt-1">
-                  {!puedeTenerPadre(categories, editingCategory?.id)
-                    ? 'Esta categoría ya tiene subcategorías, así que no puede ser subcategoría de otra.'
-                    : 'Elegí una categoría padre para convertirla en subcategoría (ej: Distribuidora → Bebidas).'}
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="color">Color</Label>
-                <div className="grid grid-cols-4 gap-2 mt-2">
-                  {colorOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, color: option.value })}
-                      className={`
-                        h-12 rounded-lg border-2 transition-all flex items-center justify-center
-                        ${formData.color === option.value
-                          ? 'border-gray-900 ring-2 ring-offset-2 ring-gray-900'
-                          : 'border-gray-200 hover:border-gray-300'
-                        }
-                      `}
-                      style={{ backgroundColor: option.value }}
-                      title={option.label}
-                    >
-                      {formData.color === option.value && (
-                        <Palette className="w-5 h-5 text-white drop-shadow" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <button type="submit" disabled={submitting} style={{ ...textoBotonC, flex: 1, textAlign: 'right', fontWeight: 600 }}>
+                {submitting ? 'Guardando' : editingCategory ? 'Guardar' : 'Crear'}
+              </button>
             </div>
+            <DialogDescription className="sr-only">
+              {editingCategory ? 'Actualiza la información de la categoría' : 'Crea una nueva categoría para organizar tus productos'}
+            </DialogDescription>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCloseDialog}
-                disabled={submitting}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={submitting}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {submitting ? 'Guardando...' : editingCategory ? 'Actualizar' : 'Crear'}
-              </Button>
-            </DialogFooter>
+            <div style={{ overflowY: 'auto', padding: '6px 16px max(env(safe-area-inset-bottom), 24px)' }}>
+              {/* Vista previa + nombre */}
+              <section style={{ marginBottom: 22 }}>
+                <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', minHeight: 52 }}>
+                    <span style={{ width: 30, height: 30, borderRadius: 8, background: formData.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Tag style={{ width: 16, height: 16, color: '#fff' }} />
+                    </span>
+                    <input
+                      id="name"
+                      aria-label="Nombre"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="Nombre de la categoría"
+                      required
+                      autoFocus={!editingCategory}
+                      style={campoC}
+                    />
+                  </div>
+                  {separador(16)}
+                  <textarea
+                    id="description"
+                    aria-label="Descripción"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Descripción (opcional)"
+                    rows={2}
+                    style={{ display: 'block', width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '12px 16px', fontSize: 16, color: IOS_C.texto, background: 'transparent', fontFamily: 'inherit' }}
+                  />
+                </div>
+              </section>
+
+              {/* Padre */}
+              <section style={{ marginBottom: 22 }}>
+                <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+                  <label className={puedePadre ? 'fila-ios' : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '0 16px', cursor: puedePadre ? 'pointer' : 'default' }}>
+                    <span style={{ fontSize: 16, color: IOS_C.texto, flexShrink: 0 }}>Dentro de</span>
+                    <span className="truncate" style={{ flex: 1, textAlign: 'right', fontSize: 16, color: IOS_C.secundario }}>
+                      {formData.parentId ? (categories.find((c) => c.id === formData.parentId)?.name ?? '—') : 'Ninguna (principal)'}
+                    </span>
+                    {puedePadre && <ChevronsUpDown style={{ width: 15, height: 15, color: IOS_C.secundario, flexShrink: 0 }} />}
+                    <select
+                      value={formData.parentId || 'none'}
+                      onChange={(e) => setFormData({ ...formData, parentId: e.target.value === 'none' ? '' : e.target.value })}
+                      disabled={!puedePadre}
+                      aria-label="Categoría padre"
+                      style={{ position: 'absolute', inset: 0, opacity: 0, fontSize: 16 }}
+                    >
+                      <option value="none">Ninguna (principal)</option>
+                      {posiblesPadres(categories, editingCategory?.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p style={{ fontSize: 13, color: IOS_C.secundario, padding: '6px 16px 0', lineHeight: 1.35 }}>
+                  {!puedePadre
+                    ? 'Esta categoría ya tiene subcategorías, así que no puede ser subcategoría de otra.'
+                    : 'Elige una categoría padre para convertirla en subcategoría (ej.: Distribuidora → Bebidas).'}
+                </p>
+              </section>
+
+              {/* Color */}
+              <section style={{ marginBottom: 22 }}>
+                <h3 style={{ fontSize: 13, color: IOS_C.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>Color</h3>
+                <div style={{ background: '#fff', borderRadius: 12, padding: '14px 12px', display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6, justifyItems: 'center' }}>
+                  {colorOptions.map((o) => {
+                    const activo = formData.color === o.value;
+                    return (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, color: o.value })}
+                        aria-label={o.label}
+                        aria-pressed={activo}
+                        style={{
+                          width: 32, height: 32, borderRadius: 16, border: 'none', cursor: 'pointer', background: o.value,
+                          boxShadow: activo ? `0 0 0 2px #fff, 0 0 0 4px ${o.value}` : 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        {activo && <Check style={{ width: 16, height: 16, color: '#fff' }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {editingCategory && (
+                <section>
+                  <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleting(editingCategory)}
+                      disabled={submitting}
+                      className="fila-ios"
+                      style={{ width: '100%', minHeight: 48, border: 'none', color: IOS_C.rojo, fontSize: 16 }}
+                    >
+                      Eliminar categoría
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
+      {/* Confirmación de borrado */}
       <AlertDialog open={!!isDeleting} onOpenChange={() => setIsDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar categoría?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar "{isDeleting?.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción no se puede deshacer. La categoría "{isDeleting?.name}" será eliminada permanentemente.
-              {' '}No se puede eliminar si tiene productos asociados.
+              No se puede deshacer. Si la categoría tiene productos asociados, no se podrá eliminar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -432,3 +370,22 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
     </div>
   );
 }
+
+const IOS_C = {
+  fondo: '#F2F2F7',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+};
+
+const botonRedondoC: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+};
+
+const textoBotonC: React.CSSProperties = { background: 'none', border: 'none', padding: '6px 0', fontSize: 17, color: '#007AFF', cursor: 'pointer' };
+
+const campoC: React.CSSProperties = { flex: 1, minWidth: 0, height: 44, border: 'none', outline: 'none', background: 'transparent', fontSize: 16, color: '#000', padding: 0 };
