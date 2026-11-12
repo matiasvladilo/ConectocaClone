@@ -1,27 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
-import { Badge } from './ui/badge';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ArrowLeft,
-  TrendingUp,
-  Package,
+  RefreshCw,
   Package2,
+  Layers,
+  BookOpen,
+  ChevronRight,
+  ChevronDown,
   AlertTriangle,
   CheckCircle2,
-  BarChart3,
-  Calendar,
-  Clock,
-  Award,
-  AlertCircle,
-  ChevronRight,
-  ShoppingBag,
-  Layers,
-  Activity,
-  DollarSign
+  Loader2,
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { productsAPI, ingredientsAPI, ordersAPI, type Product, type Ingredient } from '../utils/api';
 import { formatCLP } from '../utils/format';
 
 interface ProductionDashboardProps {
@@ -33,50 +23,32 @@ interface ProductionDashboardProps {
   onNavigateToRecipes: () => void;
 }
 
-interface Product {
+interface OrderLite {
   id: string;
-  name: string;
-  description?: string;
-  stock: number;
-  price: number;
-  categoryId?: string;
-  categoryName?: string;
-}
-
-interface Ingredient {
-  id: string;
-  name: string;
-  unit: string;
-  currentStock: number;
-  minStock: number;
-  maxStock?: number;
-  costPerUnit?: number;
-}
-
-interface Order {
-  id: string;
-  products: Array<{
-    productId: string;
-    name: string;
-    quantity: number;
-    price: number;
-    producedQuantity?: number;
-    wasteQuantity?: number;
-  }>;
+  products?: Array<{ productId: string; name: string; quantity: number; price: number }>;
   status: string;
   createdAt: string;
+  deadline?: string;
   total: number;
 }
 
-interface ProductStats {
-  productId: string;
-  productName: string;
-  totalOrdered: number;
-  orderCount: number;
-  revenue: number;
-}
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  naranja: '#FF9500',
+  verde: '#34C759',
+};
 
-const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-6d979413`;
+// Cuántos pedidos recientes se miran para "Más pedidos" y los contadores.
+const PEDIDOS_RECIENTES = 100;
+
+const formatoCantidad = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(n || 0);
 
 export function ProductionDashboard({
   onBack,
@@ -84,788 +56,392 @@ export function ProductionDashboard({
   userName,
   onNavigateToOrders,
   onNavigateToIngredients,
-  onNavigateToRecipes
+  onNavigateToRecipes,
 }: ProductionDashboardProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OrderLite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refrescando, setRefrescando] = useState(false);
+  const [error, setError] = useState(false);
+  const [verAgotados, setVerAgotados] = useState(false);
+  const [verBajos, setVerBajos] = useState(false);
+
+  const cargar = useCallback(async () => {
+    setError(false);
+    // Antes se pedía /products sin límite y el servidor devolvía solo 20:
+    // las alertas de stock no veían el resto del catálogo.
+    const [p, i, o] = await Promise.allSettled([
+      productsAPI.getAll(accessToken),
+      ingredientsAPI.getAll(accessToken),
+      ordersAPI.getAll(accessToken, 1, PEDIDOS_RECIENTES),
+    ]);
+    if (p.status === 'fulfilled') setProducts(p.value);
+    if (i.status === 'fulfilled') setIngredients(i.value);
+    if (o.status === 'fulfilled') setOrders((o.value?.data || []) as unknown as OrderLite[]);
+    if (p.status === 'rejected' || i.status === 'rejected' || o.status === 'rejected') setError(true);
+  }, [accessToken]);
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    void cargar().finally(() => setLoading(false));
+  }, [cargar]);
 
-  const loadDashboardData = async () => {
-    setLoading(true);
-    try {
-      // Cargar productos, ingredientes y órdenes en paralelo
-      const [productsRes, ingredientsRes, ordersRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/products`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        }),
-        fetch(`${API_BASE_URL}/ingredients`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        }),
-        fetch(`${API_BASE_URL}/orders?page=1&limit=100`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        })
-      ]);
-
-      if (productsRes.ok) {
-        const productsData = await productsRes.json();
-        setProducts(productsData.data || []);
-      }
-
-      if (ingredientsRes.ok) {
-        const ingredientsData = await ingredientsRes.json();
-        setIngredients(ingredientsData.data || []);
-      }
-
-      if (ordersRes.ok) {
-        const ordersData = await ordersRes.json();
-        setOrders(ordersData.data || []);
-      }
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
+  const refrescar = async () => {
+    setRefrescando(true);
+    await cargar();
+    setRefrescando(false);
   };
 
-  // Calcular productos más pedidos
-  const topProducts = useMemo(() => {
-    const productMap = new Map<string, ProductStats>();
+  // Stock de productos: mismo criterio que Productos y Distribuidora (mínimo
+  // del producto, 10 si no tiene; los de stock ilimitado no cuentan).
+  const controlaStock = (p: Product) => !p.unlimitedStock && p.stock !== -1;
+  const agotados = useMemo(() => products.filter(p => controlaStock(p) && p.stock <= 0), [products]);
+  const bajos = useMemo(
+    () => products
+      .filter(p => controlaStock(p) && p.stock > 0 && p.stock <= (p.minStock ?? 10))
+      .sort((a, b) => a.stock - b.stock),
+    [products],
+  );
+  const materiaBaja = useMemo(
+    () => ingredients
+      .filter(i => i.currentStock < i.minStock) // mismo criterio que Materia prima
+      .sort((a, b) => (a.currentStock / (a.minStock || 1)) - (b.currentStock / (b.minStock || 1))),
+    [ingredients],
+  );
 
-    orders.forEach(order => {
-      order.products?.forEach(item => {
-        const existing = productMap.get(item.productId);
-        if (existing) {
-          existing.totalOrdered += item.quantity;
-          existing.orderCount += 1;
-          existing.revenue += item.quantity * item.price;
+  const activos = useMemo(() => orders.filter(o => o.status !== 'cancelled'), [orders]);
+
+  // Día de cada pedido: el de entrega (o el de creación si no tiene), igual que
+  // la pestaña "Hoy" del Inicio, para que los dos números coincidan.
+  const diaDelPedido = (o: OrderLite) => {
+    if (o.deadline) {
+      const [y, m, d] = o.deadline.split('T')[0].split('-').map(Number);
+      return new Date(y, m - 1, d).getTime();
+    }
+    const c = new Date(o.createdAt);
+    c.setHours(0, 0, 0, 0);
+    return c.getTime();
+  };
+
+  const resumen = useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const semana = new Date(hoy);
+    semana.setDate(semana.getDate() - 6);
+    const deHoy = activos.filter(o => diaDelPedido(o) === hoy.getTime());
+    const enSemana = activos.filter(o => new Date(o.createdAt) >= semana).length;
+    // Si se cargó el tope de pedidos y el más viejo es de esta semana, hay más.
+    const masViejo = orders.length ? Math.min(...orders.map(o => new Date(o.createdAt).getTime())) : Infinity;
+    const truncado = orders.length >= PEDIDOS_RECIENTES && masViejo >= semana.getTime();
+    return {
+      hoy: deHoy.length,
+      semana: truncado ? `más de ${enSemana}` : String(enSemana),
+      ventasHoy: deHoy.reduce((s, o) => s + (o.total || 0), 0),
+      pendientes: activos.filter(o => o.status === 'pending').length,
+      enPreparacion: activos.filter(o => o.status === 'in_progress').length,
+      listos: activos.filter(o => o.status === 'completed').length,
+    };
+  }, [activos, orders]);
+
+  const masPedidos = useMemo(() => {
+    const mapa = new Map<string, { nombre: string; unidades: number; pedidos: number }>();
+    for (const o of activos) {
+      for (const item of o.products || []) {
+        const actual = mapa.get(item.productId);
+        if (actual) {
+          actual.unidades += item.quantity;
+          actual.pedidos += 1;
         } else {
-          productMap.set(item.productId, {
-            productId: item.productId,
-            productName: item.name,
-            totalOrdered: item.quantity,
-            orderCount: 1,
-            revenue: item.quantity * item.price
-          });
+          mapa.set(item.productId, { nombre: item.name, unidades: item.quantity, pedidos: 1 });
         }
-      });
-    });
+      }
+    }
+    return Array.from(mapa.values()).sort((a, b) => b.unidades - a.unidades).slice(0, 5);
+  }, [activos]);
 
-    return Array.from(productMap.values())
-      .sort((a, b) => b.totalOrdered - a.totalOrdered)
-      .slice(0, 5);
-  }, [orders]);
+  const valorStock = useMemo(
+    () => products.reduce((s, p) => s + (controlaStock(p) && p.stock > 0 ? p.price * p.stock : 0), 0),
+    [products],
+  );
 
-  // Calcular estadísticas de merma (Waste Stats)
-  const wasteStats = useMemo(() => {
-    let totalProduced = 0;
-    let totalWaste = 0;
-    const wasteByProduct = new Map<string, { name: string; waste: number; produced: number }>();
-
-    orders.filter(o => o.status === 'TERMINADA').forEach(order => {
-      order.products?.forEach(item => {
-        const produced = item.producedQuantity !== undefined ? item.producedQuantity : item.quantity;
-        const waste = item.wasteQuantity || 0;
-
-        totalProduced += produced;
-        totalWaste += waste;
-
-        if (waste > 0) {
-          const existing = wasteByProduct.get(item.productId);
-          if (existing) {
-            existing.waste += waste;
-            existing.produced += produced;
-          } else {
-            wasteByProduct.set(item.productId, {
-              name: item.name,
-              waste,
-              produced
-            });
-          }
-        }
-      });
-    });
-
-    const topWasteProducts = Array.from(wasteByProduct.values())
-      .sort((a, b) => b.waste - a.waste)
-      .slice(0, 3);
-
-    const wasteRate = totalProduced + totalWaste > 0
-      ? (totalWaste / (totalProduced + totalWaste)) * 100
-      : 0;
-
-    return {
-      totalProduced,
-      totalWaste,
-      wasteRate,
-      topWasteProducts
-    };
-  }, [orders]);
-
-  // Alertas de stock bajo
-  const lowStockProducts = useMemo(() => {
-    return products.filter(p => p.stock < 20 && p.stock > 0);
-  }, [products]);
-
-  const outOfStockProducts = useMemo(() => {
-    return products.filter(p => p.stock === 0);
-  }, [products]);
-
-  // Alertas de ingredientes bajo stock
-  const lowStockIngredients = useMemo(() => {
-    return ingredients.filter(i => i.currentStock <= i.minStock);
-  }, [ingredients]);
-
-  // Estadísticas generales
-  const stats = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const todayOrders = orders.filter(o => {
-      const orderDate = new Date(o.createdAt);
-      orderDate.setHours(0, 0, 0, 0);
-      return orderDate.getTime() === today.getTime();
-    });
-
-    const thisWeek = new Date();
-    thisWeek.setDate(thisWeek.getDate() - 7);
-
-    const weekOrders = orders.filter(o =>
-      new Date(o.createdAt) >= thisWeek
-    );
-
-    const completedOrders = orders.filter(o => o.status === 'completed');
-    const pendingOrders = orders.filter(o => o.status === 'pending');
-    const inProgressOrders = orders.filter(o => o.status === 'in_progress');
-
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-    const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-
-    // Calculate Inventory Value & Cost
-    const totalInventoryValue = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
-    const totalInventoryCost = products.reduce((sum, p) => {
-      // Safe check for ingredients
-      const productIngredients = (p as any).ingredients || [];
-      const productUnitCost = productIngredients.reduce((c: number, pi: any) => {
-        const ing = ingredients.find(i => i.id === pi.ingredientId);
-        const cost = ing?.costPerUnit || pi.costPerUnit || 0;
-        return c + (cost * pi.quantity);
-      }, 0);
-      return sum + (productUnitCost * p.stock);
-    }, 0);
-
-    return {
-      totalProducts: products.length,
-      totalIngredients: ingredients.length,
-      totalOrders: orders.length,
-      todayOrders: todayOrders.length,
-      weekOrders: weekOrders.length,
-      completedOrders: completedOrders.length,
-      pendingOrders: pendingOrders.length,
-      inProgressOrders: inProgressOrders.length,
-      lowStockAlerts: lowStockProducts.length + lowStockIngredients.length,
-      outOfStockAlerts: outOfStockProducts.length,
-      totalRevenue,
-      todayRevenue,
-      totalInventoryCost,
-      totalInventoryValue
-    };
-  }, [products, ingredients, orders, lowStockProducts, lowStockIngredients, outOfStockProducts]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando dashboard...</p>
-        </div>
-      </div>
-    );
-  }
+  const hayAlertas = agotados.length > 0 || materiaBaja.length > 0;
+  const fechaHoy = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+  const primerNombre = (userName || '').trim().split(/\s+/)[0] || userName;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 pb-24" style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}>
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onBack}
-              className="hover:bg-white/50"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Dashboard de Producción</h1>
-              <p className="text-sm text-gray-600">Bienvenido, {userName}</p>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-3xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" className="boton-ios" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Producción</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
+                Hola, {primerNombre} · {fechaHoy}
+              </p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="bg-white/50">
-              <Clock className="w-3 h-3 mr-1" />
-              {new Date().toLocaleDateString('es-CL', {
-                weekday: 'short',
-                day: 'numeric',
-                month: 'short'
-              })}
-            </Badge>
+            <button type="button" onClick={() => void refrescar()} disabled={refrescando || loading} aria-label="Actualizar" className="boton-ios" style={botonRedondo}>
+              <RefreshCw className={refrescando ? 'animate-spin' : ''} style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Alertas Críticas */}
-        {(stats.outOfStockAlerts > 0 || lowStockIngredients.length > 0) && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-gradient-to-r from-red-50 to-orange-50 border-l-4 border-red-500 rounded-lg p-4"
-          >
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="font-semibold text-red-900 mb-1">Alertas Críticas de Stock</h3>
-                <div className="space-y-1 text-sm text-red-800">
-                  {stats.outOfStockAlerts > 0 && (
-                    <p>• {stats.outOfStockAlerts} producto{stats.outOfStockAlerts > 1 ? 's' : ''} sin stock</p>
-                  )}
-                  {lowStockIngredients.length > 0 && (
-                    <p>• {lowStockIngredients.length} ingrediente{lowStockIngredients.length > 1 ? 's' : ''} bajo stock mínimo</p>
-                  )}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="bg-white"
-                onClick={onNavigateToIngredients}
-              >
-                Ver Detalles
-              </Button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Acciones Rápidas */}
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle>Acciones Rápidas</CardTitle>
-            <CardDescription>Accede a las herramientas principales</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Button
-                variant="outline"
-                className="h-auto py-4 flex flex-col items-center gap-2 hover:bg-blue-50 hover:border-blue-300"
-                onClick={onNavigateToOrders}
-              >
-                <Package2 className="w-6 h-6 text-blue-600" />
-                <div className="text-center">
-                  <p className="font-semibold">Órdenes de Producción</p>
-                  <p className="text-xs text-gray-500">Crear y gestionar órdenes</p>
-                </div>
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-auto py-4 flex flex-col items-center gap-2 hover:bg-purple-50 hover:border-purple-300"
-                onClick={onNavigateToIngredients}
-              >
-                <Layers className="w-6 h-6 text-purple-600" />
-                <div className="text-center">
-                  <p className="font-semibold">Gestión de Ingredientes</p>
-                  <p className="text-xs text-gray-500">Stock y materias primas</p>
-                </div>
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-auto py-4 flex flex-col items-center gap-2 hover:bg-green-50 hover:border-green-300"
-                onClick={onNavigateToRecipes}
-              >
-                <BarChart3 className="w-6 h-6 text-green-600" />
-                <div className="text-center">
-                  <p className="font-semibold">Recetas de Productos</p>
-                  <p className="text-xs text-gray-500">Configurar ingredientes</p>
-                </div>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Pedidos de Hoy */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-blue-100">Pedidos Hoy</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-bold">{stats.todayOrders}</p>
-                    <p className="text-xs text-blue-100 mt-1">
-                      {stats.weekOrders} esta semana
-                    </p>
-                  </div>
-                  <ShoppingBag className="w-8 h-8 text-blue-300" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* En Proceso */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="bg-gradient-to-br from-amber-500 to-orange-600 text-white border-0 shadow-lg">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-amber-100">En Proceso</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-bold">{stats.inProgressOrders}</p>
-                    <p className="text-xs text-amber-100 mt-1">
-                      {stats.pendingOrders} pendientes
-                    </p>
-                  </div>
-                  <Activity className="w-8 h-8 text-amber-300" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Completados */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="bg-gradient-to-br from-green-500 to-emerald-600 text-white border-0 shadow-lg">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-green-100">Completados</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-bold">{stats.completedOrders}</p>
-                    <p className="text-xs text-green-100 mt-1">
-                      {((stats.completedOrders / stats.totalOrders) * 100 || 0).toFixed(0)}% del total
-                    </p>
-                  </div>
-                  <CheckCircle2 className="w-8 h-8 text-green-300" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Alertas */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
-            <Card className={`bg-gradient-to-br ${stats.lowStockAlerts > 0
-              ? 'from-red-500 to-red-600'
-              : 'from-gray-500 to-gray-600'
-              } text-white border-0 shadow-lg`}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-red-100">
-                  Alertas de Stock
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-bold">{stats.lowStockAlerts}</p>
-                    <p className="text-xs text-red-100 mt-1">
-                      Requieren atención
-                    </p>
-                  </div>
-                  <AlertTriangle className="w-8 h-8 text-red-300" />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-
-        {/* Financial Analysis */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Inventory Value */}
-          <Card className="bg-gradient-to-br from-slate-50 to-white shadow-lg border-l-4 border-indigo-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-indigo-900">
-                <DollarSign className="w-5 h-5 text-indigo-600" />
-                Valorización de Inventario
-              </CardTitle>
-              <CardDescription>Costo de productos terminados en stock</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-100 shadow-sm">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600">Costo de Producción</p>
-                    <p className="text-xs text-slate-400">Materia prima acumulada</p>
-                  </div>
-                  <p className="text-lg font-bold text-slate-700">{formatCLP(stats.totalInventoryCost)}</p>
-                </div>
-
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-100 shadow-sm">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600">Valor de Venta</p>
-                    <p className="text-xs text-slate-400">Ingreso potencial total</p>
-                  </div>
-                  <p className="text-lg font-bold text-indigo-600">{formatCLP(stats.totalInventoryValue)}</p>
-                </div>
-
-                <div className="pt-3 border-t border-indigo-100 flex justify-between items-center">
-                  <p className="text-sm font-bold text-indigo-900">Margen Potencial</p>
-                  <Badge variant="secondary" className="bg-indigo-100 text-indigo-700 px-3 py-1 text-sm">
-                    {formatCLP(stats.totalInventoryValue - stats.totalInventoryCost)}
-                  </Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Revenue Stats (derived from orders) */}
-          <Card className="bg-gradient-to-br from-emerald-50 to-white shadow-lg border-l-4 border-emerald-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-emerald-900">
-                <TrendingUp className="w-5 h-5 text-emerald-600" />
-                Ingresos por Ventas
-              </CardTitle>
-              <CardDescription>Resumen de ventas realizadas</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg border border-emerald-100 shadow-sm">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600">Ventas Totales</p>
-                    <p className="text-xs text-slate-400">Todas las órdenes</p>
-                  </div>
-                  <p className="text-lg font-bold text-emerald-600">{formatCLP(stats.totalRevenue)}</p>
-                </div>
-
-                <div className="flex justify-between items-center p-3 bg-white rounded-lg border border-emerald-100 shadow-sm">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600">Ventas Hoy</p>
-                    <p className="text-xs text-slate-400">{stats.todayOrders} órdenes</p>
-                  </div>
-                  <p className="text-lg font-bold text-emerald-600">{formatCLP(stats.todayRevenue)}</p>
-                </div>
-
-                <div className="pt-3 border-t border-emerald-100 flex justify-between items-center">
-                  <p className="text-sm font-bold text-emerald-900">Ticket Promedio</p>
-                  <span className="text-emerald-700 font-semibold">{formatCLP(stats.totalOrders > 0 ? stats.totalRevenue / stats.totalOrders : 0)}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Productos Más Pedidos */}
-        <Card className="shadow-lg">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-blue-600" />
-                <div>
-                  <CardTitle>Top 5 Productos Más Pedidos</CardTitle>
-                  <CardDescription>Últimos {orders.length} pedidos registrados</CardDescription>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onNavigateToOrders}
-              >
-                Ver Órdenes
-                <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {topProducts.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                <p>No hay datos de pedidos aún</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {topProducts.map((product, index) => {
-                  const maxQuantity = topProducts[0].totalOrdered;
-                  const percentage = (product.totalOrdered / maxQuantity) * 100;
-
-                  return (
-                    <motion.div
-                      key={product.productId}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="relative"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <div className={`flex items-center justify-center w-8 h-8 rounded-full ${index === 0 ? 'bg-yellow-100 text-yellow-700' :
-                            index === 1 ? 'bg-gray-100 text-gray-700' :
-                              index === 2 ? 'bg-orange-100 text-orange-700' :
-                                'bg-blue-100 text-blue-700'
-                            }`}>
-                            {index === 0 && <Award className="w-4 h-4" />}
-                            {index > 0 && <span className="text-xs font-bold">#{index + 1}</span>}
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-900">{product.productName}</p>
-                            <p className="text-xs text-gray-500">
-                              {product.orderCount} pedido{product.orderCount > 1 ? 's' : ''}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-lg text-blue-600">
-                            {product.totalOrdered}
-                          </p>
-                          <p className="text-xs text-gray-500">unidades</p>
-                        </div>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${percentage}%` }}
-                          transition={{ duration: 0.5, delay: index * 0.1 }}
-                          className={`h-full rounded-full ${index === 0 ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' :
-                            index === 1 ? 'bg-gradient-to-r from-gray-400 to-gray-500' :
-                              index === 2 ? 'bg-gradient-to-r from-orange-400 to-orange-500' :
-                                'bg-gradient-to-r from-blue-400 to-blue-500'
-                            }`}
-                        />
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
+      <main className="max-w-3xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: IOS.secundario }} />
+          </div>
+        ) : (
+          <>
+            {error && (
+              <button type="button" onClick={() => void refrescar()}
+                style={{ ...tarjeta, width: '100%', border: 'none', padding: '12px 16px', marginBottom: 12, textAlign: 'left', fontSize: 15, color: IOS.secundario, cursor: 'pointer' }}>
+                Algunos datos no se pudieron cargar. <span style={{ color: IOS.azul }}>Reintentar</span>
+              </button>
             )}
-          </CardContent>
-        </Card>
 
-        {/* Waste Control Analysis */}
-        <Card className="shadow-lg border-l-4 border-amber-500">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-amber-600" />
-              <div>
-                <CardTitle>Control de Mermas</CardTitle>
-                <CardDescription>Análisis de desperdicios en producción</CardDescription>
-              </div>
+            {/* Pedidos */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+              <Tile titulo="Para hoy" valor={resumen.hoy} detalle={`${resumen.semana} en 7 días`} color={IOS.azul} />
+              <Tile titulo="Pendientes" valor={resumen.pendientes} detalle="por empezar" color={IOS.naranja} />
+              <Tile titulo="En preparación" valor={resumen.enPreparacion} detalle="en curso" color={IOS.azul} />
+              <Tile titulo="Listos" valor={resumen.listos} detalle="para despacho" color={IOS.verde} />
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Global Rate */}
-              <div className="flex flex-col justify-center items-center p-4 bg-amber-50 rounded-lg">
-                <p className="text-sm font-medium text-amber-800 mb-1">Tasa de Merma Global</p>
-                <p className="text-3xl font-bold text-amber-600">{wasteStats.wasteRate.toFixed(1)}%</p>
-                <p className="text-xs text-amber-600 mt-1">
-                  {wasteStats.totalWaste} mermas / {wasteStats.totalProduced} OK
-                </p>
-              </div>
 
-              {/* Top Waste Products */}
-              <div className="md:col-span-2 space-y-3">
-                <h4 className="text-sm font-semibold text-gray-700">Productos con mayor merma:</h4>
-                {wasteStats.topWasteProducts.length === 0 ? (
-                  <p className="text-sm text-gray-500 italic">No hay registros de merma.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {wasteStats.topWasteProducts.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
-                        <span className="text-gray-700">{item.name}</span>
-                        <div className="flex items-center gap-3">
-                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                            {item.waste} mermas
-                          </Badge>
-                          <span className="text-xs text-gray-500">
-                            {((item.waste / (item.produced + item.waste)) * 100).toFixed(0)}% tasa
+            {/* Alertas */}
+            <h2 style={tituloSeccion}>Stock</h2>
+            <div style={tarjeta}>
+              {!hayAlertas && bajos.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+                  <CheckCircle2 style={{ width: 22, height: 22, color: IOS.verde, flexShrink: 0 }} />
+                  <span style={{ fontSize: 16, color: IOS.texto }}>Todo el stock está sobre su mínimo</span>
+                </div>
+              ) : (
+                <>
+                  <FilaPlegable
+                    color={IOS.rojo}
+                    titulo="Productos agotados"
+                    cantidad={agotados.length}
+                    abierto={verAgotados}
+                    onToggle={() => setVerAgotados(v => !v)}
+                  >
+                    {agotados.map(p => (
+                      <FilaDetalle key={p.id} nombre={p.name} valor="0" colorValor={IOS.rojo} />
+                    ))}
+                  </FilaPlegable>
+                  <Separador />
+                  <FilaPlegable
+                    color={IOS.naranja}
+                    titulo="Productos con stock bajo"
+                    cantidad={bajos.length}
+                    abierto={verBajos}
+                    onToggle={() => setVerBajos(v => !v)}
+                  >
+                    {bajos.map(p => (
+                      <FilaDetalle key={p.id} nombre={p.name} valor={`${formatoCantidad(p.stock)} / mín. ${p.minStock ?? 10}`} colorValor={IOS.naranja} />
+                    ))}
+                  </FilaPlegable>
+                </>
+              )}
+            </div>
+
+            {/* Materia prima bajo mínimo */}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', margin: '22px 16px 7px' }}>
+              <h2 style={{ ...tituloSeccion, margin: 0 }}>Materia prima bajo mínimo</h2>
+              <button type="button" onClick={onNavigateToIngredients} style={{ background: 'none', border: 'none', padding: 0, fontSize: 15, color: IOS.azul, cursor: 'pointer' }}>
+                Ver todo
+              </button>
+            </div>
+            <div style={tarjeta}>
+              {materiaBaja.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+                  <CheckCircle2 style={{ width: 22, height: 22, color: IOS.verde, flexShrink: 0 }} />
+                  <span style={{ fontSize: 16, color: IOS.texto }}>Toda la materia prima está sobre su mínimo</span>
+                </div>
+              ) : (
+                <>
+                  {materiaBaja.slice(0, 6).map((ing, idx) => {
+                    const pct = ing.minStock > 0 ? Math.max(0, Math.min(100, (ing.currentStock / ing.minStock) * 100)) : 0;
+                    const color = pct < 50 ? IOS.rojo : IOS.naranja;
+                    return (
+                      <div key={ing.id}>
+                        {idx > 0 && <Separador />}
+                        <div style={{ padding: '10px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                            <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, color: IOS.texto }}>{ing.name}</span>
+                            <span style={{ fontSize: 15, fontWeight: 600, color, flexShrink: 0 }}>
+                              {formatoCantidad(ing.currentStock)} {ing.unit}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                            <div style={{ flex: 1, height: 4, borderRadius: 2, background: IOS.relleno, overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2 }} />
+                            </div>
+                            <span style={{ fontSize: 12, color: IOS.secundario, flexShrink: 0 }}>mín. {formatoCantidad(ing.minStock)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {materiaBaja.length > 6 && (
+                    <>
+                      <Separador />
+                      <button type="button" onClick={onNavigateToIngredients} className="fila-ios"
+                        style={{ width: '100%', height: 44, border: 'none', background: 'transparent', fontSize: 16, color: IOS.azul, cursor: 'pointer' }}>
+                        Ver {materiaBaja.length - 6} más
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Más pedidos */}
+            <h2 style={tituloSeccion}>Más pedidos · últimos {orders.length} pedidos</h2>
+            <div style={tarjeta}>
+              {masPedidos.length === 0 ? (
+                <p style={{ fontSize: 15, color: IOS.secundario, padding: '12px 16px', margin: 0 }}>Todavía no hay pedidos.</p>
+              ) : masPedidos.map((p, idx) => {
+                const pct = (p.unidades / masPedidos[0].unidades) * 100;
+                return (
+                  <div key={p.nombre + idx}>
+                    {idx > 0 && <Separador inset={52} />}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                      <span style={{
+                        width: 26, height: 26, borderRadius: 13, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 13, fontWeight: 700, background: idx === 0 ? IOS.naranja : IOS.relleno, color: idx === 0 ? '#fff' : '#3C3C43',
+                      }}>
+                        {idx + 1}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                          <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, color: IOS.texto }}>{p.nombre}</span>
+                          <span style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, flexShrink: 0 }}>{formatoCantidad(p.unidades)}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+                          <div style={{ flex: 1, height: 4, borderRadius: 2, background: IOS.relleno, overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: IOS.azul, borderRadius: 2 }} />
+                          </div>
+                          <span style={{ fontSize: 12, color: IOS.secundario, flexShrink: 0 }}>
+                            {p.pedidos} {p.pedidos === 1 ? 'pedido' : 'pedidos'}
                           </span>
                         </div>
                       </div>
-                    ))}
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Grid de 2 columnas */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Stock de Productos */}
-          <Card className="shadow-lg">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Package className="w-5 h-5 text-blue-600" />
-                <div>
-                  <CardTitle>Estado de Stock - Productos</CardTitle>
-                  <CardDescription>{products.length} productos en catálogo</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {/* Productos sin stock */}
-                {outOfStockProducts.length > 0 && (
-                  <div className="border-l-4 border-red-500 bg-red-50 rounded-r-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-red-900">Sin Stock</span>
-                      <Badge variant="destructive">{outOfStockProducts.length}</Badge>
-                    </div>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {outOfStockProducts.slice(0, 3).map(product => (
-                        <p key={product.id} className="text-sm text-red-800">
-                          • {product.name}
-                        </p>
-                      ))}
-                      {outOfStockProducts.length > 3 && (
-                        <p className="text-xs text-red-600 italic">
-                          +{outOfStockProducts.length - 3} más...
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+            {/* Valores */}
+            <h2 style={tituloSeccion}>Valores</h2>
+            <div style={tarjeta}>
+              <FilaValor etiqueta="Pedidos para hoy" valor={formatCLP(resumen.ventasHoy)} />
+              <Separador />
+              <FilaValor etiqueta="Stock a precio de venta" valor={formatCLP(valorStock)} />
+            </div>
 
-                {/* Productos con bajo stock */}
-                {lowStockProducts.length > 0 && (
-                  <div className="border-l-4 border-amber-500 bg-amber-50 rounded-r-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-amber-900">Stock Bajo</span>
-                      <Badge className="bg-amber-500">{lowStockProducts.length}</Badge>
-                    </div>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {lowStockProducts.slice(0, 3).map(product => (
-                        <div key={product.id} className="flex items-center justify-between text-sm text-amber-800">
-                          <span>• {product.name}</span>
-                          <span className="font-medium">{product.stock} unid.</span>
-                        </div>
-                      ))}
-                      {lowStockProducts.length > 3 && (
-                        <p className="text-xs text-amber-600 italic">
-                          +{lowStockProducts.length - 3} más...
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Stock OK */}
-                {outOfStockProducts.length === 0 && lowStockProducts.length === 0 && (
-                  <div className="border-l-4 border-green-500 bg-green-50 rounded-r-lg p-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      <span className="font-semibold text-green-900">
-                        Stock en buen estado
-                      </span>
-                    </div>
-                    <p className="text-sm text-green-700 mt-1">
-                      Todos los productos tienen stock suficiente
-                    </p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Stock de Ingredientes */}
-          <Card className="shadow-lg">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-purple-600" />
-                  <div>
-                    <CardTitle>Estado de Stock - Ingredientes</CardTitle>
-                    <CardDescription>{ingredients.length} ingredientes</CardDescription>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onNavigateToIngredients}
-                >
-                  Gestionar
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {lowStockIngredients.length > 0 ? (
-                  <div className="space-y-2">
-                    {lowStockIngredients.slice(0, 5).map(ingredient => {
-                      const percentage = (ingredient.currentStock / ingredient.minStock) * 100;
-                      const isVeryLow = percentage < 50;
-
-                      return (
-                        <div key={ingredient.id} className="space-y-1">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium text-gray-900">{ingredient.name}</span>
-                            <span className={`font-semibold ${isVeryLow ? 'text-red-600' : 'text-amber-600'
-                              }`}>
-                              {ingredient.currentStock} {ingredient.unit}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all ${isVeryLow
-                                  ? 'bg-gradient-to-r from-red-500 to-red-600'
-                                  : 'bg-gradient-to-r from-amber-500 to-amber-600'
-                                  }`}
-                                style={{ width: `${Math.min(percentage, 100)}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-gray-500 min-w-[60px] text-right">
-                              Min: {ingredient.minStock}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {lowStockIngredients.length > 5 && (
-                      <p className="text-xs text-gray-500 italic pt-2">
-                        +{lowStockIngredients.length - 5} ingredientes más con stock bajo
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="border-l-4 border-green-500 bg-green-50 rounded-r-lg p-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      <span className="font-semibold text-green-900">
-                        Ingredientes OK
-                      </span>
-                    </div>
-                    <p className="text-sm text-green-700 mt-1">
-                      Todos los ingredientes sobre stock mínimo
-                    </p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            {/* Herramientas */}
+            <h2 style={tituloSeccion}>Herramientas</h2>
+            <div style={tarjeta}>
+              <FilaAcceso icono={Package2} color="#5856D6" titulo="Órdenes de producción" onClick={onNavigateToOrders} />
+              <Separador inset={56} />
+              <FilaAcceso icono={Layers} color="#AF52DE" titulo="Materia prima" onClick={onNavigateToIngredients} />
+              <Separador inset={56} />
+              <FilaAcceso icono={BookOpen} color={IOS.verde} titulo="Recetas" onClick={onNavigateToRecipes} />
+            </div>
+          </>
+        )}
+      </main>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const tituloSeccion: React.CSSProperties = {
+  fontSize: 13, fontWeight: 400, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '22px 16px 7px',
+};
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+};
+
+function Separador({ inset = 16 }: { inset?: number }) {
+  return <div style={{ height: 0.5, background: IOS.separador, marginLeft: inset }} />;
+}
+
+function Tile({ titulo, valor, detalle, color }: { titulo: string; valor: number; detalle: string; color: string }) {
+  return (
+    <div style={{ ...tarjeta, padding: '12px 14px' }}>
+      <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: IOS.secundario }}>
+        <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />
+        {titulo}
+      </p>
+      <p style={{ fontSize: 28, fontWeight: 700, color: IOS.texto, lineHeight: 1.2, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{valor}</p>
+      <p style={{ fontSize: 13, color: IOS.secundario }}>{detalle}</p>
+    </div>
+  );
+}
+
+function FilaPlegable({ color, titulo, cantidad, abierto, onToggle, children }: {
+  color: string; titulo: string; cantidad: number; abierto: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  const activo = cantidad > 0;
+  return (
+    <>
+      <button type="button" onClick={activo ? onToggle : undefined} aria-expanded={activo ? abierto : undefined} className={activo ? 'fila-ios' : undefined}
+        style={{ width: '100%', minHeight: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px 0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: activo ? 'pointer' : 'default' }}>
+        <span style={{ width: 29, height: 29, borderRadius: 7, background: activo ? color : IOS.relleno, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {activo
+            ? <AlertTriangle style={{ width: 16, height: 16, color: '#fff' }} />
+            : <CheckCircle2 style={{ width: 16, height: 16, color: IOS.verde }} />}
+        </span>
+        <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>{titulo}</span>
+        <span style={{ fontSize: 16, fontWeight: activo ? 600 : 400, color: activo ? color : IOS.secundario }}>{cantidad}</span>
+        {activo && (
+          <ChevronDown style={{ width: 18, height: 18, color: '#C7C7CC', transform: abierto ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+        )}
+      </button>
+      {activo && abierto && <div style={{ background: '#FAFAFC' }}>{children}</div>}
+    </>
+  );
+}
+
+function FilaDetalle({ nombre, valor, colorValor }: { nombre: string; valor: string; colorValor: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 8px 57px', borderTop: `0.5px solid ${IOS.separador}` }}>
+      <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 15, color: '#3C3C43' }}>{nombre}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: colorValor, flexShrink: 0 }}>{valor}</span>
+    </div>
+  );
+}
+
+function FilaValor({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <div style={{ minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px' }}>
+      <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>{etiqueta}</span>
+      <span style={{ fontSize: 16, fontWeight: 600, color: IOS.texto }}>{valor}</span>
+    </div>
+  );
+}
+
+function FilaAcceso({ icono: Icono, color, titulo, onClick }: { icono: any; color: string; titulo: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="fila-ios"
+      style={{ width: '100%', height: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 12px 0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+      <span style={{ width: 29, height: 29, borderRadius: 7, background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icono style={{ width: 17, height: 17, color: '#fff' }} />
+      </span>
+      <span style={{ flex: 1, fontSize: 17, color: IOS.texto }}>{titulo}</span>
+      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC' }} />
+    </button>
   );
 }
