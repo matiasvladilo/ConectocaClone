@@ -7,6 +7,7 @@ import { Hono } from "npm:hono@4.12.5";
 import { cors } from "npm:hono@4.12.5/cors";
 import { logger } from "npm:hono@4.12.5/logger";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { correoRecuperacion, correoVerificacion, enlaceCuenta, enviarCorreoCuenta } from "./correosCuenta.ts";
 import {
   autorizar,
   autorizarPropioOConPermiso,
@@ -474,25 +475,70 @@ app.get("/make-server-6d979413/health", (c) => {
 
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') || '';
+const RESPUESTA_GENERICA_RECUPERACION = 'Si el correo existe en nuestro sistema, recibirás un enlace para crear una nueva contraseña';
+
+/**
+ * Recuperar contraseña. Antes usaba resetPasswordForEmail con redirectTo al
+ * propio endpoint de verify de Supabase: el enlace no llevaba a ninguna
+ * pantalla de la app para escribir la clave nueva, y el correo salía del
+ * servidor de prueba de Supabase. Ahora se genera el token y el correo lo
+ * envía Resend desde laoca.info (ver correosCuenta.ts).
+ *
+ * La respuesta es SIEMPRE la misma, exista o no la cuenta: no se puede usar
+ * para averiguar qué correos están registrados.
+ */
 app.post("/make-server-6d979413/auth/reset-password", async (c) => {
   try {
     const { email } = await c.req.json();
-    if (!email) return c.json({ error: 'Email es requerido' }, 400);
+    const correo = String(email || '').trim().toLowerCase();
+    if (!correo) return c.json({ error: 'Email es requerido' }, 400);
 
-    await supabaseAdmin.auth.resetPasswordForEmail(email, {
-      redirectTo: `${SUPABASE_URL}/auth/v1/verify`,
-    });
-
-    return c.json({
-      success: true,
-      message: 'Si el correo existe en nuestro sistema, recibiras un enlace de recuperacion'
-    });
-  } catch (_err) {
-    return c.json({
-      success: true,
-      message: 'Si el correo existe en nuestro sistema, recibiras un enlace de recuperacion'
-    });
+    if (APP_PUBLIC_URL && RESEND_API_KEY) {
+      const { data, error } = await supabaseAdmin.auth.admin.generateLink({ type: 'recovery', email: correo });
+      // Error = el correo no existe (u otra falla): se responde igual.
+      if (!error && data?.properties?.hashed_token) {
+        const url = enlaceCuenta(APP_PUBLIC_URL, 'nueva-clave', data.properties.hashed_token, 'recovery');
+        await enviarCorreoCuenta(RESEND_API_KEY, { to: correo, ...correoRecuperacion(url) });
+      }
+    } else {
+      console.error('reset-password: falta APP_PUBLIC_URL o RESEND_API_KEY; no se envía correo');
+    }
+  } catch (err) {
+    console.error('Error en reset-password:', err);
   }
+  return c.json({ success: true, message: RESPUESTA_GENERICA_RECUPERACION });
+});
+
+/**
+ * Reenviar el correo de verificación (desde el login, cuando la cuenta todavía
+ * no está confirmada). Respuesta siempre igual, por el mismo motivo que arriba.
+ * Solo se envía si la cuenta existe y NO está confirmada: a una cuenta ya
+ * confirmada no se le manda un enlace de acceso.
+ */
+app.post("/make-server-6d979413/auth/resend-verification", async (c) => {
+  const respuesta = { success: true, message: 'Si la cuenta está pendiente de verificación, te enviamos un correo nuevo' };
+  try {
+    const { email } = await c.req.json();
+    const correo = String(email || '').trim().toLowerCase();
+    if (!correo || !APP_PUBLIC_URL || !RESEND_API_KEY) return c.json(respuesta);
+
+    const { data: perfil } = await supabaseAdmin
+      .from('profiles').select('id, name').eq('email', correo).maybeSingle();
+    if (!perfil) return c.json(respuesta);
+
+    const { data: u } = await supabaseAdmin.auth.admin.getUserById(perfil.id);
+    if (!u?.user || u.user.email_confirmed_at) return c.json(respuesta);
+
+    const { data, error } = await supabaseAdmin.auth.admin.generateLink({ type: 'magiclink', email: correo });
+    if (!error && data?.properties?.hashed_token) {
+      const url = enlaceCuenta(APP_PUBLIC_URL, 'verificar', data.properties.hashed_token, 'magiclink');
+      await enviarCorreoCuenta(RESEND_API_KEY, { to: correo, ...correoVerificacion(perfil.name || '', url) });
+    }
+  } catch (err) {
+    console.error('Error en resend-verification:', err);
+  }
+  return c.json(respuesta);
 });
 
 app.post("/make-server-6d979413/signup", async (c) => {
@@ -580,11 +626,16 @@ app.post("/make-server-6d979413/signup", async (c) => {
       ? 'admin'
       : (ROLES_AUTOSERVICIO.has(role) ? role : 'user');
 
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    // Verificación de correo: antes era createUser con `email_confirm: true`,
+    // así que cualquiera entraba con un correo que no era suyo. generateLink
+    // ('signup') crea la cuenta SIN confirmar y devuelve el token, sin enviar
+    // nada; el correo lo manda Resend más abajo. Hasta confirmar, Supabase
+    // rechaza el inicio de sesión ("Email not confirmed").
+    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'signup',
       email,
       password,
-      user_metadata: { name, role: userRole, businessId },
-      email_confirm: true
+      options: { data: { name, role: userRole, businessId } },
     });
 
     if (error) {
@@ -625,8 +676,26 @@ app.post("/make-server-6d979413/signup", async (c) => {
 
     console.log(`User ${email} created and associated with business ${businessId}`);
 
+    // Correo de verificación. Si el envío falla la cuenta igual queda creada:
+    // desde el login se puede pedir "Reenviar correo".
+    let correoEnviado = false;
+    const tokenHash = data.properties?.hashed_token;
+    if (tokenHash && APP_PUBLIC_URL && RESEND_API_KEY) {
+      try {
+        const url = enlaceCuenta(APP_PUBLIC_URL, 'verificar', tokenHash, 'signup');
+        await enviarCorreoCuenta(RESEND_API_KEY, { to: email, ...correoVerificacion(name || '', url) });
+        correoEnviado = true;
+      } catch (err) {
+        console.error('No se pudo enviar el correo de verificación:', err);
+      }
+    } else {
+      console.error('signup: falta APP_PUBLIC_URL o RESEND_API_KEY; no se envía verificación');
+    }
+
     return c.json({
       success: true,
+      requiereVerificacion: true,
+      correoEnviado,
       user: { id: userId, email, name, role: userRole, businessId },
       business: {
         id: businessId,

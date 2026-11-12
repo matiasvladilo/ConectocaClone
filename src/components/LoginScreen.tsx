@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronsUpDown, Eye, EyeOff } from 'lucide-react';
+import { ChevronLeft, ChevronsUpDown, Eye, EyeOff, MailCheck } from 'lucide-react';
 import logo from '../assets/logo-icon.png';
 import { toast } from 'sonner';
 import { authAPI } from '../utils/api';
@@ -114,6 +114,9 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [rememberMe, setRememberMe] = useState(true); // Remember session by default
+  // Cuenta creada o login de una cuenta sin verificar: se muestra "Revisa tu correo".
+  const [correoPendiente, setCorreoPendiente] = useState<string | null>(null);
+  const [reenviando, setReenviando] = useState(false);
 
   // Business fields
   const [businessAction, setBusinessAction] = useState<'create' | 'join'>('create');
@@ -164,7 +167,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     try {
       if (isCreatingAccount) {
         // Sign up
-        await authAPI.signup(
+        const resultado: any = await authAPI.signup(
           email,
           password,
           name,
@@ -174,13 +177,15 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           businessAction === 'join' ? businessCode : undefined
         );
 
-        if (businessAction === 'create') {
-          toast.success(`¡Negocio "${businessName}" creado exitosamente! Iniciando sesión...`);
-        } else {
-          toast.success('¡Te has unido al negocio exitosamente! Iniciando sesión...');
+        if (resultado?.requiereVerificacion) {
+          // Hay que confirmar el correo antes de poder entrar.
+          setCorreoPendiente(email.trim());
+          setPassword('');
+          return;
         }
 
-        // Automatically log in after signup (nueva cuenta: mantener sesión por defecto)
+        // Servidor anterior (sin verificación): se entra directo, como antes.
+        toast.success(businessAction === 'create' ? `Negocio "${businessName}" creado` : 'Te uniste al negocio');
         await onLogin(email, password, true);
       } else {
         // Login
@@ -191,6 +196,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
       // Provide more helpful error messages
       let errorMessage = 'Error en la autenticación';
+      if (/email not confirmed/i.test(error.message || '')) {
+        // La cuenta existe pero falta confirmar el correo.
+        setCorreoPendiente(email.trim());
+        return;
+      }
       if (error.message?.includes('Invalid login credentials')) {
         errorMessage = isCreatingAccount
           ? 'Error al crear la cuenta. Por favor intenta de nuevo.'
@@ -272,6 +282,51 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     padding: 'calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px)',
   };
   const columna: React.CSSProperties = { width: '100%', maxWidth: 400, margin: 'auto 0' };
+
+  const reenviarVerificacion = async () => {
+    if (!correoPendiente) return;
+    setReenviando(true);
+    try {
+      await authAPI.resendVerification(correoPendiente);
+      toast.success('Te enviamos un correo nuevo');
+    } catch {
+      toast.error('No se pudo reenviar. Prueba en un momento.');
+    } finally {
+      setReenviando(false);
+    }
+  };
+
+  // ── Revisa tu correo ──────────────────────────────────────────────────────
+  if (correoPendiente) {
+    return (
+      <div style={contenedor}>
+        <div style={{ ...columna, textAlign: 'center' }}>
+          <div style={{ width: 76, height: 76, borderRadius: 38, background: '#E5F0FF', margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MailCheck style={{ width: 36, height: 36, color: IOS.azul }} />
+          </div>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: IOS.texto, margin: '0 0 10px' }}>Revisa tu correo</h1>
+          <p style={{ fontSize: 16, color: IOS.secundario, lineHeight: 1.45, margin: '0 0 6px' }}>
+            Te enviamos un enlace a
+          </p>
+          <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto, margin: '0 0 14px', wordBreak: 'break-all' }}>{correoPendiente}</p>
+          <p style={{ fontSize: 15, color: IOS.secundario, lineHeight: 1.45, margin: '0 0 28px' }}>
+            Ábrelo para confirmar tu cuenta y después inicia sesión. Si no aparece, revisa la carpeta de spam.
+          </p>
+          <button
+            type="button"
+            onClick={() => { setCorreoPendiente(null); setIsCreatingAccount(false); }}
+            className="boton-ios"
+            style={{ width: '100%', height: 50, borderRadius: 12, border: 'none', background: IOS.azul, color: '#fff', fontSize: 17, fontWeight: 600 }}
+          >
+            Ir a iniciar sesión
+          </button>
+          <button type="button" onClick={() => void reenviarVerificacion()} disabled={reenviando} style={{ ...estiloEnlace, marginTop: 12 }}>
+            {reenviando ? 'Enviando…' : 'Reenviar correo'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Recuperar contraseña ──────────────────────────────────────────────────
   if (showPasswordRecovery) {

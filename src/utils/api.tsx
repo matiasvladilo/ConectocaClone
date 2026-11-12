@@ -244,6 +244,12 @@ export const authAPI = {
     });
   },
 
+  resendVerification: async (email: string): Promise<{ success: boolean; message: string }> => {
+    return fetchAPI('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
   resetPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
     return fetchAPI('/auth/reset-password', {
       method: 'POST',
