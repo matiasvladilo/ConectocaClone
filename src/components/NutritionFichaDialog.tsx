@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Save, FlaskConical } from "lucide-react";
-import { Button } from "./ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { Switch } from "./ui/switch";
 import { nutritionAPI, type AlergenoAPI, type FichaNutricionalAPI, type Ingredient } from "../utils/api";
 import { NUTRIENTES } from "../utils/nutricion/tipos";
 import type { ClaveNutriente } from "../utils/nutricion/tipos";
@@ -160,272 +159,219 @@ export function NutritionFichaDialog({
     }
   };
 
-  const inputClass =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+  // Nombre y unidad separados: "Energía (kcal)" → ["Energía", "kcal"].
+  const partes = (clave: ClaveNutriente) => {
+    const m = ETIQUETA_NUTRIENTE[clave].match(/^(.*?)\s*\(([^)]+)\)$/);
+    return m ? [m[1], m[2]] : [ETIQUETA_NUTRIENTE[clave], ""];
+  };
+  const colorEstado = diagnostico.estado === "completa" ? "#34C759" : diagnostico.estado === "parcial" ? "#FFCC00" : "#C7C7CC";
+  const nContiene = contiene.length;
+  const nTrazas = trazas.length;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      {/* El ancho va inline y no como clase: DialogContent trae `sm:max-w-lg` por
-          defecto y, con la misma especificidad, la variante responsive gana por
-          orden en el CSS. Un estilo inline le gana a las dos. `max-h-[90vh]` y
-          `overflow-y-auto` sí están compiladas en index.css. */}
       <DialogContent
-        className="max-h-[90vh] overflow-y-auto bg-white"
-        style={{ maxWidth: "48rem" }}
+        className="hoja-ios"
+        style={{
+          top: "auto", bottom: 0, left: 0, right: 0, translate: "none", margin: "0 auto",
+          width: "100%", maxWidth: 560, height: "94dvh", padding: 0, gap: 0, border: "none",
+          borderRadius: "14px 14px 0 0", background: N.fondo, display: "flex", flexDirection: "column",
+        }}
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FlaskConical className="w-5 h-5 text-blue-600" />
-            Información nutricional — {ingredient.name}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px 4px" }}>
+          <button type="button" onClick={onClose} disabled={guardando} style={{ ...txtBtn, flex: 1, textAlign: "left" }}>Cancelar</button>
+          <DialogTitle className="truncate" style={{ flex: 2, textAlign: "center", fontSize: 17, fontWeight: 600, color: "#000" }}>
+            Nutrición
           </DialogTitle>
-        </DialogHeader>
+          <button type="button" onClick={() => void guardar()} disabled={guardando} style={{ ...txtBtn, flex: 1, textAlign: "right", fontWeight: 600 }}>
+            {guardando ? "Guardando" : "Guardar"}
+          </button>
+        </div>
+        <DialogDescription className="truncate" style={{ textAlign: "center", fontSize: 14, color: N.sec, padding: "0 16px 12px" }}>
+          {ingredient.name}
+        </DialogDescription>
 
-        <div className="space-y-6">
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 16px max(env(safe-area-inset-bottom), 28px)" }}>
           {/* Estado en vivo */}
-          <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
-            <div className="flex items-center gap-2 mb-1">
-              <EstadoPunto estado={diagnostico.estado} />
-              <span className="text-sm text-gray-900">
-                {diagnostico.nutrientesCargados} de {diagnostico.nutrientesTotales} nutrientes cargados
+          <div style={{ ...tarjeta, padding: "12px 16px", marginBottom: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 5, background: colorEstado, flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 15, color: "#000" }}>
+                {diagnostico.nutrientesCargados} de {diagnostico.nutrientesTotales} nutrientes
+              </span>
+              <span style={{ fontSize: 13, color: N.sec }}>
+                {diagnostico.estado === "completa" ? "Completa" : diagnostico.estado === "parcial" ? "Parcial" : "Sin datos"}
               </span>
             </div>
-            {diagnostico.pendientes.map((p) => (
-              <p key={p} className="text-xs text-gray-600">{p}</p>
-            ))}
+            <div style={{ height: 4, borderRadius: 2, background: N.relleno, marginTop: 8, overflow: "hidden" }}>
+              <div style={{ height: 4, width: `${(diagnostico.nutrientesCargados / Math.max(1, diagnostico.nutrientesTotales)) * 100}%`, background: colorEstado }} />
+            </div>
+            {diagnostico.pendientes.length > 0 && (
+              <p style={{ fontSize: 12, color: N.sec, marginTop: 6, lineHeight: 1.4 }}>{diagnostico.pendientes.join(" · ")}</p>
+            )}
           </div>
 
-          {/* Base */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-2">Base de los valores</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Valores por</span>
+          {/* Base + nutrientes */}
+          <h3 style={titulo}>Valores por</h3>
+          <div style={{ ...tarjeta, marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 48, padding: "0 16px" }}>
+              <span style={{ flex: 1, fontSize: 16, color: "#000" }}>Base</span>
               <input
-                type="text"
+                aria-label="Cantidad base"
                 inputMode="decimal"
                 value={baseCantidad}
                 onChange={(e) => setBaseCantidad(e.target.value)}
-                className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                style={{ ...campo, flex: "none", width: 56 }}
               />
-              <select
-                value={baseUnidad}
-                onChange={(e) => setBaseUnidad(e.target.value as "g" | "ml")}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="g">gramos (g)</option>
-                <option value="ml">mililitros (ml)</option>
-              </select>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Copiá la base tal como la declara el proveedor. Normalmente 100 g o 100 ml.
-            </p>
-          </div>
-
-          {/* Nutrientes */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-2">Nutrientes</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {NUTRIENTES.map((clave) => (
-                <div key={clave}>
-                  <label className="block text-xs text-gray-600 mb-1">
-                    {ETIQUETA_NUTRIENTE[clave]}
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={valores[clave]}
-                    onChange={(e) => setValores({ ...valores, [clave]: e.target.value })}
-                    className={inputClass}
-                    placeholder="—"
-                  />
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Dejá vacío lo que el proveedor no declare. Un campo vacío es “no tengo el dato”; un 0 es
-              “el proveedor declara cero”, y no significan lo mismo.
-            </p>
-          </div>
-
-          {/* Conversiones */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-2">Conversión de unidades</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">
-                  Densidad (g/ml)
-                  {diagnostico.necesitaDensidad && <span className="text-red-500"> *</span>}
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={densidad}
-                  onChange={(e) => setDensidad(e.target.value)}
-                  className={inputClass}
-                  placeholder="Ej: 0.92"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Obligatoria si se mide en volumen. No se asume que 1 ml = 1 g.
-                </p>
+              <div role="group" style={{ display: "flex", padding: 2, borderRadius: 8, background: N.relleno }}>
+                {(["g", "ml"] as const).map((u) => (
+                  <button key={u} type="button" aria-pressed={baseUnidad === u} onClick={() => setBaseUnidad(u)}
+                    style={{ minWidth: 40, height: 28, borderRadius: 6, border: "none", fontSize: 14, fontWeight: baseUnidad === u ? 600 : 500, color: "#000", background: baseUnidad === u ? "#fff" : "transparent", boxShadow: baseUnidad === u ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+                    {u}
+                  </button>
+                ))}
               </div>
-
-              {esConteo && (
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">
-                    Peso por unidad (g) <span className="text-red-500">*</span>
+            </div>
+            {NUTRIENTES.map((clave) => {
+              const [nombre, unidad] = partes(clave);
+              return (
+                <div key={clave}>
+                  <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 46, padding: "0 16px" }}>
+                    <span style={{ flex: 1, fontSize: 15, color: "#000" }}>{nombre}</span>
+                    <input
+                      inputMode="decimal"
+                      value={valores[clave]}
+                      onChange={(e) => setValores({ ...valores, [clave]: e.target.value })}
+                      placeholder="—"
+                      style={{ ...campo, flex: "none", width: 80 }}
+                    />
+                    <span style={{ width: 34, fontSize: 14, color: N.sec }}>{unidad}</span>
                   </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={pesoPorUnidad}
-                    onChange={(e) => setPesoPorUnidad(e.target.value)}
-                    className={inputClass}
-                    placeholder="Ej: 55"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Esta materia prima se mide en “{ingredient.unit}”.
-                  </p>
                 </div>
-              )}
-            </div>
+              );
+            })}
           </div>
+          <p style={pie}>Copia lo que declara el proveedor. Vacío = “no tengo el dato”; 0 = “declara cero”: no es lo mismo.</p>
 
-          {/* Nutrientes añadidos */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-1">Nutrientes añadidos</h3>
-            <p className="text-xs text-gray-500 mb-2">
-              Los sellos “ALTO EN” solo aplican a nutrientes <strong>añadidos</strong>. El azúcar de un mix
-              de queque es añadido; la lactosa natural de la leche en polvo, no. Esto no se puede deducir
-              de los números.
-            </p>
-            <div className="space-y-2">
-              <Marca label="Tiene azúcares añadidos" checked={azucaresAnadidos} onChange={setAzucaresAnadidos} />
-              <Marca label="Tiene sodio añadido" checked={sodioAnadido} onChange={setSodioAnadido} />
-              <Marca label="Tiene grasas saturadas añadidas" checked={grasasAnadidas} onChange={setGrasasAnadidas} />
-            </div>
+          {/* Conversión */}
+          <h3 style={{ ...titulo, marginTop: 22 }}>Conversión</h3>
+          <div style={{ ...tarjeta, marginBottom: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 46, padding: "0 16px" }}>
+              <span style={{ flex: 1, fontSize: 15, color: "#000" }}>
+                Densidad{diagnostico.necesitaDensidad && <span style={{ color: N.rojo }}> *</span>}
+              </span>
+              <input inputMode="decimal" value={densidad} onChange={(e) => setDensidad(e.target.value)} placeholder="0,92" style={{ ...campo, flex: "none", width: 80 }} />
+              <span style={{ width: 34, fontSize: 14, color: N.sec }}>g/ml</span>
+            </label>
+            {esConteo && (
+              <>
+                <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 46, padding: "0 16px" }}>
+                  <span style={{ flex: 1, fontSize: 15, color: "#000" }}>Peso por {ingredient.unit.replace(/s$/, "")}<span style={{ color: N.rojo }}> *</span></span>
+                  <input inputMode="decimal" value={pesoPorUnidad} onChange={(e) => setPesoPorUnidad(e.target.value)} placeholder="55" style={{ ...campo, flex: "none", width: 80 }} />
+                  <span style={{ width: 34, fontSize: 14, color: N.sec }}>g</span>
+                </label>
+              </>
+            )}
           </div>
+          <p style={pie}>La densidad es obligatoria si se mide en volumen: no se asume que 1 ml = 1 g.</p>
+
+          {/* Añadidos */}
+          <h3 style={{ ...titulo, marginTop: 22 }}>Añadidos (sellos “ALTO EN”)</h3>
+          <div style={{ ...tarjeta, marginBottom: 6 }}>
+            <FilaSwitch label="Azúcares añadidos" checked={azucaresAnadidos} onChange={setAzucaresAnadidos} />
+            <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+            <FilaSwitch label="Sodio añadido" checked={sodioAnadido} onChange={setSodioAnadido} />
+            <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+            <FilaSwitch label="Grasas saturadas añadidas" checked={grasasAnadidas} onChange={setGrasasAnadidas} />
+          </div>
+          <p style={pie}>Los sellos solo cuentan lo añadido: el azúcar de un mix de queque sí; la lactosa natural de la leche, no.</p>
 
           {/* Alérgenos */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-1">Alérgenos</h3>
-            <p className="text-xs text-gray-500 mb-2">
-              Solo lo que el proveedor declara. Nunca se infiere una traza que no esté declarada.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-gray-600 mb-1">Contiene</p>
-                <div className="space-y-1">
-                  {catalogo.map((a) => (
-                    <Marca
-                      key={`c-${a.id}`}
-                      label={a.nombre}
-                      checked={contiene.includes(a.id)}
-                      onChange={() => alternar(contiene, setContiene, a.id)}
-                    />
-                  ))}
+          <h3 style={{ ...titulo, marginTop: 22 }}>
+            Alérgenos{nContiene || nTrazas ? ` · ${nContiene} contiene · ${nTrazas} trazas` : ""}
+          </h3>
+          <div style={{ ...tarjeta, marginBottom: 6 }}>
+            {catalogo.map((a, i) => {
+              const c = contiene.includes(a.id);
+              const t = trazas.includes(a.id);
+              return (
+                <div key={a.id}>
+                  {i > 0 && <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 46, padding: "0 12px 0 16px" }}>
+                    <span style={{ flex: 1, fontSize: 15, color: c ? "#000" : t ? "#3C3C43" : N.sec }}>{a.nombre}</span>
+                    <Pastilla activo={c} color={N.rojo} onClick={() => alternar(contiene, setContiene, a.id)}>Contiene</Pastilla>
+                    <Pastilla activo={t} color="#FF9500" onClick={() => alternar(trazas, setTrazas, a.id)}>Trazas</Pastilla>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600 mb-1">Puede contener trazas de</p>
-                <div className="space-y-1">
-                  {catalogo.map((a) => (
-                    <Marca
-                      key={`t-${a.id}`}
-                      label={a.nombre}
-                      checked={trazas.includes(a.id)}
-                      onChange={() => alternar(trazas, setTrazas, a.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
+          <p style={pie}>Solo lo que declara el proveedor. Nunca se infiere una traza que no esté declarada.</p>
 
-          {/* Declaración del proveedor */}
-          <div>
-            <h3 className="text-sm text-gray-900 mb-2">Datos del proveedor</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">
-                  Ingredientes declarados (para materias primas compuestas)
-                </label>
-                <textarea
-                  value={ingredientesDeclarados}
-                  onChange={(e) => setIngredientesDeclarados(e.target.value)}
-                  rows={3}
-                  className={inputClass}
-                  placeholder="harina de trigo enriquecida, azúcar, suero de leche en polvo, sal…"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Transcribí la declaración tal cual. Se usa para expandir el ingrediente en la etiqueta.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Marca</label>
-                  <input
-                    type="text"
-                    value={marca}
-                    onChange={(e) => setMarca(e.target.value)}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Fuente de la información</label>
-                  <input
-                    type="text"
-                    value={fuente}
-                    onChange={(e) => setFuente(e.target.value)}
-                    className={inputClass}
-                    placeholder="Ej: ficha técnica del proveedor"
-                  />
-                </div>
-              </div>
-            </div>
+          {/* Proveedor */}
+          <h3 style={{ ...titulo, marginTop: 22 }}>Datos del proveedor</h3>
+          <div style={{ ...tarjeta, marginBottom: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 46, padding: "0 16px" }}>
+              <span style={{ fontSize: 15, color: "#000" }}>Marca</span>
+              <input value={marca} onChange={(e) => setMarca(e.target.value)} placeholder="Opcional" style={campo} />
+            </label>
+            <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 46, padding: "0 16px" }}>
+              <span style={{ fontSize: 15, color: "#000" }}>Fuente</span>
+              <input value={fuente} onChange={(e) => setFuente(e.target.value)} placeholder="Ficha técnica" style={campo} />
+            </label>
+            <div style={{ height: 0.5, background: N.sep, marginLeft: 16 }} />
+            <textarea
+              aria-label="Ingredientes declarados"
+              value={ingredientesDeclarados}
+              onChange={(e) => setIngredientesDeclarados(e.target.value)}
+              rows={3}
+              placeholder="Ingredientes declarados (si es compuesta): harina de trigo, azúcar, sal…"
+              style={{ display: "block", width: "100%", border: "none", outline: "none", resize: "none", padding: "12px 16px", fontSize: 16, color: "#000", background: "transparent", fontFamily: "inherit" }}
+            />
           </div>
-
-          <div className="flex gap-3">
-            <Button
-              onClick={guardar}
-              disabled={guardando}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              {guardando ? "Guardando..." : "Guardar"}
-            </Button>
-            <Button variant="outline" onClick={onClose} className="flex-1">
-              Cancelar
-            </Button>
-          </div>
+          <p style={pie}>Los ingredientes declarados se transcriben tal cual y se usan para la lista de ingredientes de la etiqueta.</p>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function Marca({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
+const N = {
+  fondo: "#F2F2F7",
+  sec: "#8E8E93",
+  sep: "rgba(60, 60, 67, 0.18)",
+  relleno: "rgba(118, 118, 128, 0.12)",
+  azul: "#007AFF",
+  rojo: "#FF3B30",
+};
+const tarjeta: React.CSSProperties = { background: "#fff", borderRadius: 12, overflow: "hidden" };
+const titulo: React.CSSProperties = { fontSize: 13, color: N.sec, textTransform: "uppercase", letterSpacing: "0.02em", padding: "0 16px 6px", fontWeight: 400 };
+const pie: React.CSSProperties = { fontSize: 13, color: N.sec, padding: "6px 16px 0", lineHeight: 1.35 };
+const txtBtn: React.CSSProperties = { background: "none", border: "none", padding: "6px 0", fontSize: 17, color: N.azul, cursor: "pointer" };
+const campo: React.CSSProperties = { flex: 1, minWidth: 0, height: 40, border: "none", outline: "none", background: "transparent", fontSize: 16, color: "#000", textAlign: "right", padding: 0 };
+
+function FilaSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-gray-700">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="w-4 h-4"
-      />
-      {label}
-    </label>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 48, padding: "0 16px" }}>
+      <span style={{ flex: 1, fontSize: 15, color: "#000" }}>{label}</span>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+    </div>
+  );
+}
+
+function Pastilla({ activo, color, onClick, children }: { activo: boolean; color: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" aria-pressed={activo} onClick={onClick}
+      style={{ height: 28, padding: "0 10px", borderRadius: 14, border: "none", fontSize: 13, fontWeight: 600, background: activo ? color : N.relleno, color: activo ? "#fff" : "#3C3C43" }}>
+      {children}
+    </button>
   );
 }
 
 export function EstadoPunto({ estado }: { estado: "completa" | "parcial" | "sin_datos" }) {
-  const color =
-    estado === "completa" ? "bg-green-500" : estado === "parcial" ? "bg-yellow-500" : "bg-gray-300";
-  return <span className={`w-3 h-3 rounded-full ${color}`} />;
+  const color = estado === "completa" ? "#34C759" : estado === "parcial" ? "#FFCC00" : "#C7C7CC";
+  return <span style={{ width: 10, height: 10, borderRadius: 5, background: color, display: "inline-block" }} />;
 }

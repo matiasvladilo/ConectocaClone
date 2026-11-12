@@ -245,7 +245,7 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
   );
 
   // ── UI ───────────────────────────────────────────────────────────────────
-  const [filtroEstado, setFiltroEstado] = useState<"todos" | "sin-stock" | "bajo" | "normal">("todos");
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "sin-stock" | "bajo" | "normal" | "nutricion">("todos");
 
   const conteo = ingredients.reduce(
     (acc, i) => {
@@ -261,6 +261,8 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
   const visibles = filteredIngredients
     .filter((i) => {
       if (filtroEstado === "todos") return true;
+      // Para cargar los datos nutricionales que faltan, de a uno.
+      if (filtroEstado === "nutricion") return diagnosticarFicha(i.unit, fichas[i.id] || null).estado !== "completa";
       const s = getStockStatus(i).status;
       return filtroEstado === "normal" ? s === "normal" || s === "exceso" : s === filtroEstado;
     })
@@ -326,6 +328,7 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
             ["sin-stock", "Sin stock", conteo.sin, "#FF3B30"],
             ["bajo", "Bajo el mínimo", conteo.bajo, "#FF9500"],
             ["normal", "OK", conteo.normal, "#34C759"],
+            ["nutricion", "Sin datos nutricionales", resumenNutricional.parcial + resumenNutricional.sin_datos, "#5856D6"],
           ] as const).map(([k, t, n, c]) => {
             const activo = filtroEstado === k;
             return (
@@ -353,8 +356,10 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
           {ingredients.length > 0 && (
             <>
               <div style={{ height: 0.5, background: M.separador, marginLeft: 16 }} />
-              {/* Cuánto falta para poder generar etiquetas nutricionales. */}
-              <div style={{ padding: "10px 16px 12px" }}>
+              {/* Cuánto falta para poder generar etiquetas nutricionales. Al
+                  tocarlo filtra la lista por lo que falta cargar. */}
+              <button type="button" className="fila-ios" onClick={() => setFiltroEstado(filtroEstado === "nutricion" ? "todos" : "nutricion")}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "none", padding: "10px 16px 12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <FlaskConical style={{ width: 16, height: 16, color: M.azul }} />
                   <span style={{ flex: 1, fontSize: 15, color: "#000" }}>Datos nutricionales</span>
@@ -367,8 +372,9 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
                 </div>
                 <p style={{ fontSize: 12, color: M.secundario, marginTop: 6 }}>
                   {resumenNutricional.completa} completas · {resumenNutricional.parcial} parciales · {resumenNutricional.sin_datos} sin datos
+                  {resumenNutricional.parcial + resumenNutricional.sin_datos > 0 && filtroEstado !== "nutricion" ? " · Ver las que faltan ›" : ""}
                 </p>
-              </div>
+              </button>
             </>
           )}
         </div>
@@ -386,7 +392,14 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
           </div>
         ) : (
           <>
-            <h3 style={tituloM}>{visibles.length} materias primas · lo urgente primero</h3>
+            {filtroEstado === "nutricion" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px 6px" }}>
+                <span style={{ ...tituloM, padding: 0, flex: 1 }}>{visibles.length} sin datos nutricionales completos</span>
+                <button type="button" onClick={() => setFiltroEstado("todos")} style={{ background: "none", border: "none", padding: 0, color: M.azul, fontSize: 14 }}>Quitar filtro</button>
+              </div>
+            ) : (
+              <h3 style={tituloM}>{visibles.length} materias primas · lo urgente primero</h3>
+            )}
             <div style={tarjetaM}>
               {visibles.length === 0 ? (
                 <p style={{ padding: "24px 16px", textAlign: "center", fontSize: 15, color: M.secundario }}>Ninguna coincide con el filtro</p>
@@ -395,14 +408,15 @@ export function IngredientManagement({ onBack, accessToken }: IngredientManageme
                 return (
                   <div key={ing.id}>
                     {i > 0 && <div style={{ height: 0.5, background: M.separador, marginLeft: 34 }} />}
-                    <button type="button" onClick={() => handleEdit(ing)} className="fila-ios"
+                    <button type="button" onClick={() => (filtroEstado === "nutricion" ? setFichaAbierta(ing) : handleEdit(ing))} className="fila-ios"
                       style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 58, padding: "8px 12px 8px 16px", textAlign: "left", border: "none" }}>
                       <span style={{ width: 8, height: 8, borderRadius: 4, background: COLOR_ESTADO[s], flexShrink: 0 }} />
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span className="truncate" style={{ display: "block", fontSize: 16, color: "#000" }}>{ing.name}</span>
                         <span className="truncate" style={{ display: "block", fontSize: 12, color: M.secundario }}>
-                          {ing.costPerUnit ? `${formatCLP(ing.costPerUnit)}/${ing.unit}` : "Sin costo"}
-                          {ing.supplier ? ` · ${ing.supplier}` : ""}
+                          {filtroEstado === "nutricion"
+                            ? ETIQUETA_ESTADO[diagnosticarFicha(ing.unit, fichas[ing.id] || null).estado]
+                            : `${ing.costPerUnit ? `${formatCLP(ing.costPerUnit)}/${ing.unit}` : "Sin costo"}${ing.supplier ? ` · ${ing.supplier}` : ""}`}
                         </span>
                       </span>
                       <span style={{ textAlign: "right", flexShrink: 0 }}>
