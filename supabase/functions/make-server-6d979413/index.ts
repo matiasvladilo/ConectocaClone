@@ -476,6 +476,18 @@ app.get("/make-server-6d979413/health", (c) => {
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') || '';
+// Dónde viven las pantallas de los enlaces de correo (AccionCuenta). Separado
+// de APP_PUBLIC_URL porque la PWA publicada todavía no las tiene: mientras se
+// prueba en la app, apunta a un deploy aparte del front nuevo.
+const CUENTA_PUBLIC_URL = (Deno.env.get('CUENTA_PUBLIC_URL')?.trim().replace(/\/+$/, '')) || APP_PUBLIC_URL;
+
+/**
+ * Flujo nuevo de cuenta (verificar correo + recuperar con pantalla propia)
+ * solo para clientes que lo piden explícitamente (`flujoCuenta: 2`, lo manda
+ * el front nuevo). La PWA publicada no lo manda y conserva el comportamiento
+ * anterior tal cual, hasta que se publique el front nuevo.
+ */
+const usaFlujoCuentaNuevo = (body: any) => Number(body?.flujoCuenta) === 2;
 const RESPUESTA_GENERICA_RECUPERACION = 'Si el correo existe en nuestro sistema, recibirás un enlace para crear una nueva contraseña';
 
 /**
@@ -490,19 +502,24 @@ const RESPUESTA_GENERICA_RECUPERACION = 'Si el correo existe en nuestro sistema,
  */
 app.post("/make-server-6d979413/auth/reset-password", async (c) => {
   try {
-    const { email } = await c.req.json();
-    const correo = String(email || '').trim().toLowerCase();
+    const body = await c.req.json();
+    const correo = String(body?.email || '').trim().toLowerCase();
     if (!correo) return c.json({ error: 'Email es requerido' }, 400);
 
-    if (APP_PUBLIC_URL && RESEND_API_KEY) {
+    if (!usaFlujoCuentaNuevo(body)) {
+      // Comportamiento anterior, sin cambios (PWA publicada).
+      await supabaseAdmin.auth.resetPasswordForEmail(correo, {
+        redirectTo: `${SUPABASE_URL}/auth/v1/verify`,
+      });
+    } else if (CUENTA_PUBLIC_URL && RESEND_API_KEY) {
       const { data, error } = await supabaseAdmin.auth.admin.generateLink({ type: 'recovery', email: correo });
       // Error = el correo no existe (u otra falla): se responde igual.
       if (!error && data?.properties?.hashed_token) {
-        const url = enlaceCuenta(APP_PUBLIC_URL, 'nueva-clave', data.properties.hashed_token, 'recovery');
+        const url = enlaceCuenta(CUENTA_PUBLIC_URL, 'nueva-clave', data.properties.hashed_token, 'recovery');
         await enviarCorreoCuenta(RESEND_API_KEY, { to: correo, ...correoRecuperacion(url) });
       }
     } else {
-      console.error('reset-password: falta APP_PUBLIC_URL o RESEND_API_KEY; no se envía correo');
+      console.error('reset-password: falta CUENTA_PUBLIC_URL/APP_PUBLIC_URL o RESEND_API_KEY; no se envía correo');
     }
   } catch (err) {
     console.error('Error en reset-password:', err);
@@ -521,7 +538,7 @@ app.post("/make-server-6d979413/auth/resend-verification", async (c) => {
   try {
     const { email } = await c.req.json();
     const correo = String(email || '').trim().toLowerCase();
-    if (!correo || !APP_PUBLIC_URL || !RESEND_API_KEY) return c.json(respuesta);
+    if (!correo || !CUENTA_PUBLIC_URL || !RESEND_API_KEY) return c.json(respuesta);
 
     const { data: perfil } = await supabaseAdmin
       .from('profiles').select('id, name').eq('email', correo).maybeSingle();
@@ -532,7 +549,7 @@ app.post("/make-server-6d979413/auth/resend-verification", async (c) => {
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({ type: 'magiclink', email: correo });
     if (!error && data?.properties?.hashed_token) {
-      const url = enlaceCuenta(APP_PUBLIC_URL, 'verificar', data.properties.hashed_token, 'magiclink');
+      const url = enlaceCuenta(CUENTA_PUBLIC_URL, 'verificar', data.properties.hashed_token, 'magiclink');
       await enviarCorreoCuenta(RESEND_API_KEY, { to: correo, ...correoVerificacion(perfil.name || '', url) });
     }
   } catch (err) {
@@ -543,7 +560,9 @@ app.post("/make-server-6d979413/auth/resend-verification", async (c) => {
 
 app.post("/make-server-6d979413/signup", async (c) => {
   try {
-    const { email, password, name, role, businessAction, businessCode, businessName } = await c.req.json();
+    const cuerpo = await c.req.json();
+    const { email, password, name, role, businessAction, businessCode, businessName } = cuerpo;
+    const verificarCorreo = usaFlujoCuentaNuevo(cuerpo);
 
     if (!email || !password || !name) {
       return c.json({ error: 'Email, password y nombre son requeridos' }, 400);
@@ -631,12 +650,21 @@ app.post("/make-server-6d979413/signup", async (c) => {
     // ('signup') crea la cuenta SIN confirmar y devuelve el token, sin enviar
     // nada; el correo lo manda Resend más abajo. Hasta confirmar, Supabase
     // rechaza el inicio de sesión ("Email not confirmed").
-    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-      type: 'signup',
-      email,
-      password,
-      options: { data: { name, role: userRole, businessId } },
-    });
+    // Sin el flujo nuevo (PWA publicada) se mantiene lo anterior: cuenta
+    // confirmada de inmediato. `properties` queda undefined y no se envía correo.
+    const { data, error } = verificarCorreo
+      ? await supabaseAdmin.auth.admin.generateLink({
+          type: 'signup',
+          email,
+          password,
+          options: { data: { name, role: userRole, businessId } },
+        })
+      : await supabaseAdmin.auth.admin.createUser({
+          email,
+          password,
+          user_metadata: { name, role: userRole, businessId },
+          email_confirm: true,
+        });
 
     if (error) {
       if (error.message.includes('already registered') || error.message.includes('already been registered')) {
@@ -679,10 +707,12 @@ app.post("/make-server-6d979413/signup", async (c) => {
     // Correo de verificación. Si el envío falla la cuenta igual queda creada:
     // desde el login se puede pedir "Reenviar correo".
     let correoEnviado = false;
-    const tokenHash = data.properties?.hashed_token;
-    if (tokenHash && APP_PUBLIC_URL && RESEND_API_KEY) {
+    const tokenHash = (data as any).properties?.hashed_token;
+    if (!verificarCorreo) {
+      // Flujo anterior: no hay verificación que enviar.
+    } else if (tokenHash && CUENTA_PUBLIC_URL && RESEND_API_KEY) {
       try {
-        const url = enlaceCuenta(APP_PUBLIC_URL, 'verificar', tokenHash, 'signup');
+        const url = enlaceCuenta(CUENTA_PUBLIC_URL, 'verificar', tokenHash, 'signup');
         await enviarCorreoCuenta(RESEND_API_KEY, { to: email, ...correoVerificacion(name || '', url) });
         correoEnviado = true;
       } catch (err) {
@@ -694,7 +724,7 @@ app.post("/make-server-6d979413/signup", async (c) => {
 
     return c.json({
       success: true,
-      requiereVerificacion: true,
+      requiereVerificacion: verificarCorreo,
       correoEnviado,
       user: { id: userId, email, name, role: userRole, businessId },
       business: {

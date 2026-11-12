@@ -239,7 +239,10 @@ export const authAPI = {
         role: role || 'user',
         businessAction,
         businessName,
-        businessCode
+        businessCode,
+        // Pide el flujo nuevo (verificación por correo). Sin esto el servidor
+        // se comporta como antes; así la PWA publicada no cambia.
+        flujoCuenta: 2,
       }),
     });
   },
@@ -253,7 +256,7 @@ export const authAPI = {
   resetPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
     return fetchAPI('/auth/reset-password', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, flujoCuenta: 2 }),
     });
   },
 };
