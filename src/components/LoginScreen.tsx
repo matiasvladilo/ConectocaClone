@@ -196,7 +196,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           ? 'Error al crear la cuenta. Por favor intenta de nuevo.'
           // Ya no hay "credenciales de demo" que sugerir: las cuentas demo se
           // retiraron junto con sus contraseñas en claro (A-01).
-          : 'Credenciales incorrectas. Verificá tu email y contraseña.';
+          : 'Correo o contraseña incorrectos.';
       } else if (error.message?.includes('already registered') || error.message?.includes('ya está registrado')) {
         errorMessage = 'Este email ya está registrado. Por favor inicia sesión.';
         setIsCreatingAccount(false);
