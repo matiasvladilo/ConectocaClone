@@ -98,3 +98,35 @@ export function agruparPorPadre(categories: Category[]): CategoriaConHijas[] {
     .filter(esRaizEfectiva)
     .map(categoria => ({ categoria, hijas: hijasDe(categories, categoria.id) }));
 }
+
+/**
+ * Categorías que puede pedir un miembro restringido (tabla
+ * categorias_permitidas). `permitidas` null o vacía = sin restricción.
+ * Una categoría permitida trae también sus subcategorías, igual que el trigger
+ * de la base (validar_categoria_permitida), que es quien la hace cumplir.
+ */
+export function idsPermitidos(categories: Category[], permitidas: string[] | null): Set<string> | null {
+  if (!permitidas || permitidas.length === 0) return null;
+  const ids = new Set<string>();
+  for (const id of permitidas) {
+    for (const h of idsDeCategoriaConHijas(categories, id)) ids.add(h);
+  }
+  return ids;
+}
+
+/** Recorta el catálogo a lo permitido: productos y las categorías que los contienen. */
+export function recortarCatalogo<P extends { categoryId?: string | null }>(
+  products: P[],
+  categories: Category[],
+  permitidas: string[] | null,
+): { products: P[]; categories: Category[] } {
+  const ids = idsPermitidos(categories, permitidas);
+  if (!ids) return { products, categories };
+  // Una subcategoría permitida suelta mantiene visible a su padre (el chip de
+  // la fila de arriba), pero solo con ella dentro.
+  const padres = new Set(categories.filter(c => ids.has(c.id) && c.parentId).map(c => c.parentId as string));
+  return {
+    products: products.filter(p => !!p.categoryId && ids.has(p.categoryId)),
+    categories: categories.filter(c => ids.has(c.id) || padres.has(c.id)),
+  };
+}

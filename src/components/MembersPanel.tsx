@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Loader2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence, type PanInfo } from 'motion/react';
 import { toast } from 'sonner';
-import { businessAPI, type BusinessMember } from '../utils/api';
+import { businessAPI, categoriesAPI, categoriasPermitidasAPI, type BusinessMember, type Category } from '../utils/api';
+import { raicesDe } from '../utils/categoryTree';
 
 /**
  * Pantalla "Miembros" (solo admin): se apila sobre "Mi cuenta" deslizándose
@@ -65,6 +66,54 @@ export function MembersPanel({ isOpen, onClose, accessToken, currentUserId }: Me
   const [regenerando, setRegenerando] = useState(false);
   const [elegido, setElegido] = useState<BusinessMember | null>(null);
   const [guardando, setGuardando] = useState<Rol | null>(null);
+
+  // Qué categorías puede pedir el miembro elegido (vacío = todo el catálogo).
+  const [categorias, setCategorias] = useState<Category[]>([]);
+  const [permitidasOriginal, setPermitidasOriginal] = useState<string[] | null>(null);
+  const [permitidas, setPermitidas] = useState<string[]>([]);
+  const [guardandoPermisos, setGuardandoPermisos] = useState(false);
+  const restringible = !!elegido && (elegido.role === 'local' || elegido.role === 'user');
+
+  useEffect(() => {
+    if (!isOpen || !accessToken || categorias.length) return;
+    categoriesAPI.getAll(accessToken).then(setCategorias).catch(() => {});
+  }, [isOpen, accessToken, categorias.length]);
+
+  useEffect(() => {
+    setPermitidasOriginal(null);
+    setPermitidas([]);
+    if (!elegido || !restringible) return;
+    categoriasPermitidasAPI
+      .de(elegido.id)
+      .then((ids) => { setPermitidasOriginal(ids); setPermitidas(ids); })
+      .catch(() => { setPermitidasOriginal([]); setPermitidas([]); });
+  }, [elegido, restringible]);
+
+  const permisosCambiaron =
+    permitidasOriginal !== null &&
+    (permitidas.length !== permitidasOriginal.length || permitidas.some((id) => !permitidasOriginal.includes(id)));
+
+  const alternarCategoria = (id: string) =>
+    setPermitidas((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+
+  const guardarPermisos = async () => {
+    if (!elegido) return;
+    setGuardandoPermisos(true);
+    try {
+      await categoriasPermitidasAPI.fijar(elegido.id, permitidas);
+      setPermitidasOriginal(permitidas);
+      const nombres = raicesDe(categorias).filter((c) => permitidas.includes(c.id)).map((c) => c.name.trim());
+      toast.success(
+        permitidas.length === 0
+          ? `${elegido.name || elegido.email} puede pedir todo`
+          : `${elegido.name || elegido.email} solo puede pedir ${nombres.join(', ')}`,
+      );
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo guardar');
+    } finally {
+      setGuardandoPermisos(false);
+    }
+  };
 
   const cargar = useCallback(async () => {
     if (!accessToken) return;
@@ -321,7 +370,7 @@ export function MembersPanel({ isOpen, onClose, accessToken, currentUserId }: Me
                       <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {elegido.name || elegido.email}
                       </p>
-                      <p style={{ fontSize: 13, color: IOS.secundario }}>Elige su rol</p>
+                      <p style={{ fontSize: 13, color: IOS.secundario }}>{restringible ? 'Rol y lo que puede pedir' : 'Elige su rol'}</p>
                     </div>
                     <button
                       type="button"
@@ -333,6 +382,56 @@ export function MembersPanel({ isOpen, onClose, accessToken, currentUserId }: Me
                     </button>
                   </div>
                   <div style={{ overflowY: 'auto', padding: '0 16px' }}>
+                    {restringible && (
+                      <>
+                        <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>
+                          Puede pedir
+                        </h3>
+                        <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+                          {permitidasOriginal === null ? (
+                            <div style={{ display: 'flex', justifyContent: 'center', padding: 18 }}>
+                              <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: IOS.secundario }} />
+                            </div>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => setPermitidas([])} className="fila-ios"
+                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 48, padding: '0 16px', textAlign: 'left' }}>
+                                <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>Todo el catálogo</span>
+                                {permitidas.length === 0 && <Check style={{ width: 20, height: 20, color: IOS.azul }} />}
+                              </button>
+                              {raicesDe(categorias).map((c) => (
+                                <div key={c.id}>
+                                  <div style={{ height: 1, background: IOS.separador, marginLeft: 16 }} />
+                                  <button type="button" onClick={() => alternarCategoria(c.id)} className="fila-ios"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 48, padding: '0 16px', textAlign: 'left' }}>
+                                    <span style={{ width: 10, height: 10, borderRadius: 5, background: c.color || IOS.secundario, flexShrink: 0 }} />
+                                    <span style={{ flex: 1, fontSize: 16, color: IOS.texto }}>{c.name.trim()}</span>
+                                    {permitidas.includes(c.id) && <Check style={{ width: 20, height: 20, color: IOS.azul }} />}
+                                  </button>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                        <p style={{ fontSize: 13, color: IOS.secundario, padding: '6px 16px 0', lineHeight: 1.35 }}>
+                          {permitidas.length === 0
+                            ? 'Ve y puede pedir todos los productos.'
+                            : 'Solo verá esas categorías (con sus subcategorías) al hacer un pedido. Cualquier otro producto se rechaza.'}
+                        </p>
+                        {permisosCambiaron && (
+                          <button type="button" onClick={() => void guardarPermisos()} disabled={guardandoPermisos} className="boton-ios"
+                            style={{ width: '100%', height: 48, borderRadius: 12, border: 'none', background: IOS.azul, color: '#fff', fontSize: 16, fontWeight: 600, marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                            {guardandoPermisos && <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />}
+                            Guardar lo que puede pedir
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {restringible && (
+                      <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '22px 16px 6px', fontWeight: 400 }}>
+                        Rol
+                      </h3>
+                    )}
                     <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
                       {ROLES.filter((r) => r.asignable !== false).map((r, i) => {
                         const actual = infoRol(elegido.role).valor === r.valor;
@@ -360,6 +459,7 @@ export function MembersPanel({ isOpen, onClose, accessToken, currentUserId }: Me
                         );
                       })}
                     </div>
+
                   </div>
                 </motion.div>
               </>

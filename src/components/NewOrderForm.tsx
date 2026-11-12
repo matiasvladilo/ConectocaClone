@@ -31,9 +31,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ImageWithFallback } from './figma/ImageWithFallback';
-import { productsAPI, categoriesAPI, type Product as APIProduct, type Category, type ProductIngredient } from '../utils/api';
+import { productsAPI, categoriesAPI, categoriasPermitidasAPI, type Product as APIProduct, type Category, type ProductIngredient } from '../utils/api';
 import { formatCLP } from '../utils/format';
-import { hijasDe, idsDeCategoriaConHijas, raicesDe } from '../utils/categoryTree';
+import { hijasDe, idsDeCategoriaConHijas, raicesDe, recortarCatalogo } from '../utils/categoryTree';
 import { calcularCantidadAgregable } from '../utils/cartStock';
 import { productoUsaLotes } from '../utils/productLots';
 import { projectId } from '../utils/supabase/info';
@@ -128,10 +128,16 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   // para qué dispara el recálculo.
   const [lotPreviews, setLotPreviews] = useState<Record<string, { quantity: number; precioUnitario: number; total: number }>>({});
 
+  // Categorías que puede pedir este usuario (vacío = todas). La base es la que
+  // hace cumplir la regla; acá solo se recorta el catálogo para no ofrecer lo
+  // que después se rechazaría.
+  const [permitidas, setPermitidas] = useState<string[] | null>(null);
+
   // Load products from API
   useEffect(() => {
     loadProducts();
     loadCategories();
+    categoriasPermitidasAPI.mias().then(setPermitidas).catch(() => setPermitidas([]));
   }, []);
 
   // Refrescar productos cada 5 seg para reflejar cambios de stock de otros usuarios
@@ -652,13 +658,14 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   // etiquetado en sus subcategorías. Con la comparación exacta anterior, tocar
   // "Distribuidora" dejaba el catálogo vacío y el operador concluía que le
   // borraron los productos.
-  const categoriasRaiz = raicesDe(categories);
+  const catalogo = recortarCatalogo(products, categories, permitidas);
+  const categoriasRaiz = raicesDe(catalogo.categories);
 
   // Segunda fila: las subcategorías del padre elegido, para afinar. Solo aparece
   // si ese padre tiene hijas.
   const subcategoriasVisibles = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
     ? []
-    : hijasDe(categories, selectedCategoryFilter);
+    : hijasDe(catalogo.categories, selectedCategoryFilter);
 
   // Se re-valida contra las hijas visibles y no se confía solo en limpiar el
   // estado al cambiar de padre: un filtro de subcategoría que sobreviva a un
@@ -669,7 +676,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
 
   const idsDelFiltro = (selectedCategoryFilter === 'all' || selectedCategoryFilter === 'uncategorized')
     ? null
-    : idsDeCategoriaConHijas(categories, selectedCategoryFilter);
+    : idsDeCategoriaConHijas(catalogo.categories, selectedCategoryFilter);
 
   const handleSeleccionarCategoria = (valor: string) => {
     setSelectedCategoryFilter(valor);
@@ -677,7 +684,7 @@ export function NewOrderForm({ onBack, onSubmit, accessToken, userRole }: NewOrd
   };
 
   // Productos que pasan búsqueda + categoría.
-  const productosVisibles = products.filter((product) => {
+  const productosVisibles = catalogo.products.filter((product) => {
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch =
       product.name.toLowerCase().includes(searchLower) ||

@@ -374,6 +374,11 @@ export const ordersAPI = {
       if (stockMatch) {
         throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
       }
+      // Trigger order_items_categoria_permitida (20261112_a).
+      const categoriaMatch = (error.message || '').match(/CATEGORIA_NO_PERMITIDA:(.+)/);
+      if (categoriaMatch) {
+        throw new Error(`"${categoriaMatch[1].trim()}" no está habilitado para tu local`);
+      }
       throw new Error(`Error guardando pedido: ${error.message}`);
     }
 
@@ -434,6 +439,11 @@ export const ordersAPI = {
       const stockMatch = (error.message || '').match(/STOCK_INSUFICIENTE:(.+)/);
       if (stockMatch) {
         throw new Error(`Stock insuficiente para "${stockMatch[1].trim()}"`);
+      }
+      // Trigger order_items_categoria_permitida (20261112_a).
+      const categoriaMatch = (error.message || '').match(/CATEGORIA_NO_PERMITIDA:(.+)/);
+      if (categoriaMatch) {
+        throw new Error(`"${categoriaMatch[1].trim()}" no está habilitado para tu local`);
       }
       // La RPC rechaza si el pedido no es del negocio del usuario o su rol no
       // puede editar (mismo criterio que canEditOrder, pero del lado servidor).
@@ -1189,5 +1199,43 @@ export const stockEventsAPI = {
   getByProduct: async (token: string, productId: string, limit: number = 50): Promise<StockEvent[]> => {
     const response = await fetchAPI(`/products/${productId}/stock-events?limit=${limit}`, {}, token);
     return response?.data || [];
+  },
+};
+/**
+ * Categorías que puede pedir cada miembro (tabla categorias_permitidas,
+ * migración 20261112_a). Lista vacía = puede pedir todo. Se lee directo con el
+ * cliente de Supabase (RLS: cada uno ve las suyas, el admin las de su negocio)
+ * y se escribe solo con la RPC fijar_categorias_permitidas, que exige admin.
+ */
+export const categoriasPermitidasAPI = {
+  mias: async (): Promise<string[]> => {
+    const { createClient } = await import('./supabase/client');
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const { data, error } = await supabase
+      .from('categorias_permitidas').select('category_id').eq('profile_id', user.id);
+    // Si la tabla todavía no existe (migración sin aplicar) se trata como "sin
+    // restricción": la base igual es la que hace cumplir la regla.
+    if (error) return [];
+    return (data || []).map((r: any) => r.category_id);
+  },
+  de: async (profileId: string): Promise<string[]> => {
+    const { createClient } = await import('./supabase/client');
+    const { data, error } = await createClient()
+      .from('categorias_permitidas').select('category_id').eq('profile_id', profileId);
+    if (error) throw new Error('No se pudieron cargar las categorías permitidas');
+    return (data || []).map((r: any) => r.category_id);
+  },
+  fijar: async (profileId: string, categorias: string[]): Promise<void> => {
+    const { createClient } = await import('./supabase/client');
+    const { error } = await createClient().rpc('fijar_categorias_permitidas', {
+      p_profile: profileId,
+      p_categorias: categorias,
+    });
+    if (error) {
+      if (/NO_AUTORIZADO/.test(error.message)) throw new Error('Solo un administrador puede cambiar esto');
+      throw new Error('No se pudo guardar. ¿Está aplicada la migración de categorías permitidas?');
+    }
   },
 };
