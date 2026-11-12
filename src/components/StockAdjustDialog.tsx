@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
+import { PackagePlus, PackageMinus, ClipboardCheck, Minus, Plus } from 'lucide-react';
 import type { Product } from '../utils/api';
 
 // Se exporta porque el backend necesita saber con qué modo se hizo el ajuste
@@ -17,6 +18,22 @@ interface StockAdjustDialogProps {
   saving?: boolean;
 }
 
+/**
+ * Tres acciones con nombre de la vida real en vez de "sumar / corregir" y un
+ * signo para restar:
+ *  - Llegó mercadería  → modo 'sumar' con cantidad positiva (reposición).
+ *  - Salió / merma     → modo 'sumar' con cantidad negativa.
+ *  - Conté el stock    → modo 'total' (el número reemplaza al actual).
+ * Al backend le llega exactamente lo mismo que antes (nuevoStock + modo).
+ */
+type Accion = 'entra' | 'sale' | 'conteo';
+
+const ACCIONES: { key: Accion; titulo: string; detalle: string; color: string; Icono: typeof PackagePlus }[] = [
+  { key: 'entra', titulo: 'Llegó', detalle: 'mercadería', color: '#34C759', Icono: PackagePlus },
+  { key: 'sale', titulo: 'Salió', detalle: 'merma o rotura', color: '#FF3B30', Icono: PackageMinus },
+  { key: 'conteo', titulo: 'Conté', detalle: 'el stock real', color: '#007AFF', Icono: ClipboardCheck },
+];
+
 export function StockAdjustDialog({
   open,
   onOpenChange,
@@ -25,7 +42,7 @@ export function StockAdjustDialog({
   onConfirm,
   saving = false,
 }: StockAdjustDialogProps) {
-  const [modo, setModo] = useState<ModoAjuste>('sumar');
+  const [accion, setAccion] = useState<Accion>('entra');
   const [valor, setValor] = useState('');
   const [costo, setCosto] = useState('');
 
@@ -37,36 +54,39 @@ export function StockAdjustDialog({
   // se vería como una sugerencia legítima y se confirmaría sin mirarlo.
   useEffect(() => {
     if (open) {
-      setModo('sumar');
+      setAccion('entra');
       setValor('');
       // Se sugiere el último costo conocido (el precio actual, que en un
-      // producto con lotes YA ES el costo del lote activo) para no obligar
-      // a retipear el mismo número cuando no cambió. Sigue siendo editable:
-      // si compró a otro precio, lo pisa.
+      // producto con lotes YA ES el costo del lote activo).
       setCosto(product && product.price > 0 ? String(product.price) : '');
     }
   }, [open, product?.id]);
 
-  // Se acepta el signo menos para poder restar en modo "sumar" (mermas o
-  // roturas) sin necesitar un modo aparte. Decimales solo si el producto se
-  // vende por fracción; se acepta coma o punto porque en el teclado de un
-  // celular en español lo natural es la coma.
+  const cambiarAccion = (a: Accion) => {
+    setAccion(a);
+    // En conteo, arrancar desde el stock actual es lo natural (se corrige el
+    // número); al entrar/salir se parte de cero.
+    setValor(a === 'conteo' ? String(stockActual) : '');
+  };
+
+  // Decimales solo si el producto se vende por fracción; coma o punto.
   const permiteDecimal = product?.allowDecimal === true;
   const texto = valor.trim().replace(',', '.');
-  const formatoValido = permiteDecimal ? /^-?(\d+(\.\d+)?|\.\d+)$/ : /^-?\d+$/;
+  const formatoValido = permiteDecimal ? /^(\d+(\.\d+)?|\.\d+)$/ : /^\d+$/;
   const cantidad = formatoValido.test(texto) ? Number(texto) : null;
-  const hayNumero = cantidad !== null;
-  // Redondeo a 3 decimales: 6.8 + 0.1 en JS da 6.8999999999999995, y eso
-  // terminaría guardado tal cual en products.stock (numeric).
+  const hayNumero = cantidad !== null && (accion === 'conteo' || cantidad > 0);
+
+  const modo: ModoAjuste = accion === 'conteo' ? 'total' : 'sumar';
+  // Redondeo a 3 decimales: 6.8 + 0.1 en JS da 6.8999999999999995.
   const nuevoStock = !hayNumero
     ? null
-    : Math.round((modo === 'sumar' ? stockActual + cantidad : cantidad) * 1000) / 1000;
+    : Math.round(
+        (accion === 'entra' ? stockActual + cantidad! : accion === 'sale' ? stockActual - cantidad! : cantidad!) * 1000,
+      ) / 1000;
   const quedaNegativo = nuevoStock !== null && nuevoStock < 0;
 
-  // El costo solo es obligatorio cuando esto va a ser una reposición real
-  // (modo sumar, cantidad positiva) de un producto en alcance.
-  const esReposicion = modo === 'sumar' && hayNumero && cantidad! > 0;
-  const requiereCosto = enLotes && esReposicion;
+  // El costo solo es obligatorio en una reposición real de un producto con lotes.
+  const requiereCosto = enLotes && accion === 'entra' && hayNumero;
   const costoNumerico = costo.trim() === '' ? null : Number(costo.trim());
   const costoValido = !requiereCosto || (costoNumerico !== null && !isNaN(costoNumerico) && costoNumerico >= 0);
 
@@ -85,13 +105,27 @@ export function StockAdjustDialog({
 
   const fmt = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 3 });
 
-  // Atajos de cantidad (solo al sumar): suman sobre lo ya escrito.
-  const sumarAtajo = (n: number) => {
-    const base = hayNumero ? cantidad! : 0;
-    setValor(String(Math.round((base + n) * 1000) / 1000));
+  const paso = (delta: number) => {
+    const base = cantidad ?? 0;
+    const siguiente = Math.max(0, Math.round((base + delta) * 1000) / 1000);
+    setValor(String(siguiente));
   };
 
+  const info = ACCIONES.find((a) => a.key === accion)!;
+
+  const mensaje = !hayNumero
+    ? accion === 'conteo' ? '¿Cuántas unidades contaste?' : accion === 'entra' ? '¿Cuántas unidades llegaron?' : '¿Cuántas unidades salieron?'
+    : quedaNegativo
+      ? `No alcanza: solo hay ${fmt(stockActual)}`
+      : requiereCosto && !costoValido
+        ? 'Falta el costo de esta compra'
+        : `Queda en ${fmt(nuevoStock!)}`;
+
   const textoBoton: React.CSSProperties = { background: 'none', border: 'none', padding: '6px 0', fontSize: 17, color: '#007AFF', cursor: 'pointer' };
+  const botonPaso: React.CSSProperties = {
+    width: 52, height: 52, borderRadius: 26, border: 'none', flexShrink: 0, cursor: 'pointer',
+    background: 'rgba(118,118,128,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -107,140 +141,101 @@ export function StockAdjustDialog({
           <button type="button" onClick={() => onOpenChange(false)} disabled={saving} style={{ ...textoBoton, flex: 1, textAlign: 'left' }}>
             Cancelar
           </button>
-          <DialogTitle style={{ flex: 2, textAlign: 'center', fontSize: 17, fontWeight: 600, color: '#000' }}>Ajustar stock</DialogTitle>
-          <button
-            type="button"
-            onClick={handleConfirmar}
-            disabled={!puedeConfirmar}
-            style={{ ...textoBoton, flex: 1, textAlign: 'right', fontWeight: 600, color: puedeConfirmar ? '#007AFF' : '#C7C7CC', cursor: puedeConfirmar ? 'pointer' : 'default' }}
-          >
-            {saving ? 'Guardando' : 'Confirmar'}
-          </button>
+          <DialogTitle style={{ flex: 2, textAlign: 'center', fontSize: 17, fontWeight: 600, color: '#000' }}>Stock</DialogTitle>
+          <span style={{ flex: 1 }} />
         </div>
-        <DialogDescription className="truncate" style={{ textAlign: 'center', fontSize: 13, color: '#8E8E93', padding: '0 16px 12px' }}>
-          {product?.name}
+        <DialogDescription className="truncate" style={{ textAlign: 'center', fontSize: 14, color: '#8E8E93', padding: '0 16px 14px' }}>
+          {product?.name} · hay {fmt(stockActual)}
         </DialogDescription>
 
-        <div style={{ overflowY: 'auto', padding: '0 16px max(env(safe-area-inset-bottom), 24px)' }}>
-          {/* Modo */}
-          <div role="group" style={{ display: 'flex', padding: 2, borderRadius: 9, background: 'rgba(118,118,128,0.12)', marginBottom: 16 }}>
-            {([['sumar', 'Sumar o restar'], ['total', 'Corregir total']] as const).map(([m, t]) => {
-              const activo = modo === m;
+        <div style={{ overflowY: 'auto', padding: '0 16px max(env(safe-area-inset-bottom), 20px)' }}>
+          {/* ¿Qué pasó? */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
+            {ACCIONES.map(({ key, titulo, detalle, color, Icono }) => {
+              const activo = accion === key;
               return (
                 <button
-                  key={m}
+                  key={key}
                   type="button"
                   aria-pressed={activo}
-                  onClick={() => setModo(m)}
+                  onClick={() => cambiarAccion(key)}
                   disabled={saving}
                   style={{
-                    flex: 1, height: 32, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 14,
-                    fontWeight: activo ? 600 : 500, color: '#000',
-                    background: activo ? '#fff' : 'transparent',
-                    boxShadow: activo ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                    padding: '12px 6px 10px', borderRadius: 14, cursor: 'pointer', textAlign: 'center',
+                    border: activo ? `2px solid ${color}` : '2px solid transparent',
+                    background: activo ? `${color}14` : '#fff',
                   }}
                 >
-                  {t}
+                  <Icono style={{ width: 24, height: 24, color: activo ? color : '#8E8E93', margin: '0 auto 4px' }} />
+                  <span style={{ display: 'block', fontSize: 15, fontWeight: 600, color: activo ? color : '#000' }}>{titulo}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: '#8E8E93', marginTop: 1 }}>{detalle}</span>
                 </button>
               );
             })}
           </div>
 
-          {/* Antes → después */}
-          <div style={{ background: '#fff', borderRadius: 12, padding: '16px 16px 14px', textAlign: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 14 }}>
-              <div>
-                <p style={{ fontSize: 12, color: '#8E8E93' }}>Ahora</p>
-                <p style={{ fontSize: 26, fontWeight: 600, color: '#8E8E93', fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }}>{fmt(stockActual)}</p>
-              </div>
-              <span style={{ fontSize: 22, color: '#C7C7CC', paddingBottom: 8 }}>→</span>
-              <div>
-                <p style={{ fontSize: 12, color: '#8E8E93' }}>Queda</p>
-                <p style={{ fontSize: 34, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color: quedaNegativo ? '#FF3B30' : nuevoStock === null ? '#C7C7CC' : '#000' }}>
-                  {nuevoStock === null ? '—' : fmt(nuevoStock)}
-                </p>
-              </div>
-            </div>
-            <p style={{ fontSize: 13, marginTop: 4, color: quedaNegativo || (requiereCosto && !costoValido && hayNumero) ? '#FF3B30' : '#8E8E93' }}>
-              {!hayNumero
-                ? (modo === 'sumar' ? 'Escribe cuánto entra (o resta con −)' : 'Escribe el stock real contado')
-                : quedaNegativo
-                  ? 'El stock no puede quedar negativo'
-                  : requiereCosto && !costoValido
-                    ? 'Falta el costo de esta compra'
-                    : modo === 'sumar'
-                      ? `${cantidad! < 0 ? 'Sale' : 'Entra'} ${fmt(Math.abs(cantidad!))}`
-                      : 'Reemplaza el stock actual'}
-            </p>
-          </div>
-
           {/* Cantidad */}
-          <p style={{ fontSize: 13, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.02em', padding: '20px 16px 6px' }}>
-            {modo === 'sumar' ? 'Cantidad' : 'Stock contado'}
-          </p>
-          <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', minHeight: 56 }}>
-              {modo === 'sumar' && (
-                <button
-                  type="button"
-                  onClick={() => setValor((v) => (v.trim().startsWith('-') ? v.trim().slice(1) : `-${v.trim()}`))}
+          <div style={{ background: '#fff', borderRadius: 14, padding: '18px 16px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button type="button" onClick={() => paso(-1)} disabled={saving} aria-label="Uno menos" style={botonPaso}>
+                <Minus style={{ width: 22, height: 22, color: '#000' }} />
+              </button>
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                {accion !== 'conteo' && (
+                  <span style={{ fontSize: 36, fontWeight: 700, color: info.color, marginRight: 2, verticalAlign: 'middle' }}>{accion === 'entra' ? '+' : '−'}</span>
+                )}
+                <input
+                  id="stock-valor"
+                  className="input-grande"
+                  aria-label={accion === 'conteo' ? 'Stock contado' : 'Cantidad'}
+                  value={valor}
+                  onChange={(e) => setValor(e.target.value.replace(/[^\d.,]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && puedeConfirmar) {
+                      e.preventDefault();
+                      handleConfirmar();
+                    }
+                  }}
+                  placeholder="0"
+                  inputMode={permiteDecimal ? 'decimal' : 'numeric'}
+                  autoComplete="off"
                   disabled={saving}
-                  aria-label="Cambiar entre sumar y restar"
-                  style={{ width: 44, height: 34, borderRadius: 8, border: 'none', background: 'rgba(118,118,128,0.12)', fontSize: 18, fontWeight: 600, color: hayNumero && cantidad! < 0 ? '#FF3B30' : '#34C759', flexShrink: 0 }}
-                >
-                  {hayNumero && cantidad! < 0 ? '−' : '+'}
-                </button>
-              )}
-              <input
-                id="stock-valor"
-                aria-label={modo === 'sumar' ? 'Cuánto sumar' : 'Stock real contado'}
-                value={valor}
-                onChange={(e) => setValor(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && puedeConfirmar) {
-                    e.preventDefault();
-                    handleConfirmar();
-                  }
-                }}
-                placeholder="0"
-                inputMode={permiteDecimal ? 'decimal' : 'numeric'}
-                autoFocus
-                autoComplete="off"
-                disabled={saving}
-                style={{ flex: 1, minWidth: 0, height: 56, border: 'none', outline: 'none', background: 'transparent', fontSize: 28, fontWeight: 600, textAlign: 'right', color: '#000', fontVariantNumeric: 'tabular-nums' }}
-              />
+                  style={{
+                    width: `${Math.max(1, valor.length || 1) + 0.5}ch`, maxWidth: '100%', border: 'none', outline: 'none', background: 'transparent',
+                    fontSize: 44, fontWeight: 700, textAlign: 'center', verticalAlign: 'middle', color: '#000', fontVariantNumeric: 'tabular-nums', padding: 0,
+                  }}
+                />
+              </div>
+              <button type="button" onClick={() => paso(1)} disabled={saving} aria-label="Uno más" style={botonPaso}>
+                <Plus style={{ width: 22, height: 22, color: '#000' }} />
+              </button>
             </div>
-            {modo === 'sumar' && (
-              <>
-                <div style={{ height: 0.5, background: 'rgba(60,60,67,0.18)', marginLeft: 16 }} />
-                <div style={{ display: 'flex', gap: 8, padding: '10px 16px' }}>
-                  {[1, 6, 12, 24].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => sumarAtajo(n)}
-                      disabled={saving}
-                      style={{ flex: 1, height: 34, borderRadius: 17, border: 'none', background: 'rgba(0,122,255,0.1)', color: '#007AFF', fontSize: 15, fontWeight: 600 }}
-                    >
-                      +{n}
-                    </button>
-                  ))}
-                </div>
-              </>
+            <p style={{ textAlign: 'center', fontSize: 15, marginTop: 6, color: quedaNegativo || (requiereCosto && !costoValido) ? '#FF3B30' : '#8E8E93' }}>
+              {mensaje}
+            </p>
+            {accion !== 'conteo' && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                {[6, 12, 24, 50].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => paso(n)}
+                    disabled={saving}
+                    style={{ flex: 1, height: 34, borderRadius: 17, border: 'none', background: 'rgba(118,118,128,0.12)', color: '#000', fontSize: 15, fontWeight: 600 }}
+                  >
+                    +{n}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          <p style={{ fontSize: 13, color: '#8E8E93', padding: '6px 16px 0', lineHeight: 1.35 }}>
-            {modo === 'sumar'
-              ? 'Usa el botón +/− para restar mermas o roturas.'
-              : 'Úsalo después de contar: el stock queda en este número.'}
-          </p>
 
           {requiereCosto && (
             <>
-              <p style={{ fontSize: 13, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.02em', padding: '20px 16px 6px' }}>Costo por unidad</p>
-              <div style={{ background: '#fff', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', minHeight: 48 }}>
-                <label htmlFor="stock-costo" style={{ fontSize: 16, color: '#000', flex: 1 }}>Costo de esta compra</label>
-                <span style={{ fontSize: 16, color: costo ? '#000' : '#C7C7CC' }}>$</span>
+              <div style={{ background: '#fff', borderRadius: 14, display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', minHeight: 50, marginTop: 14 }}>
+                <label htmlFor="stock-costo" style={{ fontSize: 16, color: '#000', flex: 1 }}>Costo por unidad</label>
+                <span style={{ fontSize: 16, color: '#000' }}>$</span>
                 <input
                   id="stock-costo"
                   value={costo}
@@ -249,16 +244,39 @@ export function StockAdjustDialog({
                   placeholder="0"
                   inputMode="decimal"
                   disabled={saving}
-                  style={{ width: 90, height: 44, border: 'none', outline: 'none', background: 'transparent', fontSize: 16, textAlign: 'left', color: '#000' }}
+                  style={{ width: 90, height: 44, border: 'none', outline: 'none', background: 'transparent', fontSize: 16, color: '#000' }}
                 />
               </div>
               <p style={{ fontSize: 13, color: '#8E8E93', padding: '6px 16px 0', lineHeight: 1.35 }}>
                 {product && product.price > 0
-                  ? 'Se sugiere el último costo. Déjalo así si no cambió, o escribe el nuevo si compraste más caro o más barato.'
-                  : 'Producto de Distribuidora: el precio de venta se actualiza solo según el costo de cada compra.'}
+                  ? 'Es el último costo. Cámbialo solo si esta compra salió a otro precio.'
+                  : 'El precio de venta se actualiza solo según el costo de cada compra.'}
               </p>
             </>
           )}
+
+          {/* Botón grande abajo: lo que hay que tocar queda claro */}
+          <button
+            type="button"
+            onClick={handleConfirmar}
+            disabled={!puedeConfirmar}
+            className="boton-ios"
+            style={{
+              width: '100%', height: 54, borderRadius: 14, border: 'none', marginTop: 18,
+              background: puedeConfirmar ? info.color : '#D1D1D6', color: '#fff', fontSize: 17, fontWeight: 600,
+              cursor: puedeConfirmar ? 'pointer' : 'default',
+            }}
+          >
+            {saving
+              ? 'Guardando…'
+              : !hayNumero || quedaNegativo
+                ? 'Guardar'
+                : accion === 'entra'
+                  ? `Sumar ${fmt(cantidad!)} · queda ${fmt(nuevoStock!)}`
+                  : accion === 'sale'
+                    ? `Descontar ${fmt(cantidad!)} · queda ${fmt(nuevoStock!)}`
+                    : `Dejar en ${fmt(nuevoStock!)}`}
+          </button>
         </div>
       </DialogContent>
     </Dialog>

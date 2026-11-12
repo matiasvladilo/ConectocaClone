@@ -870,3 +870,11 @@ body {
 .hoja-ios > button:last-child {
   display: none;
 }
+
+/* Campo numérico grande (Ajustar stock). La regla anti-zoom de arriba fuerza
+   16px en todo input móvil; este es mayor a 16, así que tampoco hace zoom. */
+@media screen and (max-width: 768px) {
+  input.input-grande {
+    font-size: 44px !important;
+  }
+}
