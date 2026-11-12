@@ -2,21 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CAPACITOR_DEBUG</key>
+	<key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>es_CL</string>
-	<!-- Permiso de cámara: lo pide el escáner de códigos de barras
-	     (src/components/BarcodeScannerDialog.tsx, getUserMedia). iOS rechaza el
-	     acceso y muestra un crash de privacidad si falta esta clave. El texto es
-	     el que ve el usuario en el diálogo de permiso. -->
-	<key>NSCameraUsageDescription</key>
-	<string>La Oca usa la cámara para escanear códigos de barras y tomar fotos de los productos.</string>
-	<!-- Guardar/compartir archivos exportados (PDF/Excel) pasa por la hoja de
-	     compartir del sistema, que no necesita permiso de fototeca. Esta clave se
-	     declara por si a futuro se agrega guardar una imagen directo al carrete. -->
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>La Oca puede guardar etiquetas e informes generados en tus fotos.</string>
 	<key>CFBundleDisplayName</key>
 	<string>La Oca</string>
 	<key>CFBundleExecutable</key>
@@ -33,21 +22,25 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>La Oca usa la cámara para escanear códigos de barras y tomar fotos de los productos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>La Oca puede guardar etiquetas e informes generados en tus fotos.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
