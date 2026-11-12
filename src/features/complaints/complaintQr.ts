@@ -22,7 +22,7 @@ export interface ComplaintQrDownloadDependencies {
     value: string,
     options: { width: number; margin: number; errorCorrectionLevel: 'H' },
   ) => Promise<string>;
-  triggerDownload: (dataUrl: string, filename: string) => void;
+  triggerDownload: (dataUrl: string, filename: string) => void | Promise<void>;
 }
 
 export async function downloadComplaintQrFile(
@@ -34,7 +34,7 @@ export async function downloadComplaintQrFile(
     margin: 2,
     errorCorrectionLevel: 'H',
   });
-  dependencies.triggerDownload(dataUrl, 'qr-reclamos-conectoca.png');
+  await dependencies.triggerDownload(dataUrl, 'qr-reclamos-conectoca.png');
 }
 
 export interface ComplaintQrDownloadAttempt {

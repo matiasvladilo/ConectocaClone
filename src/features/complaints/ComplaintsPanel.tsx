@@ -1,25 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
   ArrowLeft,
-  CheckCircle2,
+  ChevronLeft,
   ChevronRight,
-  Clock,
   Inbox,
   Loader2,
   MailWarning,
   RefreshCw,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { PaginationControls } from '../../components/PaginationControls';
-import { Badge } from '../../components/ui/badge';
-import { Button } from '../../components/ui/button';
 import {
   ComplaintDetailRequestGuard,
   complaintStatusCountFilters,
   DEFAULT_COMPLAINT_FILTERS,
   getComplaintEmptyMessage,
-  isCompactPaginationWidth,
   mergeComplaintEmailStatuses,
   normalizeComplaintPage,
   replaceComplaintInPage,
@@ -29,9 +27,10 @@ import {
 } from './adminPanelState';
 import { ComplaintApiError, complaintsAPI } from './api';
 import { ComplaintDetail } from './ComplaintDetail';
-import { ComplaintFilters } from './ComplaintFilters';
-import { ComplaintKindBadge } from './ComplaintKindBadge';
+import { BuscadorReclamos, ComplaintFilters } from './ComplaintFilters';
+import { ComplaintKindIcon, STATUS_COLOR } from './ComplaintKindBadge';
 import { ComplaintQrDownload } from './ComplaintQrDownload';
+import { complaintKindLabel } from './complaintKinds';
 import { resolveComplaintQrOrigin } from './complaintQr';
 import type {
   ComplaintDetail as ComplaintDetailData,
@@ -65,19 +64,24 @@ type BranchState =
 
 type StatusCounts = { pending: number; attended: number } | null | 'error';
 
-type PanelNotice = { tone: 'success' | 'warning'; message: string; action?: 'list' } | null;
 
 const EMAIL_RECONCILIATION_ATTEMPTS = 4;
 const EMAIL_RECONCILIATION_DELAY_MS = 750;
 
-const dateFormatter = new Intl.DateTimeFormat('es-CL', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
+const horaFormatter = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const diaFormatter = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short' });
+const diaAnioFormatter = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
 
+/** Como la lista de Mail: hoy → hora, ayer → "Ayer", este año → "3 nov", antes → con año. */
 function formatDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Fecha no disponible' : dateFormatter.format(date);
+  if (Number.isNaN(date.getTime())) return '—';
+  const hoy = new Date();
+  const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).getTime();
+  const t = date.getTime();
+  if (t >= inicioHoy) return horaFormatter.format(date);
+  if (t >= inicioHoy - 86_400_000) return 'Ayer';
+  return date.getFullYear() === hoy.getFullYear() ? diaFormatter.format(date) : diaAnioFormatter.format(date);
 }
 
 function originLabel(originType: ComplaintDetailData['originType'], branchName: string | null): string {
@@ -110,12 +114,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   const [listState, setListState] = useState<ListState>({ kind: 'loading' });
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'closed' });
   const [branchState, setBranchState] = useState<BranchState>({ kind: 'loading' });
-  const [notice, setNotice] = useState<PanelNotice>(null);
   const [counts, setCounts] = useState<StatusCounts>(null);
   const countsRequestRef = useRef(0);
-  const [compactPagination, setCompactPagination] = useState(() => (
-    typeof window !== 'undefined' && isCompactPaginationWidth(window.innerWidth)
-  ));
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const detailDialogRef = useRef<HTMLElement>(null);
@@ -166,10 +166,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
           message: safeErrorMessage(error, 'No pudimos cargar los mensajes. Revisa tu conexión e inténtalo nuevamente.'),
         });
       } else {
-        setNotice({
-          tone: 'warning',
-          message: 'El cambio se guardó, pero no pudimos actualizar la bandeja. Vuelve a intentarlo.',
-          action: 'list',
+        toast.warning('El cambio se guardó, pero no pudimos actualizar la bandeja.', {
+          action: { label: 'Actualizar', onClick: () => void loadList(filtersRef.current) },
         });
       }
     }
@@ -244,14 +242,6 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   }, [initialComplaintId, openDetail]);
 
   useEffect(() => {
-    const updateCompactPagination = () => {
-      setCompactPagination(isCompactPaginationWidth(window.innerWidth));
-    };
-    window.addEventListener('resize', updateCompactPagination);
-    return () => window.removeEventListener('resize', updateCompactPagination);
-  }, []);
-
-  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -299,10 +289,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
       setListState(current => current.kind === 'ready'
         ? { kind: 'ready', page: replaceComplaintInPage(current.page, updated) }
         : current);
-      setNotice({
-        tone: 'success',
-        message: status === 'attended' ? 'Marcado como atendido.' : 'Reabierto como pendiente.',
-      });
+      toast.success(status === 'attended' ? 'Marcado como atendido' : 'Reabierto como pendiente');
       void loadCounts();
       await loadList(filtersRef.current, false);
     } catch (error) {
@@ -342,12 +329,9 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
     }
 
     if (detailOperationIsCurrent(token)) {
-      setNotice({
-        tone: 'warning',
-        message: lastReadFailed
-          ? 'No pudimos confirmar el resultado del correo. Actualiza el detalle para volver a consultarlo.'
-          : 'El correo sigue procesándose. Actualiza el detalle para confirmar el resultado.',
-      });
+      toast.warning(lastReadFailed
+        ? 'No pudimos confirmar el resultado del correo. Actualiza el detalle para volver a consultarlo.'
+        : 'El correo sigue procesándose. Actualiza el detalle para confirmar el resultado.');
     }
     return latest;
   }
@@ -356,9 +340,8 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
     const requestedFailed = kinds.some(kind => kind === 'confirmation'
       ? complaint.confirmationEmailStatus === 'failed'
       : complaint.notificationEmailStatus === 'failed');
-    setNotice(requestedFailed
-      ? { tone: 'warning', message: 'El correo volvió a fallar. Puedes reintentarlo desde el detalle.' }
-      : { tone: 'success', message: 'Correo reenviado correctamente.' });
+    if (requestedFailed) toast.warning('El correo volvió a fallar. Puedes reintentarlo desde el detalle.');
+    else toast.success('Correo reenviado');
   }
 
   async function handleRetryEmail(kinds: ComplaintEmailKind[]) {
@@ -400,7 +383,7 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
       const refreshed = await complaintsAPI.get(accessToken, current.complaint.id);
       if (!applyDetailToOpenComplaint(token, refreshed)) return;
       if (!requestedEmailsAreSending(refreshed, ['confirmation', 'notification'])) {
-        setNotice({ tone: 'success', message: 'Detalle actualizado.' });
+        toast.success('Detalle actualizado');
       }
     } catch (error) {
       if (!detailOperationIsCurrent(token)) return;
@@ -443,24 +426,34 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
   }
 
   const branches = branchState.kind === 'ready' ? branchState.branches : [];
-  const countLabel = (value: number | undefined) => (counts === 'error' ? '—' : value ?? '…');
+  const conteos = counts && counts !== 'error' ? counts : null;
   const refreshAll = () => {
     void loadList(filtersRef.current);
     void loadCounts();
   };
+  const pildoras: Array<{ key: ComplaintFiltersValue['status']; label: string; color: string; total: number | null }> = [
+    { key: '', label: 'Todos', color: IOS.azul, total: conteos ? conteos.pending + conteos.attended : null },
+    { key: 'pending', label: 'Pendientes', color: STATUS_COLOR.pending, total: conteos?.pending ?? null },
+    { key: 'attended', label: 'Atendidos', color: STATUS_COLOR.attended, total: conteos?.attended ?? null },
+  ];
+  const cargando = listState.kind === 'loading';
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <Button type="button" variant="outline" onClick={onBack} aria-label="Volver">
-            <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-          </Button>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-gray-900">Reclamos y sugerencias</h1>
-            <p className="text-sm text-gray-600">Mensajes recibidos desde el QR</p>
-          </div>
-          <div className="ml-auto">
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" className="boton-ios" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Reclamos</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>Mensajes de clientes desde el QR</p>
+            </div>
+            <button type="button" onClick={refreshAll} disabled={cargando} aria-label="Actualizar" className="boton-ios" style={botonRedondo}>
+              <RefreshCw className={cargando ? 'animate-spin' : ''} style={{ width: 18, height: 18, color: '#fff' }} />
+            </button>
             <ComplaintQrDownload
               publicUrl={resolveComplaintQrOrigin(
                 import.meta.env.VITE_APP_PUBLIC_URL as string | undefined,
@@ -468,204 +461,227 @@ export function ComplaintsPanel({ accessToken, initialComplaintId = null, onComp
               )}
             />
           </div>
-        </div>
-
-        <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-red-500 bg-white p-3 shadow-md sm:p-4">
-            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
-              <Clock className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
-              Pendientes
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-red-600">{countLabel(counts && counts !== 'error' ? counts.pending : undefined)}</p>
-          </div>
-          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-green-500 bg-white p-3 shadow-md sm:p-4">
-            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
-              <CheckCircle2 className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
-              Atendidos
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-green-600">{countLabel(counts && counts !== 'error' ? counts.attended : undefined)}</p>
-          </div>
-          <div className="min-w-0 rounded-lg border border-gray-200 border-l-4 border-l-blue-500 bg-white p-3 shadow-md sm:p-4">
-            <p className="flex items-center gap-1.5 truncate text-xs text-gray-600 sm:text-sm">
-              <Inbox className="hidden h-4 w-4 shrink-0 sm:inline" aria-hidden="true" />
-              Total
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-gray-900">{countLabel(counts && counts !== 'error' ? counts.pending + counts.attended : undefined)}</p>
+          <div style={{ marginTop: 12 }}>
+            <BuscadorReclamos value={filters} onChange={setCurrentFilters} />
           </div>
         </div>
+      </div>
 
-        {notice && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm ${notice.tone === 'success' ? 'border-green-200 bg-green-50 text-green-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
-          >
-            <p>{notice.message}</p>
-            <div className="flex gap-2">
-              {notice.action === 'list' && <Button type="button" variant="outline" size="sm" onClick={() => void loadList(filtersRef.current)}>Actualizar</Button>}
-              <Button type="button" variant="ghost" size="sm" onClick={() => setNotice(null)}>Cerrar</Button>
-            </div>
-          </div>
-        )}
+      <main className="max-w-7xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Estado */}
+        <div className="sin-scrollbar" role="group" aria-label="Estado" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 12px', padding: '0 16px' }}>
+          {pildoras.map(p => {
+            const activo = filters.status === p.key;
+            return (
+              <button
+                key={p.key || 'todos'}
+                type="button"
+                aria-pressed={activo}
+                onClick={() => setCurrentFilters({ ...filtersRef.current, status: p.key, page: 1 })}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? p.color : IOS.tarjeta, color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}
+              >
+                {!activo && p.key && <span style={{ width: 8, height: 8, borderRadius: 4, background: p.color }} />}
+                {p.label}
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>{counts === 'error' ? '—' : p.total ?? '…'}</span>
+              </button>
+            );
+          })}
+        </div>
 
-        <ComplaintFilters
-          value={filters}
-          branches={branches}
-          onChange={setCurrentFilters}
-          disabled={listState.kind === 'loading'}
-        />
+        <ComplaintFilters value={filters} branches={branches} onChange={setCurrentFilters} disabled={cargando} />
 
         {branchState.kind === 'error' && (
-          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <p>No pudimos cargar las sucursales. Los demás filtros siguen disponibles.</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void loadBranches()}>
-              <RefreshCw aria-hidden="true" />
-              Reintentar sucursales
-            </Button>
-          </div>
+          <button type="button" onClick={() => void loadBranches()}
+            style={{ display: 'block', width: '100%', border: 'none', background: 'transparent', fontSize: 13, color: IOS.secundario, textAlign: 'left', padding: '8px 16px 0', cursor: 'pointer' }}>
+            No se cargaron las sucursales. <span style={{ color: IOS.azul }}>Reintentar</span>
+          </button>
         )}
 
-        {listState.kind === 'loading' && (
-          <section aria-label="Cargando mensajes" aria-busy="true" className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-16 shadow-sm">
-            <div className="text-center text-gray-600">
-              <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" aria-hidden="true" />
-              <p className="mt-3 text-sm">Cargando mensajes…</p>
+        {/* Lista */}
+        <section aria-labelledby="complaints-list-title" style={{ marginTop: 20 }}>
+          <h2 id="complaints-list-title" style={{ fontSize: 13, fontWeight: 400, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '0 16px 7px' }}>
+            {listState.kind === 'ready'
+              ? `${listState.page.pagination.total} ${listState.page.pagination.total === 1 ? 'mensaje' : 'mensajes'}`
+              : 'Mensajes'}
+          </h2>
+
+          {listState.kind === 'loading' && (
+            <div aria-busy="true" aria-label="Cargando mensajes" style={{ ...tarjeta, padding: '48px 16px', display: 'flex', justifyContent: 'center' }}>
+              <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: IOS.secundario }} aria-hidden="true" />
             </div>
-          </section>
-        )}
+          )}
 
-        {listState.kind === 'error' && (
-          <section role="alert" className="flex items-center justify-center rounded-xl border border-red-200 bg-white p-6 py-12 text-center shadow-sm">
-            <div className="max-w-md">
-              <AlertCircle className="mx-auto h-10 w-10 text-red-600" aria-hidden="true" />
-              <h2 className="mt-4 text-lg font-bold">No pudimos cargar la bandeja</h2>
-              <p className="mt-2 text-sm text-gray-600">{listState.message}</p>
-              <Button type="button" variant="outline" className="mt-5" onClick={refreshAll}>
-                <RefreshCw aria-hidden="true" />
+          {listState.kind === 'error' && (
+            <div role="alert" style={{ ...tarjeta, padding: '32px 20px', textAlign: 'center' }}>
+              <AlertCircle style={{ width: 36, height: 36, color: IOS.rojo, margin: '0 auto 10px' }} aria-hidden="true" />
+              <p style={{ fontSize: 17, fontWeight: 600, margin: '0 0 4px' }}>No pudimos cargar la bandeja</p>
+              <p style={{ fontSize: 15, color: IOS.secundario, margin: '0 0 14px' }}>{listState.message}</p>
+              <button type="button" onClick={refreshAll} className="boton-ios"
+                style={{ height: 40, padding: '0 18px', borderRadius: 20, border: 'none', background: IOS.azul, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
                 Reintentar
-              </Button>
+              </button>
             </div>
-          </section>
-        )}
+          )}
 
-        {listState.kind === 'ready' && (
-          <section aria-labelledby="complaints-list-title" className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
-              <h2 id="complaints-list-title" className="text-sm font-semibold text-gray-900">
-                {listState.page.pagination.total} {listState.page.pagination.total === 1 ? 'caso' : 'casos'}
-              </h2>
-              <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
-                <RefreshCw aria-hidden="true" />
-                Actualizar
-              </Button>
+          {listState.kind === 'ready' && (listState.page.data.length === 0 ? (
+            <div style={{ ...tarjeta, padding: '40px 20px', textAlign: 'center' }}>
+              <Inbox style={{ width: 40, height: 40, color: '#C7C7CC', margin: '0 auto 10px' }} aria-hidden="true" />
+              <p style={{ fontSize: 16, color: IOS.secundario, margin: 0 }}>{getComplaintEmptyMessage(filters)}</p>
             </div>
-
-            {listState.page.data.length === 0 ? (
-              <div className="flex items-center justify-center px-6 py-12 text-center">
-                <div>
-                  <Inbox className="mx-auto h-11 w-11 text-gray-300" aria-hidden="true" />
-                  <p className="mt-4 font-medium text-gray-700">{getComplaintEmptyMessage(filters)}</p>
-                </div>
-              </div>
-            ) : (
-              <ul>
-                {listState.page.data.map((complaint, index) => (
-                  <li key={complaint.id} className={index > 0 ? 'border-t border-gray-200' : undefined}>
+          ) : (
+            <ul style={{ ...tarjeta, listStyle: 'none', margin: 0, padding: 0 }}>
+              {listState.page.data.map((complaint, index) => {
+                const pendiente = complaint.status === 'pending';
+                return (
+                  <li key={complaint.id}>
+                    {index > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 64 }} />}
                     <button
                       type="button"
                       onClick={() => void openDetail(complaint.id)}
-                      className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
-                      aria-label={`Abrir ${complaint.caseNumber}, ${complaint.status === 'pending' ? 'pendiente' : 'atendido'}`}
+                      className="fila-ios"
+                      aria-label={`Abrir ${complaint.caseNumber}, ${complaintKindLabel(complaint.kind)}, ${pendiente ? 'pendiente' : 'atendido'}`}
+                      style={{ width: '100%', display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 12px 12px 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate font-semibold text-gray-900">{complaint.caseNumber}</p>
-                          <div className="flex shrink-0 items-center gap-2">
-                            {complaint.hasEmailFailure && (
-                              <span title="Hay un correo automático fallido" className="inline-flex items-center text-red-600">
-                                <MailWarning className="h-4 w-4" aria-hidden="true" />
-                                <span className="sr-only">Correo automático fallido</span>
-                              </span>
-                            )}
-                            <Badge className={complaint.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
-                              {complaint.status === 'pending' ? 'Pendiente' : 'Atendido'}
-                            </Badge>
-                          </div>
+                      <ComplaintKindIcon kind={complaint.kind} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {pendiente && <span title="Pendiente" style={{ width: 8, height: 8, borderRadius: 4, background: STATUS_COLOR.pending, flexShrink: 0 }} />}
+                          <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600, color: IOS.texto }}>
+                            {complaint.caseNumber}
+                          </span>
+                          {complaint.hasEmailFailure && (
+                            <MailWarning style={{ width: 15, height: 15, color: IOS.rojo, flexShrink: 0 }} aria-label="Correo automático fallido" />
+                          )}
+                          <span style={{ fontSize: 14, color: IOS.secundario, flexShrink: 0 }}>{formatDate(complaint.createdAt)}</span>
+                          <ChevronRight style={{ width: 16, height: 16, color: '#C7C7CC', flexShrink: 0 }} aria-hidden="true" />
                         </div>
-                        <div className="mt-0.5 flex min-w-0 items-center gap-2">
-                          <ComplaintKindBadge kind={complaint.kind} />
-                          <p className="truncate text-xs text-gray-500">
-                            {originLabel(complaint.originType, complaint.branchName)} · {formatDate(complaint.createdAt)}
-                          </p>
-                        </div>
-                        <p className="mt-1 truncate text-sm text-gray-600">{complaint.descriptionPreview}</p>
+                        <p className="truncate" style={{ fontSize: 14, color: IOS.secundario, margin: '1px 0 0' }}>
+                          {complaintKindLabel(complaint.kind)} · {originLabel(complaint.originType, complaint.branchName)}
+                          {!pendiente && <span style={{ color: STATUS_COLOR.attended }}> · Atendido</span>}
+                        </p>
+                        <p style={{
+                          fontSize: 15, color: '#3C3C43', margin: '3px 0 0', lineHeight: 1.35, overflow: 'hidden',
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere',
+                        }}>
+                          {complaint.descriptionPreview}
+                        </p>
                       </div>
-                      <ChevronRight className="h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />
                     </button>
                   </li>
-                ))}
-              </ul>
-            )}
+                );
+              })}
+            </ul>
+          ))}
 
-            <div className="border-t border-gray-200">
-              <PaginationControls
-                pagination={listState.page.pagination}
-                onPageChange={page => setCurrentFilters({ ...filtersRef.current, page })}
-                compact={compactPagination}
-              />
+          {listState.kind === 'ready' && listState.page.pagination.totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
+              <button type="button" disabled={!listState.page.pagination.hasPrev}
+                onClick={() => setCurrentFilters({ ...filtersRef.current, page: listState.page.pagination.page - 1 })}
+                className="boton-ios" style={{ ...botonPagina, opacity: listState.page.pagination.hasPrev ? 1 : 0.4 }}>
+                <ChevronLeft style={{ width: 18, height: 18 }} aria-hidden="true" /> Anterior
+              </button>
+              <span style={{ fontSize: 14, color: IOS.secundario }}>
+                Página {listState.page.pagination.page} de {listState.page.pagination.totalPages}
+              </span>
+              <button type="button" disabled={!listState.page.pagination.hasNext}
+                onClick={() => setCurrentFilters({ ...filtersRef.current, page: listState.page.pagination.page + 1 })}
+                className="boton-ios" style={{ ...botonPagina, opacity: listState.page.pagination.hasNext ? 1 : 0.4 }}>
+                Siguiente <ChevronRight style={{ width: 18, height: 18 }} aria-hidden="true" />
+              </button>
             </div>
-          </section>
-        )}
+          )}
+        </section>
       </main>
 
-      {detailState.kind !== 'closed' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2" role="presentation">
-          <section
-            ref={detailDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="complaint-detail-dialog-title"
-            aria-describedby="complaint-detail-dialog-description"
-            tabIndex={-1}
-            onKeyDown={trapDetailFocus}
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-4 shadow-2xl outline-none"
-          >
-          <h2 id="complaint-detail-dialog-title" className="sr-only">Detalle del mensaje</h2>
-          <p id="complaint-detail-dialog-description" className="sr-only">Antecedentes, evidencias y acciones del mensaje seleccionado.</p>
+      {createPortal(
+        <AnimatePresence>
+          {detailState.kind !== 'closed' && (
+            <>
+              <motion.div key="fondo" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeDetail}
+                role="presentation" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50 }} />
+              <motion.section
+                key="hoja"
+                ref={detailDialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="complaint-detail-dialog-title"
+                aria-describedby="complaint-detail-dialog-description"
+                tabIndex={-1}
+                onKeyDown={trapDetailFocus}
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+                style={{
+                  position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 51, margin: '0 auto', maxWidth: 640, height: '92dvh',
+                  background: IOS.fondo, borderRadius: '14px 14px 0 0', display: 'flex', flexDirection: 'column', outline: 'none',
+                }}
+              >
+                <h2 id="complaint-detail-dialog-title" className="sr-only">Detalle del mensaje</h2>
+                <p id="complaint-detail-dialog-description" className="sr-only">Antecedentes, evidencias y acciones del mensaje seleccionado.</p>
 
-          {detailState.kind === 'loading' && (
-            <div aria-busy="true" className="flex items-center justify-center py-16 text-center text-gray-600">
-              <div><Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" aria-hidden="true" /><p className="mt-3 text-sm">Cargando detalle…</p></div>
-            </div>
-          )}
+                {detailState.kind === 'loading' && (
+                  <div aria-busy="true" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Loader2 className="animate-spin" style={{ width: 26, height: 26, color: IOS.secundario }} aria-hidden="true" />
+                  </div>
+                )}
 
-          {detailState.kind === 'error' && (
-            <div role="alert" className="flex items-center justify-center p-4 py-12 text-center">
-              <div className="max-w-md">
-                <AlertCircle className="mx-auto h-10 w-10 text-red-600" aria-hidden="true" />
-                <h2 className="mt-4 text-lg font-bold">No pudimos cargar el detalle</h2>
-                <p className="mt-2 text-sm text-gray-600">{detailState.message}</p>
-                <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
-                  <Button type="button" onClick={() => void openDetail(detailState.id)}><RefreshCw aria-hidden="true" />Reintentar</Button>
-                  <Button type="button" variant="outline" onClick={closeDetail}>Cerrar</Button>
-                </div>
-              </div>
-            </div>
-          )}
+                {detailState.kind === 'error' && (
+                  <div role="alert" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+                    <AlertCircle style={{ width: 40, height: 40, color: IOS.rojo, marginBottom: 12 }} aria-hidden="true" />
+                    <p style={{ fontSize: 17, fontWeight: 600, margin: '0 0 6px' }}>No pudimos cargar el detalle</p>
+                    <p style={{ fontSize: 15, color: IOS.secundario, margin: '0 0 20px' }}>{detailState.message}</p>
+                    <div style={{ display: 'flex', gap: 10, width: '100%', maxWidth: 320 }}>
+                      <button type="button" onClick={closeDetail} className="boton-ios"
+                        style={{ ...botonPagina, flex: 1, justifyContent: 'center', height: 50, borderRadius: 12, background: '#E3E3E8', color: IOS.texto }}>Cerrar</button>
+                      <button type="button" onClick={() => void openDetail(detailState.id)} className="boton-ios"
+                        style={{ ...botonPagina, flex: 1, justifyContent: 'center', height: 50, borderRadius: 12, background: IOS.azul, color: '#fff' }}>Reintentar</button>
+                    </div>
+                  </div>
+                )}
 
-          {detailState.kind === 'ready' && (
-            <ComplaintDetail
-              complaint={detailState.complaint}
-              onStatusChange={handleStatusChange}
-              onRetryEmail={handleRetryEmail}
-              onRefresh={handleRefreshDetail}
-              onOpenAttachment={handleOpenAttachment}
-              onClose={closeDetail}
-            />
+                {detailState.kind === 'ready' && (
+                  <ComplaintDetail
+                    key={detailState.complaint.id}
+                    complaint={detailState.complaint}
+                    onStatusChange={handleStatusChange}
+                    onRetryEmail={handleRetryEmail}
+                    onRefresh={handleRefreshDetail}
+                    onOpenAttachment={handleOpenAttachment}
+                    onClose={closeDetail}
+                  />
+                )}
+              </motion.section>
+            </>
           )}
-          </section>
-        </div>
+        </AnimatePresence>,
+        document.body,
       )}
     </div>
   );
 }
+
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+};
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+};
+
+const botonPagina: React.CSSProperties = {
+  height: 36, padding: '0 12px', borderRadius: 18, border: 'none', background: IOS.tarjeta, color: IOS.azul,
+  fontSize: 15, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+};

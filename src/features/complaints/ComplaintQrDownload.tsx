@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { QrCode } from 'lucide-react';
+import { Loader2, QrCode } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { Button } from '../../components/ui/button';
+import { entregarArchivo } from '../../utils/descargarArchivo';
 import {
   ComplaintQrDownloadGate,
   downloadComplaintQrFile,
@@ -12,57 +13,56 @@ export interface ComplaintQrDownloadProps {
   publicUrl: string;
 }
 
+/**
+ * Genera el PNG del QR y lo entrega. Pasa por entregarArchivo: en la web es el
+ * `<a download>` de siempre; en la app nativa el WebView ignora las descargas,
+ * así que se guarda y se abre la hoja de compartir de iOS.
+ */
 export async function downloadComplaintQr(publicUrl: string): Promise<void> {
   await downloadComplaintQrFile(publicUrl, {
     toDataURL: (value, options) => QRCode.toDataURL(value, options),
-    triggerDownload: (dataUrl, filename) => {
-      const anchor = document.createElement('a');
-      anchor.href = dataUrl;
-      anchor.download = filename;
-      anchor.click();
+    triggerDownload: async (dataUrl, filename) => {
+      const blob = await (await fetch(dataUrl)).blob();
+      await entregarArchivo(blob, filename, 'image/png');
     },
   });
 }
 
+/** Botón redondo para el encabezado azul. */
 export function ComplaintQrDownload({ publicUrl }: ComplaintQrDownloadProps) {
   const gateRef = useRef(new ComplaintQrDownloadGate());
   const [isDownloading, setIsDownloading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function handleDownload() {
     const attempt = gateRef.current.start(() => downloadComplaintQr(publicUrl));
     if (!attempt.started) return;
 
     setIsDownloading(true);
-    setError(null);
     try {
       await attempt.promise;
     } catch {
-      setError('No pudimos generar el QR. Inténtalo nuevamente.');
+      toast.error('No pudimos generar el QR. Inténtalo nuevamente.');
     } finally {
       setIsDownloading(false);
     }
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={isDownloading}
-        aria-busy={isDownloading}
-        aria-describedby={error ? 'complaint-qr-download-error' : undefined}
-        onClick={() => void handleDownload()}
-      >
-        <QrCode aria-hidden="true" />
-        <span className="hidden sm:inline">{isDownloading ? 'Generando QR…' : 'Descargar QR'}</span>
-        <span className="sr-only sm:hidden">{isDownloading ? 'Generando QR…' : 'Descargar QR'}</span>
-      </Button>
-      {error && (
-        <p id="complaint-qr-download-error" role="alert" className="text-right text-xs text-red-600">
-          {error}
-        </p>
-      )}
-    </div>
+    <button
+      type="button"
+      disabled={isDownloading}
+      aria-busy={isDownloading}
+      aria-label={isDownloading ? 'Generando QR…' : 'Descargar QR del formulario'}
+      onClick={() => void handleDownload()}
+      className="boton-ios"
+      style={{
+        width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+      }}
+    >
+      {isDownloading
+        ? <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: '#fff' }} aria-hidden="true" />
+        : <QrCode style={{ width: 18, height: 18, color: '#fff' }} aria-hidden="true" />}
+    </button>
   );
 }
