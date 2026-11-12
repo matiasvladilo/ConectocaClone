@@ -878,3 +878,11 @@ body {
     font-size: 44px !important;
   }
 }
+
+/* Sin zoom por doble toque: iOS ignora maximum-scale=1 del viewport, y tocar
+   rápido dos veces un botón (+ / − de cantidades) agrandaba toda la app. El
+   pellizco para hacer zoom sigue funcionando (accesibilidad). */
+html,
+body {
+  touch-action: manipulation;
+}
