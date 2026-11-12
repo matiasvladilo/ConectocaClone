@@ -1,21 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from './ui/alert-dialog';
-import { Badge } from './ui/badge';
-import { Separator } from './ui/separator';
+import { useState, useEffect, useCallback } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { toast } from 'sonner';
-import { productionAreasAPI, type ProductionArea } from '../utils/api';
-import { motion, AnimatePresence } from 'motion/react';
+import { productionAreasAPI, productsAPI, type ProductionArea } from '../utils/api';
 import {
   ArrowLeft,
   Plus,
-  Edit2,
-  Trash2,
+  Check,
+  ChevronRight,
+  Loader2,
   Factory,
   Briefcase,
   ChefHat,
@@ -29,7 +21,7 @@ import {
   Flame,
   Snowflake,
   ShoppingBag,
-  Package
+  Package,
 } from 'lucide-react';
 
 interface ProductionAreasManagementProps {
@@ -47,11 +39,11 @@ const ICON_OPTIONS = [
   { name: 'IceCream', icon: IceCream, label: 'Helado' },
   { name: 'Wheat', icon: Wheat, label: 'Trigo' },
   { name: 'UtensilsCrossed', icon: UtensilsCrossed, label: 'Cocina' },
-  { name: 'Flame', icon: Flame, label: 'Cocina Caliente' },
-  { name: 'Snowflake', icon: Snowflake, label: 'Cocina Fría' },
+  { name: 'Flame', icon: Flame, label: 'Cocina caliente' },
+  { name: 'Snowflake', icon: Snowflake, label: 'Cocina fría' },
   { name: 'ShoppingBag', icon: ShoppingBag, label: 'Bolsa' },
   { name: 'Package', icon: Package, label: 'Paquete' },
-  { name: 'Factory', icon: Factory, label: 'Fábrica' }
+  { name: 'Factory', icon: Factory, label: 'Fábrica' },
 ];
 
 const COLOR_OPTIONS = [
@@ -61,406 +53,378 @@ const COLOR_OPTIONS = [
   { value: '#EF4444', label: 'Rojo' },
   { value: '#8B5CF6', label: 'Morado' },
   { value: '#EC4899', label: 'Rosa' },
-  { value: '#06B6D4', label: 'Cyan' },
-  { value: '#F97316', label: 'Naranja' }
+  { value: '#06B6D4', label: 'Cian' },
+  { value: '#F97316', label: 'Naranja' },
 ];
+
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+};
+
+const FORM_VACIO = { name: '', description: '', color: '#0059FF', icon: 'Briefcase' };
+
+function iconoDe(nombre?: string) {
+  return ICON_OPTIONS.find((o) => o.name === nombre)?.icon ?? Briefcase;
+}
 
 export function ProductionAreasManagement({ onBack, accessToken }: ProductionAreasManagementProps) {
   const [areas, setAreas] = useState<ProductionArea[]>([]);
   const [loading, setLoading] = useState(true);
+  // Cuántos productos tiene asignados cada área (informativo; si falla, no se muestra).
+  const [productosPorArea, setProductosPorArea] = useState<Record<string, number> | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [editingArea, setEditingArea] = useState<ProductionArea | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    color: '#0059FF',
-    icon: 'Briefcase'
-  });
+  const [formData, setFormData] = useState(FORM_VACIO);
+  const [guardando, setGuardando] = useState(false);
+  const [confirmandoBorrar, setConfirmandoBorrar] = useState(false);
+  const [borrando, setBorrando] = useState(false);
 
-  useEffect(() => {
-    loadAreas();
-  }, []);
-
-  const loadAreas = async () => {
+  const loadAreas = useCallback(async () => {
     if (!accessToken) return;
-
     try {
       setLoading(true);
-      const data = await productionAreasAPI.getAll(accessToken);
-      setAreas(data);
+      setAreas(await productionAreasAPI.getAll(accessToken));
     } catch (error: any) {
       console.error('Error loading production areas:', error);
       toast.error(error.message || 'Error al cargar las áreas de producción');
     } finally {
       setLoading(false);
     }
-  };
+  }, [accessToken]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!accessToken) {
-      toast.error('No hay sesión activa');
-      return;
-    }
-
-    if (!formData.name.trim()) {
-      toast.error('El nombre es obligatorio');
-      return;
-    }
-
-    try {
-      if (editingArea) {
-        await productionAreasAPI.update(accessToken, editingArea.id, formData);
-        toast.success('Área de producción actualizada correctamente');
-      } else {
-        await productionAreasAPI.create(accessToken, formData);
-        toast.success('Área de producción creada correctamente');
-      }
-
-      await loadAreas();
-      handleCloseDialog();
-    } catch (error: any) {
-      console.error('Error saving production area:', error);
-      toast.error(error.message || 'Error al guardar el área de producción');
-    }
-  };
-
-  const handleDelete = async (areaId: string, areaName: string) => {
+  const loadConteos = useCallback(async () => {
     if (!accessToken) return;
-
     try {
-      await productionAreasAPI.delete(accessToken, areaId);
-      toast.success(`Área "${areaName}" eliminada correctamente`);
-      await loadAreas();
-    } catch (error: any) {
-      console.error('Error deleting production area:', error);
-      toast.error(error.message || 'Error al eliminar el área de producción');
+      const productos = await productsAPI.getAll(accessToken);
+      const conteo: Record<string, number> = {};
+      for (const p of productos) {
+        if (p.productionAreaId) conteo[p.productionAreaId] = (conteo[p.productionAreaId] ?? 0) + 1;
+      }
+      setProductosPorArea(conteo);
+    } catch {
+      setProductosPorArea(null);
     }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void loadAreas();
+    void loadConteos();
+  }, [loadAreas, loadConteos]);
+
+  const abrirNueva = () => {
+    setEditingArea(null);
+    setFormData(FORM_VACIO);
+    setConfirmandoBorrar(false);
+    setShowDialog(true);
   };
 
-  const handleEdit = (area: ProductionArea) => {
+  const abrirEditar = (area: ProductionArea) => {
     setEditingArea(area);
     setFormData({
       name: area.name,
       description: area.description || '',
       color: area.color || '#0059FF',
-      icon: area.icon || 'Briefcase'
+      icon: area.icon || 'Briefcase',
     });
+    setConfirmandoBorrar(false);
     setShowDialog(true);
   };
 
-  const handleCloseDialog = () => {
+  const cerrar = () => {
+    if (guardando || borrando) return;
     setShowDialog(false);
-    setEditingArea(null);
-    setFormData({
-      name: '',
-      description: '',
-      color: '#0059FF',
-      icon: 'Briefcase'
-    });
   };
 
-  const getIconComponent = (iconName: string) => {
-    const iconOption = ICON_OPTIONS.find(opt => opt.name === iconName);
-    return iconOption ? iconOption.icon : Briefcase;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessToken) {
+      toast.error('No hay sesión activa');
+      return;
+    }
+    if (!formData.name.trim()) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+    setGuardando(true);
+    try {
+      const datos = { ...formData, name: formData.name.trim(), description: formData.description.trim() };
+      if (editingArea) {
+        await productionAreasAPI.update(accessToken, editingArea.id, datos);
+        toast.success('Área actualizada');
+      } else {
+        await productionAreasAPI.create(accessToken, datos);
+        toast.success('Área creada');
+      }
+      setShowDialog(false);
+      await loadAreas();
+    } catch (error: any) {
+      console.error('Error saving production area:', error);
+      toast.error(error.message || 'Error al guardar el área de producción');
+    } finally {
+      setGuardando(false);
+    }
   };
+
+  const handleDelete = async () => {
+    if (!accessToken || !editingArea) return;
+    setBorrando(true);
+    try {
+      await productionAreasAPI.delete(accessToken, editingArea.id);
+      toast.success(`Área "${editingArea.name}" eliminada`);
+      setShowDialog(false);
+      await Promise.all([loadAreas(), loadConteos()]);
+    } catch (error: any) {
+      console.error('Error deleting production area:', error);
+      toast.error(error.message || 'Error al eliminar el área de producción');
+    } finally {
+      setBorrando(false);
+      setConfirmandoBorrar(false);
+    }
+  };
+
+  const IconoForm = iconoDe(formData.icon);
+  const productosDelArea = editingArea && productosPorArea ? productosPorArea[editingArea.id] ?? 0 : null;
 
   return (
-    <div
-      className="min-h-screen relative overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
-    >
-      {/* Decorative background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3]
-          }}
-          transition={{ duration: 8, repeat: Infinity }}
-        />
-      </div>
-
-      {/* Header */}
-      <div
-        className="relative z-10 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
-        }}
-      >
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1, x: -4 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-11 h-11 flex items-center justify-center rounded-full"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <ArrowLeft className="w-5 h-5 text-white" />
-              </motion.button>
-              <div>
-                <h1 className="text-white tracking-wide flex items-center gap-2" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  <Factory className="w-5 h-5" />
-                  Áreas de Producción
-                </h1>
-                <p className="text-blue-100 text-xs">
-                  Configura y gestiona las áreas de tu producción
-                </p>
-              </div>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-7xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" className="boton-ios" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Áreas de producción</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>Dónde se prepara cada producto</p>
             </div>
-
-            <Dialog open={showDialog} onOpenChange={setShowDialog}>
-              <DialogTrigger asChild>
-                <Button
-                  onClick={() => {
-                    setEditingArea(null);
-                    setFormData({ name: '', description: '', color: '#0059FF', icon: 'Briefcase' });
-                  }}
-                  style={{
-                    background: 'linear-gradient(90deg, #FFD43B 0%, #FFC107 100%)',
-                    color: '#0047BA'
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Nueva Área
-                </Button>
-              </DialogTrigger>
-
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="text-[#0047BA]">
-                    {editingArea ? 'Editar Área de Producción' : 'Nueva Área de Producción'}
-                  </DialogTitle>
-                  <DialogDescription>
-                    Define las áreas de producción de tu negocio para organizar mejor los pedidos.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nombre *</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Ej: Panadería, Pastelería, Cocina Caliente..."
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="description">Descripción</Label>
-                    <Textarea
-                      id="description"
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      placeholder="Descripción opcional del área"
-                      rows={2}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Color</Label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {COLOR_OPTIONS.map((color) => (
-                        <button
-                          key={color.value}
-                          type="button"
-                          onClick={() => setFormData({ ...formData, color: color.value })}
-                          className="h-10 rounded-lg border-2 transition-all hover:scale-105"
-                          style={{
-                            backgroundColor: color.value,
-                            borderColor: formData.color === color.value ? '#000' : 'transparent'
-                          }}
-                          title={color.label}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Ícono</Label>
-                    <div className="grid grid-cols-7 gap-2">
-                      {ICON_OPTIONS.map((iconOption) => {
-                        const IconComponent = iconOption.icon;
-                        return (
-                          <button
-                            key={iconOption.name}
-                            type="button"
-                            onClick={() => setFormData({ ...formData, icon: iconOption.name })}
-                            className="h-10 rounded-lg border-2 flex items-center justify-center transition-all hover:scale-105"
-                            style={{
-                              borderColor: formData.icon === iconOption.name ? formData.color : '#E5E7EB',
-                              backgroundColor: formData.icon === iconOption.name ? `${formData.color}20` : 'transparent'
-                            }}
-                            title={iconOption.label}
-                          >
-                            <IconComponent
-                              className="w-5 h-5"
-                              style={{ color: formData.icon === iconOption.name ? formData.color : '#6B7280' }}
-                            />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 pt-4">
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      style={{
-                        background: 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
-                      }}
-                    >
-                      {editingArea ? 'Actualizar' : 'Crear'} Área
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleCloseDialog}
-                      className="flex-1"
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+            <button type="button" onClick={abrirNueva} aria-label="Nueva área" className="boton-ios" style={botonRedondo}>
+              <Plus style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6 relative z-10">
+      <main className="max-w-3xl mx-auto" style={{ padding: '20px 16px max(env(safe-area-inset-bottom), 32px)' }}>
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0059FF]"></div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: IOS.secundario }} />
           </div>
         ) : areas.length === 0 ? (
-          <Card className="border-2 shadow-lg">
-            <CardContent className="py-20">
-              <div className="text-center space-y-4">
-                <Factory className="w-16 h-16 text-gray-400 mx-auto" />
-                <h3 className="text-lg font-semibold text-gray-700">
-                  No hay áreas de producción configuradas
-                </h3>
-                <p className="text-gray-500 max-w-md mx-auto">
-                  Crea tu primera área de producción para organizar mejor los pedidos de tu negocio.
-                  Por ejemplo: Panadería, Pastelería, Cocina Caliente, Cocina Fría, etc.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div style={{ ...tarjeta, padding: '36px 24px', textAlign: 'center' }}>
+            <Factory style={{ width: 44, height: 44, color: '#C7C7CC', margin: '0 auto 12px' }} />
+            <p style={{ fontSize: 17, fontWeight: 600, margin: '0 0 6px', color: IOS.texto }}>Todavía no hay áreas</p>
+            <p style={{ fontSize: 15, color: IOS.secundario, margin: '0 0 18px', lineHeight: 1.4 }}>
+              Crea áreas como Panadería, Pastelería o Cocina para separar los pedidos por quién los prepara.
+            </p>
+            <button type="button" onClick={abrirNueva} className="boton-ios"
+              style={{ height: 44, padding: '0 20px', borderRadius: 22, border: 'none', background: IOS.azul, color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
+              Crear la primera área
+            </button>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <AnimatePresence>
-              {areas.map((area, index) => {
-                const IconComponent = getIconComponent(area.icon || 'Briefcase');
-
+          <>
+            <h2 style={tituloSeccion}>{areas.length} {areas.length === 1 ? 'área' : 'áreas'}</h2>
+            <ul style={{ ...tarjeta, listStyle: 'none', margin: 0, padding: 0 }}>
+              {areas.map((area, i) => {
+                const Icono = iconoDe(area.icon);
+                const color = area.color || '#0059FF';
+                const n = productosPorArea ? productosPorArea[area.id] ?? 0 : null;
                 return (
-                  <motion.div
-                    key={area.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ delay: index * 0.05 }}
-                  >
-                    <Card
-                      className="border-2 shadow-lg hover:shadow-xl transition-shadow"
-                      style={{ borderLeftWidth: '4px', borderLeftColor: area.color }}
-                    >
-                      <CardHeader>
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className="w-12 h-12 rounded-xl flex items-center justify-center"
-                              style={{ backgroundColor: `${area.color}20` }}
-                            >
-                              <IconComponent
-                                className="w-6 h-6"
-                                style={{ color: area.color }}
-                              />
-                            </div>
-                            <div>
-                              <CardTitle className="text-[#0047BA] text-lg">
-                                {area.name}
-                              </CardTitle>
-                              {area.description && (
-                                <CardDescription className="text-sm mt-1">
-                                  {area.description}
-                                </CardDescription>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </CardHeader>
-
-                      <Separator />
-
-                      <CardContent className="pt-4">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEdit(area)}
-                            className="flex-1"
-                          >
-                            <Edit2 className="w-3.5 h-3.5 mr-1" />
-                            Editar
-                          </Button>
-
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-300"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                                Eliminar
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Esta acción no se puede deshacer. El área "{area.name}" será eliminada permanentemente.
-                                  {' '}Los productos asignados a esta área no se eliminarán, pero perderán su asignación.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleDelete(area.id, area.name)}
-                                  className="bg-red-600 hover:bg-red-700"
-                                >
-                                  Eliminar
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
+                  <li key={area.id}>
+                    {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 68 }} />}
+                    <button type="button" onClick={() => abrirEditar(area)} className="fila-ios"
+                      style={{ width: '100%', minHeight: 64, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px 10px 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                      <span style={{ width: 40, height: 40, borderRadius: 10, background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Icono style={{ width: 21, height: 21, color: '#fff' }} />
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span className="truncate" style={{ display: 'block', fontSize: 17, color: IOS.texto }}>{area.name}</span>
+                        {area.description && (
+                          <span className="truncate" style={{ display: 'block', fontSize: 14, color: IOS.secundario }}>{area.description}</span>
+                        )}
+                      </span>
+                      {n !== null && (
+                        <span style={{ fontSize: 15, color: IOS.secundario, flexShrink: 0 }}>
+                          {n} {n === 1 ? 'producto' : 'productos'}
+                        </span>
+                      )}
+                      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC', flexShrink: 0 }} />
+                    </button>
+                  </li>
                 );
               })}
-            </AnimatePresence>
-          </div>
+            </ul>
+            <p style={{ fontSize: 13, color: IOS.secundario, margin: '8px 16px 0', lineHeight: 1.4 }}>
+              El área de cada producto se elige al editar el producto.
+            </p>
+          </>
         )}
-      </div>
+      </main>
+
+      {/* Hoja: nueva / editar */}
+      <Dialog open={showDialog} onOpenChange={(abierto) => { if (!abierto) cerrar(); }}>
+        <DialogContent
+          className="hoja-ios"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          style={{
+            top: 'auto', bottom: 0, left: 0, right: 0, translate: 'none', margin: '0 auto',
+            width: '100%', maxWidth: 640, height: '92dvh', padding: 0, gap: 0, border: 'none',
+            borderRadius: '14px 14px 0 0', background: IOS.fondo, display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '14px 16px 10px', gap: 8 }}>
+              <button type="button" onClick={cerrar} disabled={guardando || borrando} style={{ ...textoBoton, flex: 1, textAlign: 'left' }}>
+                Cancelar
+              </button>
+              <DialogTitle className="truncate" style={{ fontSize: 17, fontWeight: 600, color: IOS.texto, textAlign: 'center', flex: 2 }}>
+                {editingArea ? 'Editar área' : 'Nueva área'}
+              </DialogTitle>
+              <button type="submit" disabled={guardando || borrando || !formData.name.trim()}
+                style={{ ...textoBoton, flex: 1, textAlign: 'right', fontWeight: 600, opacity: formData.name.trim() ? 1 : 0.4, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                {guardando && <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} />}
+                {guardando ? 'Guardando' : editingArea ? 'Guardar' : 'Crear'}
+              </button>
+            </div>
+            <DialogDescription className="sr-only">Nombre, color e ícono del área de producción.</DialogDescription>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 16px max(env(safe-area-inset-bottom), 24px)' }}>
+              {/* Vista previa */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0 18px' }}>
+                <span style={{ width: 72, height: 72, borderRadius: 18, background: formData.color, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 6px 18px ${formData.color}55` }}>
+                  <IconoForm style={{ width: 36, height: 36, color: '#fff' }} />
+                </span>
+                <p className="truncate" style={{ maxWidth: '100%', fontSize: 20, fontWeight: 700, margin: '12px 0 0', color: formData.name.trim() ? IOS.texto : '#C7C7CC' }}>
+                  {formData.name.trim() || 'Nombre del área'}
+                </p>
+              </div>
+
+              <div style={tarjeta}>
+                <input
+                  aria-label="Nombre"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Nombre (ej. Panadería)"
+                  autoFocus={!editingArea}
+                  style={campo}
+                />
+                <div style={{ height: 0.5, background: IOS.separador, marginLeft: 16 }} />
+                <textarea
+                  aria-label="Descripción"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Descripción (opcional)"
+                  rows={2}
+                  style={{ ...campo, height: 'auto', padding: '11px 16px', resize: 'none', lineHeight: 1.4, fontFamily: 'inherit' }}
+                />
+              </div>
+
+              <h3 style={tituloSeccion}>Color</h3>
+              <div style={{ ...tarjeta, padding: '14px 12px', display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6, justifyItems: 'center' }}>
+                {COLOR_OPTIONS.map((c) => {
+                  const activo = formData.color === c.value;
+                  return (
+                    <button key={c.value} type="button" aria-label={c.label} aria-pressed={activo}
+                      onClick={() => setFormData({ ...formData, color: c.value })}
+                      style={{
+                        width: 32, height: 32, borderRadius: 16, border: 'none', cursor: 'pointer', background: c.value,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: activo ? `0 0 0 2px #fff, 0 0 0 4px ${c.value}` : 'none',
+                      }}>
+                      {activo && <Check style={{ width: 16, height: 16, color: '#fff' }} strokeWidth={3} />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <h3 style={tituloSeccion}>Ícono</h3>
+              <div style={{ ...tarjeta, padding: 12, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+                {ICON_OPTIONS.map((o) => {
+                  const activo = formData.icon === o.name;
+                  const Icono = o.icon;
+                  return (
+                    <button key={o.name} type="button" aria-label={o.label} aria-pressed={activo} title={o.label}
+                      onClick={() => setFormData({ ...formData, icon: o.name })}
+                      style={{
+                        aspectRatio: '1 / 1', borderRadius: 10, border: 'none', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: activo ? formData.color : 'rgba(118,118,128,0.12)',
+                      }}>
+                      <Icono style={{ width: 20, height: 20, color: activo ? '#fff' : '#3C3C43' }} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {editingArea && (
+                <>
+                  <div style={{ ...tarjeta, marginTop: 32 }}>
+                    {confirmandoBorrar ? (
+                      <div style={{ padding: 16 }}>
+                        <p style={{ fontSize: 15, color: IOS.texto, margin: '0 0 4px', fontWeight: 600 }}>¿Eliminar "{editingArea.name}"?</p>
+                        <p style={{ fontSize: 14, color: IOS.secundario, margin: '0 0 14px', lineHeight: 1.4 }}>
+                          {productosDelArea
+                            ? `${productosDelArea} ${productosDelArea === 1 ? 'producto queda' : 'productos quedan'} sin área asignada. Los productos no se borran.`
+                            : 'Los productos no se borran; solo pierden esta área.'}
+                          {' '}No se puede deshacer.
+                        </p>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <button type="button" onClick={() => setConfirmandoBorrar(false)} disabled={borrando} className="boton-ios"
+                            style={{ ...botonGrande, background: '#E3E3E8', color: IOS.texto }}>
+                            Cancelar
+                          </button>
+                          <button type="button" onClick={() => void handleDelete()} disabled={borrando} className="boton-ios"
+                            style={{ ...botonGrande, background: IOS.rojo, color: '#fff' }}>
+                            {borrando && <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />}
+                            {borrando ? 'Eliminando' : 'Eliminar'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => setConfirmandoBorrar(true)} className="fila-ios"
+                        style={{ width: '100%', height: 44, border: 'none', background: 'transparent', fontSize: 17, color: IOS.rojo, cursor: 'pointer' }}>
+                        Eliminar área
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const tituloSeccion: React.CSSProperties = {
+  fontSize: 13, fontWeight: 400, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '22px 16px 7px',
+};
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+};
+
+const textoBoton: React.CSSProperties = {
+  background: 'none', border: 'none', padding: 0, fontSize: 17, color: IOS.azul, cursor: 'pointer',
+};
+
+const campo: React.CSSProperties = {
+  display: 'block', width: '100%', boxSizing: 'border-box', height: 44, border: 'none', outline: 'none',
+  background: 'transparent', fontSize: 17, color: IOS.texto, padding: '0 16px',
+};
+
+const botonGrande: React.CSSProperties = {
+  flex: 1, height: 44, borderRadius: 10, border: 'none', fontSize: 16, fontWeight: 600, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
