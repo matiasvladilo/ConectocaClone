@@ -1,29 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ProductionOrder, ProductionOrderStatus } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
 import {
   ArrowLeft,
   Plus,
+  Minus,
   Package,
-  Package2,
   CheckCircle2,
   Clock,
   FileText,
-  Trash2,
   Search,
-  Filter,
-  AlertCircle
+  X,
+  ChevronDown,
+  AlertCircle,
+  Loader2,
+  Layers,
+  BookOpen,
+  ChevronRight,
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from './ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { AnimatePresence, motion } from 'motion/react';
+import { projectId } from '../utils/supabase/info';
+import { productsAPI } from '../utils/api';
 
 interface ProductionOrdersProps {
   onBack: () => void;
@@ -40,7 +38,7 @@ interface Product {
   description?: string;
   stock: number;
   price: number;
-  trackStock?: boolean; // Si es false, stock ilimitado
+  unlimitedStock?: boolean;
 }
 
 export function ProductionOrders({ onBack, accessToken, userName, userRole, onNavigateToIngredients, onNavigateToRecipes }: ProductionOrdersProps) {
@@ -102,22 +100,9 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
 
   const loadProducts = async () => {
     try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-6d979413/products`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error('Error al cargar productos');
-      }
-
-      const result = await response.json();
-      console.log('📦 Products loaded:', result);
-      setProducts(result.data || []);
+      // Antes era /products sin límite y el servidor devolvía solo 20.
+      const lista = await productsAPI.getAll(accessToken);
+      setProducts(lista as unknown as Product[]);
     } catch (error: any) {
       console.error('Error loading products:', error);
       toast.error(error.message || 'Error al cargar productos');
@@ -211,7 +196,7 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
 
       const data = await response.json();
 
-      toast.success('✅ Orden de producción creada exitosamente');
+      toast.success('Orden de producción creada');
 
       // Reset form
       setSelectedProducts([]);
@@ -309,9 +294,9 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
 
       // Show different success messages based on status
       if (newStatus === 'EN_PROCESO') {
-        toast.success('✅ Producción iniciada - Stock de materias primas descontado');
+        toast.success('Producción iniciada · se descontó la materia prima');
       } else if (newStatus === 'TERMINADA') {
-        toast.success('✅ Producción completada - Stock de productos actualizado');
+        toast.success('Producción terminada · stock de productos actualizado');
       } else {
         toast.success('Estado actualizado correctamente');
       }
@@ -326,11 +311,7 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
     }
   };
 
-  const handleDeleteOrder = async (orderId: string, orderName: string) => {
-    if (!confirm(`¿Estás seguro de eliminar la orden "${orderName}"?\n\nEsta acción no se puede deshacer.`)) {
-      return;
-    }
-
+  const handleDeleteOrder = async (orderId: string) => {
     try {
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-6d979413/production-orders/${orderId}`,
@@ -347,50 +328,11 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
         throw new Error(error.error || 'Error al eliminar orden');
       }
 
-      toast.success('✅ Orden eliminada correctamente');
+      toast.success('Orden eliminada');
       await loadProductionOrders();
     } catch (error: any) {
       console.error('Error deleting order:', error);
       toast.error(error.message || 'Error al eliminar orden');
-    }
-  };
-
-  const getStatusColor = (status: ProductionOrderStatus) => {
-    switch (status) {
-      case 'BORRADOR':
-        return 'bg-gray-100 text-gray-800 border-gray-300';
-      case 'EN_PROCESO':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'TERMINADA':
-        return 'bg-green-100 text-green-800 border-green-300';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
-    }
-  };
-
-  const getStatusIcon = (status: ProductionOrderStatus) => {
-    switch (status) {
-      case 'BORRADOR':
-        return <FileText className="w-4 h-4" />;
-      case 'EN_PROCESO':
-        return <Clock className="w-4 h-4" />;
-      case 'TERMINADA':
-        return <CheckCircle2 className="w-4 h-4" />;
-      default:
-        return <FileText className="w-4 h-4" />;
-    }
-  };
-
-  const getStatusLabel = (status: ProductionOrderStatus) => {
-    switch (status) {
-      case 'BORRADOR':
-        return 'Borrador';
-      case 'EN_PROCESO':
-        return 'En Proceso';
-      case 'TERMINADA':
-        return 'Terminada';
-      default:
-        return status;
     }
   };
 
@@ -432,551 +374,594 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
     return matchesSearch && matchesStatus && matchesDate;
   });
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando órdenes de producción...</p>
-        </div>
-      </div>
-    );
-  }
+  // ---- UI de la hoja "Nueva orden" ----------------------------------------
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+  const [creando, setCreando] = useState(false);
+  const [completando, setCompletando] = useState(false);
+  const [accionEnCurso, setAccionEnCurso] = useState<string | null>(null);
+  const [confirmarBorrar, setConfirmarBorrar] = useState<string | null>(null);
+  const [verFechas, setVerFechas] = useState(false);
+
+  const puedeCrear = userRole === 'production' || userRole === 'admin';
+
+  const agregarProducto = (product: Product) => {
+    setSelectedProducts(prev => prev.some(p => p.productId === product.id)
+      ? prev.map(p => p.productId === product.id ? { ...p, quantity: p.quantity + 1 } : p)
+      : [...prev, { productId: product.id, name: product.name, quantity: 1 }]);
+    setBusquedaProducto('');
+  };
+
+  const cambiarCantidad = (productId: string, cantidad: number) => {
+    setSelectedProducts(prev => prev.map(p => p.productId === productId ? { ...p, quantity: Math.max(1, cantidad || 1) } : p));
+  };
+
+  const resultadosProducto = useMemo(() => {
+    const q = busquedaProducto.trim().toLowerCase();
+    if (!q) return [];
+    return products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 30);
+  }, [busquedaProducto, products]);
+
+  const abrirNueva = () => {
+    setSelectedProducts([]);
+    setNotes('');
+    setBusquedaProducto('');
+    setIsCreateDialogOpen(true);
+  };
+
+  const cerrarNueva = () => {
+    if (creando) return;
+    setIsCreateDialogOpen(false);
+  };
+
+  const crear = async () => {
+    setCreando(true);
+    await handleCreateOrder();
+    setCreando(false);
+  };
+
+  const cambiarEstado = async (orderId: string, estado: ProductionOrderStatus) => {
+    setAccionEnCurso(orderId);
+    await handleUpdateStatus(orderId, estado);
+    setAccionEnCurso(null);
+  };
+
+  const borrar = async (orderId: string) => {
+    setAccionEnCurso(orderId);
+    await handleDeleteOrder(orderId);
+    setAccionEnCurso(null);
+    setConfirmarBorrar(null);
+  };
+
+  const terminar = async () => {
+    setCompletando(true);
+    await handleConfirmComplete();
+    setCompletando(false);
+  };
+
+  const conteo = {
+    ALL: productionOrders.length,
+    BORRADOR: productionOrders.filter(o => o.status === 'BORRADOR').length,
+    EN_PROCESO: productionOrders.filter(o => o.status === 'EN_PROCESO').length,
+    TERMINADA: productionOrders.filter(o => o.status === 'TERMINADA').length,
+  };
+
+  const ordenadas = [...filteredOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-yellow-50 p-4 md:p-6 lg:p-8" style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}>
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6 md:mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={onBack}
-                className="shrink-0"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div>
-                <h1 className="text-2xl md:text-3xl text-gray-900">
-                  🏭 Órdenes de Producción
-                </h1>
-                <p className="text-sm text-gray-600 mt-1">
-                  Usuario: {userName}
-                </p>
-              </div>
+    <div className="min-h-screen" style={{ background: IOS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-3xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" className="boton-ios" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Órdenes de producción</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>Lo que se produce para reponer stock</p>
             </div>
-
-            <div className="flex flex-col gap-2">
-              <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                {/* Only show create button for production and admin roles */}
-                {(userRole === 'production' || userRole === 'admin') && (
-                  <DialogTrigger asChild>
-                    <Button className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg">
-                      <Plus className="w-5 h-5 mr-2" />
-                      Nueva Orden de Producción
-                    </Button>
-                  </DialogTrigger>
-                )}
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>📦 Nueva Orden de Producción</DialogTitle>
-                    <DialogDescription>
-                      Agrega los productos que deseas producir y su cantidad
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <div className="space-y-6 py-4">
-                    {/* Add Products */}
-                    <div className="space-y-4">
-                      <Label>Productos a Producir</Label>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="md:col-span-2">
-                          <Select value={currentProductId} onValueChange={setCurrentProductId}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccionar producto" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {products.map(product => (
-                                <SelectItem key={product.id} value={product.id}>
-                                  {product.name} (Stock: {product.trackStock === false || product.stock === -1 ? '∞ Ilimitado' : product.stock})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex gap-2">
-                          <Input
-                            type="number"
-                            min="1"
-                            value={currentQuantity}
-                            onChange={(e) => setCurrentQuantity(parseInt(e.target.value) || '')}
-                            placeholder="Cantidad"
-                            className="flex-1"
-                          />
-                          <Button
-                            type="button"
-                            onClick={handleAddProduct}
-                            size="icon"
-                            className="shrink-0"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Selected Products */}
-                      {selectedProducts.length > 0 && (
-                        <div className="space-y-2">
-                          <Label className="text-sm text-gray-600">Productos agregados:</Label>
-                          {selectedProducts.map((item) => (
-                            <div
-                              key={item.productId}
-                              className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg"
-                            >
-                              <div className="flex items-center gap-3">
-                                <Package className="w-5 h-5 text-blue-600" />
-                                <div>
-                                  <p className="font-medium text-gray-900">{item.name}</p>
-                                  <p className="text-sm text-gray-600">Cantidad: {item.quantity}</p>
-                                </div>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleRemoveProduct(item.productId)}
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Notes */}
-                    <div className="space-y-2">
-                      <Label htmlFor="notes">Notas / Observaciones (opcional)</Label>
-                      <Textarea
-                        id="notes"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        placeholder="Ej: Producción urgente para evento especial..."
-                        rows={3}
-                      />
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-3 justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setIsCreateDialogOpen(false);
-                          setSelectedProducts([]);
-                          setNotes('');
-                        }}
-                      >
-                        Cancelar
-                      </Button>
-                      <Button
-                        onClick={handleCreateOrder}
-                        disabled={selectedProducts.length === 0 && (!currentProductId || !currentQuantity)}
-                        className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
-                      >
-                        Crear Orden de Producción
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              {/* Stock de Materia Prima Button */}
-              {onNavigateToIngredients && (userRole === 'production' || userRole === 'admin') && (
-                <Button
-                  variant="outline"
-                  onClick={onNavigateToIngredients}
-                  className="border-yellow-300 text-yellow-700 hover:bg-yellow-50 hover:text-yellow-800 shadow"
-                >
-                  <Package2 className="w-5 h-5 mr-2" />
-                  Stock de Materia Prima
-                </Button>
-              )}
-
-              {/* Recetas Button */}
-              {onNavigateToRecipes && (userRole === 'production' || userRole === 'admin') && (
-                <Button
-                  variant="outline"
-                  onClick={onNavigateToRecipes}
-                  className="border-green-300 text-green-700 hover:bg-green-50 hover:text-green-800 shadow"
-                >
-                  <FileText className="w-5 h-5 mr-2" />
-                  Recetas
-                </Button>
-              )}
-            </div>
+            {puedeCrear && (
+              <button type="button" onClick={abrirNueva} aria-label="Nueva orden de producción" className="boton-ios" style={botonRedondo}>
+                <Plus style={{ width: 20, height: 20, color: '#fff' }} />
+              </button>
+            )}
+          </div>
+          <div style={{ position: 'relative', marginTop: 12 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'rgba(255,255,255,0.75)' }} />
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por producto o código"
+              aria-label="Buscar órdenes"
+              className="buscador-sobre-azul"
+              style={{ width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', fontSize: 16, padding: searchTerm ? '0 34px' : '0 12px 0 34px' }}
+            />
+            {searchTerm && (
+              <button type="button" onClick={() => setSearchTerm('')} aria-label="Borrar búsqueda" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X style={{ width: 14, height: 14, color: '#fff' }} />
+              </button>
+            )}
           </div>
         </div>
-
-        {/* Filters */}
-        <Card className="mb-6">
-          <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  placeholder="Buscar por ID, producto..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Filter className="w-5 h-5 text-gray-500 shrink-0" />
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value: string) => setStatusFilter(value as ProductionOrderStatus | 'ALL')}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filtrar por estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">Todos los estados</SelectItem>
-                    <SelectItem value="BORRADOR">Borrador</SelectItem>
-                    <SelectItem value="EN_PROCESO">En Proceso</SelectItem>
-                    <SelectItem value="TERMINADA">Terminada</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Input
-                  type="date"
-                  value={dateFilterFrom}
-                  onChange={(e) => setDateFilterFrom(e.target.value)}
-                  className="flex-1"
-                  placeholder="Desde"
-                />
-                <Input
-                  type="date"
-                  value={dateFilterTo}
-                  onChange={(e) => setDateFilterTo(e.target.value)}
-                  className="flex-1"
-                  placeholder="Hasta"
-                />
-                {(dateFilterFrom || dateFilterTo) && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setDateFilterFrom('');
-                      setDateFilterTo('');
-                    }}
-                    className="shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4 text-gray-500" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Orders Grid */}
-        {filteredOrders.length === 0 ? (
-          <Card className="p-12 text-center">
-            <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg text-gray-600 mb-2">
-              {searchTerm || statusFilter !== 'ALL'
-                ? 'No se encontraron órdenes con estos filtros'
-                : 'No hay órdenes de producción'}
-            </h3>
-            <p className="text-sm text-gray-500 mb-6">
-              {searchTerm || statusFilter !== 'ALL'
-                ? 'Intenta ajustar los filtros de búsqueda'
-                : 'Crea tu primera orden de producción para comenzar'}
-            </p>
-            {!searchTerm && statusFilter === 'ALL' && (
-              <Button
-                onClick={() => setIsCreateDialogOpen(true)}
-                className="bg-gradient-to-r from-blue-600 to-blue-700"
-              >
-                <Plus className="w-5 h-5 mr-2" />
-                Nueva Orden de Producción
-              </Button>
-            )}
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-            <AnimatePresence mode="popLayout">
-              {filteredOrders.map((order) => (
-                <motion.div
-                  key={order.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Card className="hover:shadow-xl transition-shadow duration-300 border-2">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <CardTitle className="text-lg truncate">
-                            {order.productName}
-                          </CardTitle>
-                          <p className="text-xs text-gray-500 mt-1">
-                            ID: {order.id.substring(0, 8).toUpperCase()}
-                          </p>
-                        </div>
-                        <Badge className={`${getStatusColor(order.status)} border shrink-0`}>
-                          <span className="flex items-center gap-1.5">
-                            {getStatusIcon(order.status)}
-                            {getStatusLabel(order.status)}
-                          </span>
-                        </Badge>
-                      </div>
-                    </CardHeader>
-
-                    <CardContent className="space-y-4">
-                      {/* Products */}
-                      <div className="space-y-2">
-                        <Label className="text-xs text-gray-600">Productos:</Label>
-                        <div className="space-y-1.5">
-                          {order.products.map((product, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between p-2 bg-gray-50 rounded-md text-sm"
-                            >
-                              <span className="text-gray-700 font-medium">{product.name}</span>
-                              <div className="flex gap-1.5">
-                                {order.status === 'TERMINADA' && product.producedQuantity !== undefined ? (
-                                  <>
-                                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                      OK: {product.producedQuantity}
-                                    </Badge>
-                                    {(product.wasteQuantity || 0) > 0 && (
-                                      <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
-                                        Merma: {product.wasteQuantity}
-                                      </Badge>
-                                    )}
-                                  </>
-                                ) : (
-                                  <Badge variant="outline" className="text-xs">
-                                    {product.quantity} unidades
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Dates */}
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                          <p className="text-gray-500">Creada</p>
-                          <p className="font-medium text-gray-900">
-                            {new Date(order.createdAt).toLocaleDateString('es-CL')}
-                          </p>
-                        </div>
-                        {order.completedAt && (
-                          <div>
-                            <p className="text-gray-500">Completada</p>
-                            <p className="font-medium text-gray-900">
-                              {new Date(order.completedAt).toLocaleDateString('es-CL')}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Notes */}
-                      {order.notes && (
-                        <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-md">
-                          <p className="text-xs text-gray-600 mb-1">Notas:</p>
-                          <p className="text-sm text-gray-800">{order.notes}</p>
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      <div className="flex flex-wrap gap-2 pt-2 border-t">
-                        {order.status === 'BORRADOR' && (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() => handleUpdateStatus(order.id, 'EN_PROCESO')}
-                              className="flex-1 bg-blue-600 hover:bg-blue-700"
-                            >
-                              <Clock className="w-4 h-4 mr-1" />
-                              Iniciar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDeleteOrder(order.id, order.productName)}
-                              className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4 mr-1" />
-                              Eliminar
-                            </Button>
-                          </>
-                        )}
-
-                        {order.status === 'EN_PROCESO' && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleOpenCompleteDialog(order)}
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                          >
-                            <CheckCircle2 className="w-4 h-4 mr-1" />
-                            Completar
-                          </Button>
-                        )}
-
-                        {order.status === 'TERMINADA' && (
-                          <div className="flex-1 text-center py-2 bg-green-50 rounded-md">
-                            <p className="text-sm text-green-700 font-medium">
-                              ✅ Orden Completada
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* Summary */}
-        {productionOrders.length > 0 && (
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="bg-gradient-to-br from-gray-50 to-gray-100 border-gray-200">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gray-200 rounded-lg">
-                    <FileText className="w-6 h-6 text-gray-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Borradores</p>
-                    <p className="text-2xl text-gray-900">
-                      {productionOrders.filter(o => o.status === 'BORRADOR').length}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-200 rounded-lg">
-                    <Clock className="w-6 h-6 text-blue-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-blue-600">En Proceso</p>
-                    <p className="text-2xl text-blue-900">
-                      {productionOrders.filter(o => o.status === 'EN_PROCESO').length}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-200 rounded-lg">
-                    <CheckCircle2 className="w-6 h-6 text-green-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-green-600">Terminadas</p>
-                    <p className="text-2xl text-green-900">
-                      {productionOrders.filter(o => o.status === 'TERMINADA').length}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
       </div>
-      {/* Confirmation Dialog for Completion */}
-      <Dialog open={isCompleteDialogOpen} onOpenChange={setIsCompleteDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Completar Orden de Producción</DialogTitle>
-            <DialogDescription>
-              Confirma las cantidades reales producidas y registra mermas si las hubo.
-              El stock de productos terminados se incrementará según la "Cantidad Producida".
-            </DialogDescription>
-          </DialogHeader>
 
-          <div className="py-4 space-y-6">
-            {completionData.map((item) => (
-              <div key={item.productId} className="bg-slate-50 p-4 rounded-lg space-y-3">
-                <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-medium text-slate-800">{item.name}</h4>
-                  <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
-                    Objetivo: {item.targetQuantity}
+      <main className="max-w-3xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Estado */}
+        <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 12px', padding: '0 16px' }}>
+          {ESTADOS.map(e => {
+            const activo = statusFilter === e.key;
+            return (
+              <button key={e.key} type="button" aria-pressed={activo} onClick={() => setStatusFilter(e.key)}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? e.color : IOS.tarjeta, color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}>
+                {!activo && e.key !== 'ALL' && <span style={{ width: 8, height: 8, borderRadius: 4, background: e.color }} />}
+                {e.label}
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>{conteo[e.key]}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Fechas */}
+        <div style={tarjeta}>
+          <button type="button" onClick={() => setVerFechas(v => !v)} aria-expanded={verFechas} className="fila-ios"
+            style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+            <span style={{ fontSize: 17, color: IOS.texto }}>Fechas</span>
+            <span className="truncate" style={{ flex: 1, minWidth: 0, textAlign: 'right', fontSize: 15, color: dateFilterFrom || dateFilterTo ? IOS.azul : IOS.secundario }}>
+              {dateFilterFrom || dateFilterTo ? `${dateFilterFrom ? fechaCorta(dateFilterFrom) : '…'} – ${dateFilterTo ? fechaCorta(dateFilterTo) : 'hoy'}` : 'Todas'}
+            </span>
+            <ChevronDown style={{ width: 18, height: 18, color: 'rgba(60,60,67,0.3)', transform: verFechas ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+          </button>
+          {verFechas && (
+            <>
+              <Separador />
+              <div style={{ display: 'flex', gap: 8, padding: '10px 16px' }}>
+                <CampoFecha etiqueta="Desde" valor={dateFilterFrom} onCambio={setDateFilterFrom} />
+                <CampoFecha etiqueta="Hasta" valor={dateFilterTo} onCambio={setDateFilterTo} />
+              </div>
+              {(dateFilterFrom || dateFilterTo) && (
+                <>
+                  <Separador />
+                  <button type="button" onClick={() => { setDateFilterFrom(''); setDateFilterTo(''); }} className="fila-ios"
+                    style={{ width: '100%', height: 44, border: 'none', background: 'transparent', fontSize: 17, color: IOS.azul, cursor: 'pointer' }}>
+                    Quitar fechas
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Lista */}
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: IOS.secundario }} />
+          </div>
+        ) : ordenadas.length === 0 ? (
+          <div style={{ ...tarjeta, marginTop: 20, padding: '36px 24px', textAlign: 'center' }}>
+            <Package style={{ width: 40, height: 40, color: '#C7C7CC', margin: '0 auto 10px' }} />
+            <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>
+              {productionOrders.length === 0 ? 'Todavía no hay órdenes' : 'Ninguna orden coincide'}
+            </p>
+            <p style={{ fontSize: 15, color: IOS.secundario, marginTop: 4, lineHeight: 1.4 }}>
+              {productionOrders.length === 0
+                ? 'Una orden registra lo que se produce: al iniciarla se descuenta la materia prima y al terminarla sube el stock del producto.'
+                : 'Prueba con otro estado, fecha o búsqueda.'}
+            </p>
+            {productionOrders.length === 0 && puedeCrear && (
+              <button type="button" onClick={abrirNueva} className="boton-ios"
+                style={{ marginTop: 16, height: 44, padding: '0 20px', borderRadius: 22, border: 'none', background: IOS.azul, color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>
+                Crear orden
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <h2 style={tituloSeccion}>{ordenadas.length} {ordenadas.length === 1 ? 'orden' : 'órdenes'}</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {ordenadas.map(order => {
+                const est = ESTADO_DE[order.status] ?? ESTADO_DE.BORRADOR;
+                const Icono = est.icono;
+                const ocupado = accionEnCurso === order.id;
+                return (
+                  <div key={order.id} style={tarjeta}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+                      <span style={{ width: 32, height: 32, borderRadius: 8, background: est.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Icono style={{ width: 18, height: 18, color: '#fff' }} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p className="truncate" style={{ fontSize: 16, fontWeight: 600, color: IOS.texto }}>{order.productName}</p>
+                        <p className="truncate" style={{ fontSize: 13, color: IOS.secundario }}>
+                          <span style={{ color: est.color, fontWeight: 600 }}>{est.label}</span>
+                          {' · '}#{order.id.substring(0, 8).toUpperCase()}
+                          {' · '}{fechaLarga(order.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {order.products.map((p, idx) => (
+                      <div key={p.productId + idx}>
+                        <Separador inset={60} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px 9px 60px' }}>
+                          <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 15, color: '#3C3C43' }}>{p.name}</span>
+                          {order.status === 'TERMINADA' && p.producedQuantity !== undefined ? (
+                            <span style={{ fontSize: 14, flexShrink: 0 }}>
+                              <span style={{ color: IOS.verde, fontWeight: 600 }}>{p.producedQuantity} ok</span>
+                              {(p.wasteQuantity || 0) > 0 && <span style={{ color: IOS.rojo, fontWeight: 600 }}> · {p.wasteQuantity} merma</span>}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, flexShrink: 0 }}>{p.quantity}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {order.notes && (
+                      <>
+                        <Separador inset={60} />
+                        <p style={{ fontSize: 14, color: IOS.secundario, padding: '9px 16px 9px 60px', lineHeight: 1.4, overflowWrap: 'anywhere' }}>{order.notes}</p>
+                      </>
+                    )}
+
+                    {/* Acciones */}
+                    {order.status === 'TERMINADA' ? (
+                      order.completedAt && (
+                        <>
+                          <Separador />
+                          <p style={{ fontSize: 13, color: IOS.secundario, padding: '10px 16px' }}>Terminada el {fechaLarga(order.completedAt)}</p>
+                        </>
+                      )
+                    ) : puedeCrear && (
+                      <>
+                        <Separador />
+                        {confirmarBorrar === order.id ? (
+                          <div style={{ padding: 12 }}>
+                            <p style={{ fontSize: 14, color: IOS.secundario, textAlign: 'center', margin: '0 0 10px' }}>¿Eliminar esta orden? No se puede deshacer.</p>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <button type="button" onClick={() => setConfirmarBorrar(null)} disabled={ocupado} className="boton-ios" style={{ ...botonAccion, background: '#E3E3E8', color: IOS.texto }}>Cancelar</button>
+                              <button type="button" onClick={() => void borrar(order.id)} disabled={ocupado} className="boton-ios" style={{ ...botonAccion, background: IOS.rojo, color: '#fff' }}>
+                                {ocupado && <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />}Eliminar
+                              </button>
+                            </div>
+                          </div>
+                        ) : order.status === 'BORRADOR' ? (
+                          <div style={{ display: 'flex', gap: 10, padding: 12 }}>
+                            <button type="button" onClick={() => setConfirmarBorrar(order.id)} disabled={ocupado} className="boton-ios"
+                              style={{ ...botonAccion, flex: '0 0 auto', padding: '0 16px', background: 'rgba(255,59,48,0.1)', color: IOS.rojo }}>
+                              Eliminar
+                            </button>
+                            <button type="button" onClick={() => void cambiarEstado(order.id, 'EN_PROCESO')} disabled={ocupado} className="boton-ios"
+                              style={{ ...botonAccion, background: IOS.azul, color: '#fff' }}>
+                              {ocupado ? <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} /> : <Clock style={{ width: 17, height: 17 }} />}
+                              Iniciar producción
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ padding: 12 }}>
+                            <button type="button" onClick={() => handleOpenCompleteDialog(order)} disabled={ocupado} className="boton-ios"
+                              style={{ ...botonAccion, width: '100%', background: IOS.verde, color: '#fff' }}>
+                              <CheckCircle2 style={{ width: 17, height: 17 }} />
+                              Terminar y registrar lo producido
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* Herramientas */}
+        {(onNavigateToIngredients || onNavigateToRecipes) && puedeCrear && (
+          <>
+            <h2 style={tituloSeccion}>Herramientas</h2>
+            <div style={tarjeta}>
+              {onNavigateToIngredients && (
+                <FilaAcceso icono={Layers} color="#AF52DE" titulo="Materia prima" onClick={onNavigateToIngredients} />
+              )}
+              {onNavigateToIngredients && onNavigateToRecipes && <Separador inset={56} />}
+              {onNavigateToRecipes && (
+                <FilaAcceso icono={BookOpen} color={IOS.verde} titulo="Recetas" onClick={onNavigateToRecipes} />
+              )}
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* Hoja: nueva orden */}
+      <Hoja abierta={isCreateDialogOpen} onCerrar={cerrarNueva} titulo="Nueva orden"
+        izquierda={<button type="button" onClick={cerrarNueva} disabled={creando} style={textoBoton}>Cancelar</button>}
+        derecha={
+          <button type="button" onClick={() => void crear()} disabled={creando || selectedProducts.length === 0}
+            style={{ ...textoBoton, fontWeight: 600, opacity: selectedProducts.length === 0 ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {creando && <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} />}
+            {creando ? 'Creando' : 'Crear'}
+          </button>
+        }>
+        <div style={{ position: 'relative' }}>
+          <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: IOS.secundario }} />
+          <input
+            type="search"
+            value={busquedaProducto}
+            onChange={(e) => setBusquedaProducto(e.target.value)}
+            placeholder="Buscar producto para agregar"
+            aria-label="Buscar producto"
+            style={{ width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none', background: IOS.relleno, fontSize: 16, padding: '0 12px 0 34px', color: IOS.texto }}
+          />
+        </div>
+
+        {busquedaProducto.trim() && (
+          <div style={{ ...tarjeta, marginTop: 8 }}>
+            {resultadosProducto.length === 0 ? (
+              <p style={{ fontSize: 15, color: IOS.secundario, padding: '12px 16px' }}>Ningún producto coincide.</p>
+            ) : resultadosProducto.map((p, idx) => (
+              <div key={p.id}>
+                {idx > 0 && <Separador />}
+                <button type="button" onClick={() => agregarProducto(p)} className="fila-ios"
+                  style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                  <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, color: IOS.texto }}>{p.name}</span>
+                  <span style={{ fontSize: 13, color: IOS.secundario, flexShrink: 0 }}>
+                    {p.unlimitedStock || p.stock === -1 ? 'sin control' : `stock ${p.stock}`}
                   </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-green-700 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Cantidad Producida (OK)
-                    </Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={item.producedQuantity}
-                      onChange={(e) => handleUpdateCompletionData(item.productId, 'producedQuantity', e.target.value)}
-                      className="border-green-200 focus-visible:ring-green-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-red-700 font-semibold flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> Merma (Descarte)
-                    </Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={item.wasteQuantity}
-                      onChange={(e) => handleUpdateCompletionData(item.productId, 'wasteQuantity', e.target.value)}
-                      className="border-red-200 focus-visible:ring-red-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Validation/Info Message */}
-                {(item.producedQuantity + item.wasteQuantity) !== item.targetQuantity && (
-                  <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    Total ({item.producedQuantity + item.wasteQuantity}) difiere del objetivo ({item.targetQuantity})
-                  </p>
-                )}
+                  <Plus style={{ width: 18, height: 18, color: IOS.azul, flexShrink: 0 }} />
+                </button>
               </div>
             ))}
           </div>
+        )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCompleteDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleConfirmComplete} className="bg-green-600 hover:bg-green-700">
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Confirmar y Finalizar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <h3 style={tituloSeccion}>A producir</h3>
+        <div style={tarjeta}>
+          {selectedProducts.length === 0 ? (
+            <p style={{ fontSize: 15, color: IOS.secundario, padding: '12px 16px', lineHeight: 1.4 }}>Busca un producto arriba para agregarlo.</p>
+          ) : selectedProducts.map((item, idx) => (
+            <div key={item.productId}>
+              {idx > 0 && <Separador />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px 8px 16px' }}>
+                <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, color: IOS.texto }}>{item.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', background: IOS.relleno, borderRadius: 9, flexShrink: 0 }}>
+                  <button type="button" aria-label={`Restar ${item.name}`} onClick={() => item.quantity <= 1 ? handleRemoveProduct(item.productId) : cambiarCantidad(item.productId, item.quantity - 1)}
+                    style={botonPaso}>
+                    {item.quantity <= 1 ? <X style={{ width: 15, height: 15, color: IOS.rojo }} /> : <Minus style={{ width: 15, height: 15 }} />}
+                  </button>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={item.quantity}
+                    onChange={(e) => cambiarCantidad(item.productId, parseInt(e.target.value, 10))}
+                    aria-label={`Cantidad de ${item.name}`}
+                    style={{ width: 52, height: 32, border: 'none', background: 'transparent', textAlign: 'center', fontSize: 16, fontWeight: 600, color: IOS.texto, outline: 'none' }}
+                  />
+                  <button type="button" aria-label={`Sumar ${item.name}`} onClick={() => cambiarCantidad(item.productId, item.quantity + 1)} style={botonPaso}>
+                    <Plus style={{ width: 15, height: 15 }} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 style={tituloSeccion}>Notas</h3>
+        <div style={tarjeta}>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Opcional. Ej.: para el evento del sábado"
+            rows={3}
+            aria-label="Notas"
+            style={{ display: 'block', width: '100%', border: 'none', outline: 'none', resize: 'none', padding: '11px 16px', fontSize: 16, lineHeight: 1.4, fontFamily: 'inherit', background: 'transparent', color: IOS.texto }}
+          />
+        </div>
+        <p style={{ fontSize: 13, color: IOS.secundario, margin: '8px 16px 0', lineHeight: 1.4 }}>
+          La orden queda como borrador. Al iniciarla se descuenta la materia prima según las recetas.
+        </p>
+      </Hoja>
+
+      {/* Hoja: terminar */}
+      <Hoja abierta={isCompleteDialogOpen} onCerrar={() => !completando && setIsCompleteDialogOpen(false)} titulo="Terminar orden"
+        izquierda={<button type="button" onClick={() => setIsCompleteDialogOpen(false)} disabled={completando} style={textoBoton}>Cancelar</button>}
+        derecha={
+          <button type="button" onClick={() => void terminar()} disabled={completando}
+            style={{ ...textoBoton, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {completando && <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} />}
+            {completando ? 'Guardando' : 'Terminar'}
+          </button>
+        }>
+        <p style={{ fontSize: 14, color: IOS.secundario, margin: '0 16px 4px', lineHeight: 1.4 }}>
+          Anota cuánto salió bien y cuánto se perdió. El stock del producto sube con lo producido.
+        </p>
+        {completionData.map(item => {
+          const difiere = item.producedQuantity + item.wasteQuantity !== item.targetQuantity;
+          return (
+            <div key={item.productId}>
+              <h3 style={tituloSeccion}>{item.name} · objetivo {item.targetQuantity}</h3>
+              <div style={tarjeta}>
+                <FilaNumero etiqueta="Producido" color={IOS.verde} valor={item.producedQuantity}
+                  onCambio={(v) => handleUpdateCompletionData(item.productId, 'producedQuantity', v)} />
+                <Separador />
+                <FilaNumero etiqueta="Merma" color={IOS.rojo} valor={item.wasteQuantity}
+                  onCambio={(v) => handleUpdateCompletionData(item.productId, 'wasteQuantity', v)} />
+              </div>
+              {difiere && (
+                <p style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: IOS.naranja, margin: '6px 16px 0' }}>
+                  <AlertCircle style={{ width: 14, height: 14 }} />
+                  Suma {item.producedQuantity + item.wasteQuantity}, distinto del objetivo ({item.targetQuantity})
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </Hoja>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+const IOS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  naranja: '#FF9500',
+  verde: '#34C759',
+};
+
+const ESTADOS: { key: ProductionOrderStatus | 'ALL'; label: string; color: string }[] = [
+  { key: 'ALL', label: 'Todas', color: IOS.azul },
+  { key: 'BORRADOR', label: 'Borradores', color: '#8E8E93' },
+  { key: 'EN_PROCESO', label: 'En proceso', color: IOS.azul },
+  { key: 'TERMINADA', label: 'Terminadas', color: IOS.verde },
+];
+
+const ESTADO_DE: Record<ProductionOrderStatus, { label: string; color: string; icono: any }> = {
+  BORRADOR: { label: 'Borrador', color: '#8E8E93', icono: FileText },
+  EN_PROCESO: { label: 'En proceso', color: IOS.azul, icono: Clock },
+  TERMINADA: { label: 'Terminada', color: IOS.verde, icono: CheckCircle2 },
+};
+
+const fechaLarga = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' }).replace('.', '');
+
+const fechaCorta = (yyyyMmDd: string) => {
+  const [y, m, d] = yyyyMmDd.split('-');
+  return y && m && d ? `${d}/${m}` : yyyyMmDd;
+};
+
+const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const tituloSeccion: React.CSSProperties = {
+  fontSize: 13, fontWeight: 400, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '22px 16px 7px',
+};
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+};
+
+const botonAccion: React.CSSProperties = {
+  flex: 1, height: 44, borderRadius: 10, border: 'none', fontSize: 16, fontWeight: 600, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
+
+const botonPaso: React.CSSProperties = {
+  width: 34, height: 32, border: 'none', background: 'transparent', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', color: IOS.azul,
+};
+
+const textoBoton: React.CSSProperties = {
+  background: 'none', border: 'none', padding: 0, fontSize: 17, color: IOS.azul, cursor: 'pointer',
+};
+
+function Separador({ inset = 16 }: { inset?: number }) {
+  return <div style={{ height: 0.5, background: IOS.separador, marginLeft: inset }} />;
+}
+
+function FilaAcceso({ icono: Icono, color, titulo, onClick }: { icono: any; color: string; titulo: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="fila-ios"
+      style={{ width: '100%', height: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 12px 0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+      <span style={{ width: 29, height: 29, borderRadius: 7, background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icono style={{ width: 17, height: 17, color: '#fff' }} />
+      </span>
+      <span style={{ flex: 1, fontSize: 17, color: IOS.texto }}>{titulo}</span>
+      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC' }} />
+    </button>
+  );
+}
+
+function FilaNumero({ etiqueta, color, valor, onCambio }: { etiqueta: string; color: string; valor: number; onCambio: (v: string) => void }) {
+  return (
+    <label style={{ minHeight: 48, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', cursor: 'text' }}>
+      <span style={{ width: 8, height: 8, borderRadius: 4, background: color, flexShrink: 0 }} />
+      <span style={{ flex: 1, fontSize: 17, color: IOS.texto }}>{etiqueta}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        aria-label={etiqueta}
+        style={{ width: 90, height: 36, border: 'none', outline: 'none', borderRadius: 8, background: IOS.relleno, textAlign: 'right', padding: '0 10px', fontSize: 17, fontWeight: 600, color: IOS.texto }}
+      />
+    </label>
+  );
+}
+
+/** Fecha nativa con su etiqueta visible: iOS no muestra placeholder en type=date. */
+function CampoFecha({ etiqueta, valor, onCambio }: { etiqueta: string; valor: string; onCambio: (v: string) => void }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, position: 'relative', borderRadius: 9, overflow: 'hidden', background: IOS.relleno }}>
+      <input
+        type="date"
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        aria-label={etiqueta}
+        style={{
+          display: 'block', width: '100%', boxSizing: 'border-box', height: 36, border: 'none', padding: '0 10px',
+          WebkitAppearance: 'none', appearance: 'none', background: 'transparent', fontSize: 15,
+          color: valor ? IOS.texto : 'transparent',
+        }}
+      />
+      {!valor && (
+        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: IOS.secundario, pointerEvents: 'none' }}>
+          {etiqueta}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Hoja inferior estilo iOS (Cancelar / título / acción). */
+function Hoja({ abierta, onCerrar, titulo, izquierda, derecha, children }: {
+  abierta: boolean; onCerrar: () => void; titulo: string; izquierda: React.ReactNode; derecha: React.ReactNode; children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!abierta) return;
+    const t = (e: KeyboardEvent) => { if (e.key === 'Escape') onCerrar(); };
+    window.addEventListener('keydown', t);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', t); document.body.style.overflow = prev; };
+  }, [abierta, onCerrar]);
+
+  return createPortal(
+    <AnimatePresence>
+      {abierta && (
+        <>
+          <motion.div key="fondo" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onCerrar}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 60 }} />
+          <motion.div key="hoja" role="dialog" aria-modal="true" aria-label={titulo}
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+            style={{
+              position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 61, margin: '0 auto', maxWidth: 640, height: '92dvh',
+              background: IOS.fondo, borderRadius: '14px 14px 0 0', display: 'flex', flexDirection: 'column',
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '14px 16px 10px', gap: 8 }}>
+              <div style={{ flex: 1, textAlign: 'left' }}>{izquierda}</div>
+              <span className="truncate" style={{ flex: 2, textAlign: 'center', fontSize: 17, fontWeight: 600, color: IOS.texto }}>{titulo}</span>
+              <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>{derecha}</div>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 16px max(env(safe-area-inset-bottom), 24px)' }}>
+              {children}
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>,
+    document.body,
   );
 }

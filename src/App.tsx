@@ -1694,7 +1694,7 @@ export default function App() {
           blanco); mide 0 donde no hay safe-area (navegador común). z-30: por
           encima de los encabezados sticky (z-20) y por debajo de los paneles
           laterales y diálogos (z-40/z-50), que manejan su propia barra. */}
-      {currentUser && ["home", "history", "newOrder", "orderDetail", "analytics", "production", "distribucion", "products", "categories", "productIngredients", "ingredients", "complaints", "productionAreas", "productionDashboard"].includes(currentScreen) && (
+      {currentUser && ["home", "history", "newOrder", "orderDetail", "analytics", "production", "distribucion", "products", "categories", "productIngredients", "ingredients", "complaints", "productionAreas", "productionDashboard", "productionOrders"].includes(currentScreen) && (
         <div
           aria-hidden="true"
           style={{
