@@ -182,6 +182,10 @@ export default function App() {
   // tiene que devolver al lugar del que vino el usuario.
   const [pantallaAnterior, setPantallaAnterior] = useState<Pantalla>("home");
 
+  // Productos se abre desde el Inicio o desde Mi cuenta: "volver" regresa al
+  // lugar de origen (antes el admin siempre caía en Mi cuenta).
+  const [origenProductos, setOrigenProductos] = useState<"home" | "profile">("home");
+
   const irAPantalla = (destino: Pantalla) => {
     setPantallaAnterior(currentScreen);
     setCurrentScreen(destino);
@@ -1751,7 +1755,7 @@ export default function App() {
           }}
           onManageProducts={
             currentUser.role === 'production' || currentUser.role === 'admin'
-              ? () => setCurrentScreen('products')
+              ? () => { setOrigenProductos('home'); setCurrentScreen('products'); }
               : undefined
           }
           onUpdateOrderStatus={handleUpdateOrderStatus}
@@ -1819,7 +1823,7 @@ export default function App() {
           pendingComplaintsCount={
             isProfileVerified && currentUser.role === "admin" ? pendingComplaintsCount : undefined
           }
-          onManageProducts={() => setCurrentScreen("products")}
+          onManageProducts={() => { setOrigenProductos("profile"); setCurrentScreen("products"); }}
           onManageProductionAreas={
             currentUser.role === "admin"
               ? () => setCurrentScreen("productionAreas")
@@ -1893,13 +1897,7 @@ export default function App() {
         accessToken && (
           <ProductManagement
             accessToken={accessToken}
-            onBack={() => {
-              if (currentUser.role === "production") {
-                setCurrentScreen("home");
-              } else {
-                setCurrentScreen("profile");
-              }
-            }}
+            onBack={() => setCurrentScreen(origenProductos)}
             onManageCategories={() =>
               setCurrentScreen("categories")
             }
