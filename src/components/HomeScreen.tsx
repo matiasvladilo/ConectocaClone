@@ -1,9 +1,8 @@
 import React from 'react';
 import { User, Order } from '../App';
-import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { Package, Plus, User as UserIcon, Menu, Bell, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, ChevronRight, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
+import { Package, Plus, Menu, Bell, Clock, CheckCircle2, Truck, TrendingUp, ChevronRight, MessageSquare, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
@@ -93,21 +92,6 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   // de sus productos, así que hay que cruzar por productId contra el catálogo.
   const [catalogProducts, setCatalogProducts] = React.useState<Product[] | null>(null);
   const [catalogCategories, setCatalogCategories] = React.useState<Category[] | null>(null);
-
-  // Resumen de pedidos: colapsado por defecto para que "Realizar nuevo pedido" y
-  // la lista de pedidos sean lo primero que se ve. Se recuerda la preferencia:
-  // si el usuario lo expande, queda expandido la próxima vez.
-  const [statsExpanded, setStatsExpanded] = React.useState<boolean>(() => {
-    try { return localStorage.getItem('conectoca_home_stats_expanded') === 'true'; }
-    catch { return false; }
-  });
-  const toggleStats = () => {
-    setStatsExpanded(prev => {
-      const next = !prev;
-      try { localStorage.setItem('conectoca_home_stats_expanded', String(next)); } catch { /* storage no disponible */ }
-      return next;
-    });
-  };
 
   // Confirmó un cambio de estado deslizando una tarjeta. La lógica (aviso +
   // "Deshacer" + error) se comparte con despacho y producción en el helper.
@@ -206,17 +190,33 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   const inProgressOrders = orders.filter(o => o.status === 'in_progress').length;
   const completedOrders = orders.filter(o => o.status === 'completed').length;
   const dispatchedOrders = orders.filter(o => o.status === 'dispatched').length;
-  const deliveredOrders = orders.filter(o => o.status === 'delivered').length;
-  const totalAmount = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-
-  // Get unique customers count (only for admin)
-  const uniqueCustomers = user.role === 'admin'
-    ? new Set(orders.map(o => o.customerName)).size
-    : 0;
 
   // Check if user is admin
   const isAdmin = user.role === 'admin';
   const isProduction = user.role === 'production';
+
+  const primerNombre = (user.name || '').trim().split(/\s+/)[0] || user.name;
+  const subtituloPanel = isAdmin ? 'Vista global del negocio' : isProduction ? 'Panel de producción' : 'Tus pedidos de hoy y próximos';
+
+  const resumen: { label: string; valor: number }[] = isAdmin || user.role === 'dispatch'
+    ? [
+        { label: 'Pendientes', valor: pendingOrders },
+        { label: 'En prep.', valor: inProgressOrders },
+        { label: 'Listos', valor: completedOrders },
+        { label: 'Despachados', valor: dispatchedOrders },
+      ]
+    : [
+        { label: 'Pendientes', valor: pendingOrders },
+        { label: 'En preparación', valor: inProgressOrders },
+        { label: 'Listos', valor: completedOrders },
+      ];
+
+  // Accesos secundarios por rol, como lista agrupada de iOS.
+  const accesos: { key: string; label: string; icon: any; color: string; onClick: () => void }[] = [];
+  if (onGoToDashboard && isProduction) accesos.push({ key: 'dash', label: 'Panel de producción', icon: BarChart3, color: '#5856D6', onClick: onGoToDashboard });
+  if (onGoToProduction && user.role === 'dispatch') accesos.push({ key: 'desp', label: 'Panel de despacho', icon: Truck, color: '#5856D6', onClick: onGoToProduction });
+  if (onGoToBakeryKDS && (user.role === 'dispatch' || user.role === 'pastry')) accesos.push({ key: 'past', label: 'Panel de pastelería', icon: Store, color: '#FF2D55', onClick: onGoToBakeryKDS });
+  if (onManageProducts && (isAdmin || isProduction)) accesos.push({ key: 'prod', label: 'Productos', icon: Package, color: '#FF9500', onClick: onManageProducts });
 
   return (
     <div
@@ -243,453 +243,108 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
         />
       </div>
 
-      {/* Header */}
-      <div
-        className="relative z-10 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
-          borderBottom: '3px solid #FFD43B',
-          paddingTop: 'max(env(safe-area-inset-top), 20px)'
-        }}
-      >
-        <div className="max-w-md mx-auto px-6 py-6 home-contenedor">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <motion.div
-                className="relative"
-                whileHover={{ rotate: [0, -10, 10, -10, 0] }}
-                transition={{ duration: 0.5 }}
-              >
-                <img
-                  src={logo}
-                  alt="La Oca Logo"
-                  className="w-12 h-12 object-contain relative z-10"
-                  style={{ imageRendering: 'crisp-edges' }}
-                />
-              </motion.div>
-              <div>
-                <h1 className="text-white tracking-wide" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  CONECTOCA
-                </h1>
-                <p className="text-blue-100 text-xs">
-                  Gestión de Pedidos La Oca
-                </p>
-              </div>
+      {/* Encabezado (estilo iOS). La sección "Mis Pedidos" de abajo conserva
+          su diseño original a pedido del usuario. */}
+      <div className="relative z-10" style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-md mx-auto home-contenedor" style={{ padding: '8px 16px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img src={logo} alt="La Oca" style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0 }} />
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 22, fontWeight: 700, lineHeight: 1.2 }}>Hola, {primerNombre}</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>{subtituloPanel}</p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {onOpenNotifications && (
-              <motion.button
+              <button
+                type="button"
                 onClick={onOpenNotifications}
                 aria-label={unreadNotifications ? `Notificaciones, ${unreadNotifications} sin leer` : 'Notificaciones'}
-                whileTap={{ scale: 0.95 }}
-                className="w-11 h-11 rounded-full flex items-center justify-center relative"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
+                className="boton-ios"
+                style={{ ...botonRedondoIOS, position: 'relative' }}
               >
-                <Bell className="w-5 h-5 text-white" />
+                <Bell style={{ width: 19, height: 19, color: '#fff' }} />
                 {!!unreadNotifications && unreadNotifications > 0 && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: -6,
-                      right: -8,
-                      minWidth: 20,
-                      height: 20,
-                      padding: '0 5px',
-                      borderRadius: 10,
-                      background: '#FF3B30',
-                      color: '#fff',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      lineHeight: '20px',
-                      textAlign: 'center',
-                      boxShadow: '0 0 0 2px #0060E0',
-                    }}
-                  >
+                  <span style={{
+                    position: 'absolute', top: -4, right: -6, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
+                    background: '#FF3B30', color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: '18px', textAlign: 'center',
+                    boxShadow: '0 0 0 2px #0060E0',
+                  }}>
                     {unreadNotifications > 99 ? '99+' : unreadNotifications}
                   </span>
                 )}
-              </motion.button>
+              </button>
             )}
-            <motion.button
-              onClick={onViewProfile}
-              aria-label="Abrir menú"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              className="w-11 h-11 rounded-full flex items-center justify-center relative overflow-hidden group"
-              style={{
-                background: 'rgba(255, 255, 255, 0.15)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)'
-              }}
-            >
-              <Menu className="w-5 h-5 text-white relative z-10" />
-              <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </motion.button>
-            </div>
+            <button type="button" onClick={onViewProfile} aria-label="Abrir menú" className="boton-ios" style={botonRedondoIOS}>
+              <Menu style={{ width: 19, height: 19, color: '#fff' }} />
+            </button>
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="space-y-2"
-          >
-            <h2 className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
-              ¡Hola, {user.name}! 👋
-            </h2>
-            {/* El rol ya lo comunica esta línea de panel; el badge
-                "👑 ADMINISTRADOR" era redundante y ocupaba alto de más. */}
-            <p className="text-blue-100" style={{ fontSize: '14px' }}>
-              {isAdmin ? 'Panel de Administración - Vista Global' : isProduction ? 'Panel de Producción' : 'Bienvenido a tu panel de pedidos'}
-            </p>
-          </motion.div>
-
-          {/* Resumen de pedidos (colapsable). La barra siempre muestra los
-              números clave de un vistazo; el chevron despliega las tarjetas. */}
+          {/* Resumen siempre visible (antes iba plegado): son los números que se
+              miran al abrir la app. Cuenta lo que trae la primera página. */}
           {orders.length > 0 && (
-            <div className="mt-6">
-              <button
-                onClick={toggleStats}
-                aria-expanded={statsExpanded}
-                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl backdrop-blur-md text-left"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.12)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <span className="text-blue-50 text-xs sm:text-sm truncate">
-                  {isAdmin
-                    ? `${pendingOrders} pend · ${inProgressOrders} en proceso · ${completedOrders} listos · ${dispatchedOrders} desp · ${uniqueCustomers} clientes`
-                    : `${pendingOrders} pendientes · ${inProgressOrders} en proceso`}
-                </span>
-                {statsExpanded
-                  ? <ChevronUp className="w-4 h-4 text-blue-100 shrink-0" />
-                  : <ChevronDown className="w-4 h-4 text-blue-100 shrink-0" />}
-              </button>
-
-          {statsExpanded && (isAdmin ? (
-            // Admin stats - Comprehensive global view
-            <motion.div
-              className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 home-stats"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+            <div
+              style={{
+                marginTop: 14, display: 'grid', gridTemplateColumns: `repeat(${resumen.length}, minmax(0, 1fr))`,
+                background: 'rgba(255,255,255,0.14)', borderRadius: 12, padding: '10px 2px',
+              }}
             >
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(255, 212, 59, 0.2)',
-                  border: '1px solid rgba(255, 212, 59, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Clock className="w-3.5 h-3.5 text-yellow-200" />
-                  <span className="text-[10px] text-yellow-100">Pendientes</span>
+              {resumen.map((r, i) => (
+                <div key={r.label} style={{ textAlign: 'center', minWidth: 0, borderLeft: i > 0 ? '0.5px solid rgba(255,255,255,0.22)' : 'none', padding: '0 2px' }}>
+                  <p style={{ color: '#fff', fontSize: 22, fontWeight: 700, lineHeight: 1.15, fontVariantNumeric: 'tabular-nums' }}>{r.valor}</p>
+                  <p className="truncate" style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, letterSpacing: -0.2 }}>{r.label}</p>
                 </div>
-                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  {pendingOrders}
-                </p>
-              </div>
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Package className="w-3.5 h-3.5 text-blue-200" />
-                  <span className="text-[10px] text-blue-100">En Proceso</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  {inProgressOrders}
-                </p>
-              </div>
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(16, 185, 129, 0.2)',
-                  border: '1px solid rgba(16, 185, 129, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-green-200" />
-                  <span className="text-[10px] text-green-100">Listos</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  {completedOrders}
-                </p>
-              </div>
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Truck className="w-3.5 h-3.5 text-blue-200" />
-                  <span className="text-[10px] text-blue-100">Despachados</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  {dispatchedOrders}
-                </p>
-              </div>
-              <div
-                className="p-3 rounded-xl backdrop-blur-md col-span-2"
-                style={{
-                  background: 'rgba(255, 212, 59, 0.2)',
-                  border: '1px solid rgba(255, 212, 59, 0.3)'
-                }}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <UserIcon className="w-3.5 h-3.5 text-yellow-200" />
-                  <span className="text-[10px] text-yellow-100">Clientes Activos</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
-                  {uniqueCustomers}
-                </p>
-              </div>
-            </motion.div>
-          ) : (
-            // Regular user stats
-            <motion.div
-              className="mt-2 grid grid-cols-2 gap-3"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Clock className="w-4 h-4 text-yellow-300" />
-                  <span className="text-xs text-blue-100">Pendientes</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
-                  {pendingOrders}
-                </p>
-              </div>
-              <div
-                className="p-3 rounded-xl backdrop-blur-md"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.15)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Package className="w-4 h-4 text-green-300" />
-                  <span className="text-xs text-blue-100">En Proceso</span>
-                </div>
-                <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
-                  {inProgressOrders}
-                </p>
-              </div>
-            </motion.div>
-          ))}
+              ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* En escritorio (>=1024px) el inicio se ensancha: los botones de acción
-          pasan a una fila horizontal arriba y los pedidos quedan en una sola
-          columna más ancha. El CSS de Tailwind está precompilado y casi no trae
-          variantes lg:, por eso va acá con media query (mismo patrón que
-          ProductManagement). */}
+      {/* En escritorio (>=1024px) el inicio se ensancha. El CSS de Tailwind está
+          precompilado y casi no trae variantes lg:, por eso va con media query. */}
       <style>{`
         @media (min-width: 1024px) {
           .home-contenedor { max-width: 64rem; }
-          .home-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-          .home-acciones { display: flex; gap: 0.75rem; }
-          .home-acciones > * { flex: 1 1 0; margin: 0 !important; }
-          .home-acciones button { margin-top: 0 !important; }
           .home-segmentos { max-width: 420px; }
         }
       `}</style>
       <div className="max-w-md mx-auto px-6 py-6 space-y-6 relative z-10 home-contenedor">
-        {/* Action Buttons */}
-        <div className="space-y-3 home-acciones">
-          {/* Dashboard Button - Only for production users - ABOVE production orders button */}
-          {onGoToDashboard && isProduction && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onGoToDashboard}
-                className="w-full h-14 text-white relative overflow-hidden group shadow-lg"
-                style={{
-                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <BarChart3 className="w-5 h-5" />
-                  Dashboard de Producción
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
-
-          {/* Product Management - Only for production users */}
-          {onManageProducts && isProduction && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.35 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onManageProducts}
-                className="w-full h-14 text-white relative overflow-hidden group shadow-lg"
-                style={{
-                  background: 'linear-gradient(90deg, #2563EB 0%, #3B82F6 100%)', // slightly different blue
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <Package className="w-5 h-5" />
-                  Gestión de Productos
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
-
-          {/* New Order Button - Different text for production users */}
+        {/* Acción principal + accesos por rol (estilo iOS) */}
+        <div>
           {onNewOrder && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
+            <button
+              type="button"
+              onClick={onNewOrder}
+              className="boton-ios"
+              style={{
+                width: '100%', height: 50, borderRadius: 12, border: 'none', background: '#007AFF', color: '#fff',
+                fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 122, 255, 0.25)',
+              }}
             >
-              <Button
-                onClick={onNewOrder}
-                className="w-full py-6 text-gray-900 hover:bg-yellow-400 transition-all group relative overflow-hidden"
-                style={{
-                  background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
-                  borderRadius: '12px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(255, 212, 59, 0.4)'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <Plus className="w-5 h-5" />
-                  {isProduction ? 'Realizar nueva orden de producción' : 'Realizar nuevo pedido'}
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 to-yellow-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
+              <Plus style={{ width: 20, height: 20 }} strokeWidth={2.5} />
+              {isProduction ? 'Nueva orden de producción' : 'Nuevo pedido'}
+            </button>
           )}
 
-          {/* Production Area Button - Only for admin and dispatch users */}
-          {/* El admin entra a Despacho desde Mi Perfil: acá solo queda Gestionar Productos como botón principal. */}
-          {onGoToProduction && user.role === 'dispatch' && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.32 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onGoToProduction}
-                className="w-full h-12 text-white relative overflow-hidden group shadow-lg"
-                style={{
-                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <Factory className="w-5 h-5" />
-                  Ir a Panel de Despacho
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
+          {accesos.length > 0 && (
+            <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', marginTop: 12 }}>
+              {accesos.map((a, i) => {
+                const Icono = a.icon;
+                return (
+                  <div key={a.key}>
+                    {i > 0 && <div style={{ height: 0.5, background: 'rgba(60, 60, 67, 0.18)', marginLeft: 56 }} />}
+                    <button type="button" onClick={a.onClick} className="fila-ios"
+                      style={{ width: '100%', height: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 12px 0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                      <span style={{ width: 29, height: 29, borderRadius: 7, background: a.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Icono style={{ width: 17, height: 17, color: '#fff' }} />
+                      </span>
+                      <span style={{ flex: 1, fontSize: 17, color: '#000' }}>{a.label}</span>
+                      <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC' }} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
-
-          {/* Gestionar Productos (admin): ocupa el lugar del botón de Pastelería,
-              que el admin igual puede abrir desde el panel. Va en azul (el color que
-              tenía Despacho en este lugar) para no repetir el amarillo de
-              "Realizar nuevo pedido" justo arriba. */}
-          {onManageProducts && user.role === 'admin' && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.33 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onManageProducts}
-                className="w-full h-12 relative overflow-hidden group shadow-lg mt-3"
-                style={{
-                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)',
-                  color: 'white'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <Package className="w-5 h-5" />
-                  Gestionar Productos
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
-
-          {/* Bakery KDS Button (despacho y pastelería; el admin ve Gestionar Productos) */}
-          {onGoToBakeryKDS && (user.role === 'dispatch' || user.role === 'pastry') && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.33 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                onClick={onGoToBakeryKDS}
-                className="w-full h-12 text-white relative overflow-hidden group shadow-lg mt-3"
-                style={{
-                  background: 'linear-gradient(90deg, #D946EF 0%, #EC4899 100%)',
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  boxShadow: '0 4px 14px rgba(236, 72, 153, 0.3)'
-                }}
-              >
-                <div className="flex items-center justify-center gap-2 relative z-10">
-                  <Store className="w-5 h-5" />
-                  Ir a Panel de Pastelería
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-r from-pink-500 to-pink-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Button>
-            </motion.div>
-          )}
-
         </div>
 
         {/* Orders List */}
@@ -1076,3 +731,8 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
     </div>
   );
 }
+
+const botonRedondoIOS: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
+};
