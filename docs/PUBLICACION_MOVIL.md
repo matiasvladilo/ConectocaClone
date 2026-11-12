@@ -16,14 +16,13 @@ con Capacitor.
 | Dato | Valor | Dónde se cambia |
 |---|---|---|
 | Nombre visible | **La Oca** | `capacitor.config.ts` (`appName`), ya propagado |
-| App ID / Bundle ID | **`cl.conectoca.app`** | `capacitor.config.ts` (`appId`) |
+| App ID / Bundle ID | **`info.laoca.app`** | `capacitor.config.ts` (`appId`), iOS `project.pbxproj`, Android `build.gradle` |
 | Versión | 0.1.0 | `package.json`; ver §6 para versionado nativo |
 
 **El App ID es definitivo una vez publicado** (no se puede cambiar sin crear una
-ficha nueva y perder reseñas/instalaciones). `cl.conectoca.app` se eligió por:
-`cl` = Chile (la app declara `lang="es-CL"`), `conectoca` = producto, `app` =
-segmento final. **Confirmar antes de la primera subida.** Si hay un dominio
-propio, conviene registrar el App ID a nombre de ese dominio.
+ficha nueva y perder reseñas/instalaciones). Se decidió `info.laoca.app` el
+2026-11-12, a partir del dominio propio laoca.info (antes era `cl.conectoca.app`,
+que no correspondía a ningún dominio registrado).
 
 ---
 

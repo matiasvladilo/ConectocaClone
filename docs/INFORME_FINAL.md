@@ -27,7 +27,7 @@ con verificación empírica; `_a` y `_b` (C-01) pendientes de aplicar junto con 
 deploy del Edge Function.
 
 **Fase 3 — Capacitor.** Capacitor 7 (estable). `ios/` y `android/` generados,
-`capacitor.config.ts` con `webDir: build`, App ID `cl.conectoca.app` documentado.
+`capacitor.config.ts` con `webDir: build`, App ID `info.laoca.app` documentado.
 iOS con Swift Package Manager (sin CocoaPods, que el Ruby del sistema no soporta).
 Scripts de build/sync/open. La PWA sigue intacta.
 

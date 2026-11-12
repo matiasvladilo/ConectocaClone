@@ -1,4 +1,4 @@
-package cl.conectoca.app;
+package info.laoca.app;
 
 import com.getcapacitor.BridgeActivity;
 

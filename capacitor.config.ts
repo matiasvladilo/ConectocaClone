@@ -6,18 +6,12 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * en Netlify igual que antes.
  *
  * ── appId ──────────────────────────────────────────────────────────────────
- * `cl.conectoca.app` — identificador reverse-DNS, el formato que exigen App
- * Store (Bundle ID) y Google Play (applicationId).
- *   - `cl`        el negocio opera en Chile (index.html declara lang="es-CL").
- *   - `conectoca` el nombre del producto.
- *   - `app`       segmento final; el id debe tener al menos dos puntos.
+ * `info.laoca.app` — identificador reverse-DNS (Bundle ID en App Store,
+ * applicationId en Google Play), armado con el dominio propio laoca.info.
+ * Decidido el 2026-11-12 antes de crear la ficha en App Store Connect.
  *
- * DECISIÓN QUE HAY QUE CONFIRMAR ANTES DE PUBLICAR: este id es definitivo una
- * vez que la app está en las tiendas — no se puede cambiar sin crear una ficha
- * nueva y perder reseñas e instalaciones. Si existe un dominio propio (p. ej.
- * conectoca.cl), lo idiomático sería `cl.conectoca.app` igual, pero conviene
- * registrarlo a nombre de ese dominio. Cambiarlo ahora es `npx cap add` de
- * nuevo; cambiarlo después de publicar, no.
+ * Es DEFINITIVO una vez publicada la app: cambiarlo después obliga a crear
+ * una ficha nueva y se pierden reseñas e instalaciones.
  *
  * ── appName ────────────────────────────────────────────────────────────────
  * "La Oca" — es el nombre que ya usa la PWA (index.html <title>, manifest).
@@ -28,7 +22,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * `npm run build` antes de `npx cap sync`. El script `cap:sync` lo encadena.
  */
 const config: CapacitorConfig = {
-  appId: 'cl.conectoca.app',
+  appId: 'info.laoca.app',
   appName: 'La Oca',
   webDir: 'build',
 

@@ -68,8 +68,8 @@ Ver `docs/SECURITY_AUDIT.md` para el detalle de cada hallazgo.
 
 ## P1 — Cuentas de tienda (registros de app)
 
-- [ ] 👤 Crear el **registro de app en App Store Connect** (Bundle ID `cl.conectoca.app`).
-- [ ] 👤 Crear el **registro de app en Google Play Console** (applicationId `cl.conectoca.app`).
+- [ ] 👤 Crear el **registro de app en App Store Connect** (Bundle ID `info.laoca.app`).
+- [ ] 👤 Crear el **registro de app en Google Play Console** (applicationId `info.laoca.app`).
 
 ## P2 — Material de fichas
 

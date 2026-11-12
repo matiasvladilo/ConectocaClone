@@ -12,10 +12,10 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace "cl.conectoca.app"
+    namespace "info.laoca.app"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "cl.conectoca.app"
+        applicationId "info.laoca.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
