@@ -1295,7 +1295,9 @@ export default function App() {
       toast.success("Inicio de sesión exitoso");
     } catch (error: any) {
       console.error("Login error:", error);
-      toast.error(error.message || "Error al iniciar sesión");
+      // Sin toast acá: LoginScreen (el único que llama) ya muestra el error
+      // traducido ("Credenciales incorrectas…"). Con los dos salían dos
+      // avisos, uno en inglés ("Invalid login credentials").
       throw error;
     }
   };
