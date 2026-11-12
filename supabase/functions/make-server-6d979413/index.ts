@@ -741,6 +741,51 @@ app.post("/make-server-6d979413/signup", async (c) => {
 
 // ─── PROFILE ROUTES ───────────────────────────────────────────────────────────
 
+/**
+ * Eliminar la propia cuenta (requisito de Apple 5.1.1(v) para apps que
+ * permiten registrarse). Borra el usuario de Auth; por las FK eso elimina en
+ * cascada el perfil, sus notificaciones y sus categorías permitidas. Los
+ * pedidos NO se borran: son registros del negocio (y contables), y su FK
+ * user_id es ON DELETE SET NULL, así que quedan sin usuario asociado. El
+ * nombre del local guardado en el pedido (customer_name) se conserva.
+ *
+ * El dueño de un negocio con otros miembros no puede eliminarse solo: dejaría
+ * el negocio sin propietario. Primero tiene que traspasarlo (o escribir a
+ * soporte). Si es el único miembro, se elimina igual.
+ */
+app.delete("/make-server-6d979413/account", async (c) => {
+  const s = await sesion(c);
+  if (s.respuesta) return s.respuesta;
+  const { userId, profile } = s;
+
+  try {
+    if (profile?.businessId) {
+      const { data: biz } = await supabaseAdmin
+        .from('businesses').select('owner_id, name').eq('id', profile.businessId).maybeSingle();
+      if (biz?.owner_id === userId) {
+        const { count } = await supabaseAdmin
+          .from('profiles').select('id', { count: 'exact', head: true })
+          .eq('business_id', profile.businessId).neq('id', userId);
+        if ((count ?? 0) > 0) {
+          return c.json({
+            error: `Eres el dueño de ${biz.name}. Para eliminar tu cuenta, primero escríbenos para traspasar el negocio a otro administrador.`,
+            codigo: 'DUENO_CON_MIEMBROS',
+          }, 409);
+        }
+      }
+    }
+
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error) throw error;
+
+    console.log(`Account deleted: ${userId}`);
+    return c.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting account:', err);
+    return c.json({ error: 'No se pudo eliminar la cuenta. Intenta de nuevo.' }, 500);
+  }
+});
+
 app.get("/make-server-6d979413/profile", async (c) => {
   const { error, userId, user } = await verifyAuth(c.req.header('Authorization'));
   if (error) return c.json({ error }, 401);

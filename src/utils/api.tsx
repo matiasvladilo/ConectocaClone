@@ -261,6 +261,13 @@ export const authAPI = {
   },
 };
 
+// Eliminar la propia cuenta (ver DELETE /account en el Edge Function).
+export const cuentaAPI = {
+  eliminar: async (token: string): Promise<void> => {
+    await fetchAPI('/account', { method: 'DELETE' }, token);
+  },
+};
+
 // Profile API
 export const profileAPI = {
   get: async (token: string): Promise<UserProfile> => {

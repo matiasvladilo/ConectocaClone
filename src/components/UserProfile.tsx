@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Truck,
   X,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -31,6 +32,8 @@ import { estiloBarraDeEstado } from '../utils/initNative';
 import { isNativePlatform } from '../utils/platform';
 import { seccionesParaRol } from '../utils/preferenciasNotificaciones';
 import { MembersPanel } from './MembersPanel';
+import { PrivacidadPanel } from './PrivacidadPanel';
+import { cuentaAPI } from '../utils/api';
 
 /**
  * Panel "Mi cuenta": se abre desde el botón ☰ del inicio y se desliza desde la
@@ -228,6 +231,26 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
   const [addressValue, setAddressValue] = useState(user.address || '');
   const [isSaving, setIsSaving] = useState(false);
   const [miembrosAbierto, setMiembrosAbierto] = useState(false);
+  const [privacidadAbierta, setPrivacidadAbierta] = useState(false);
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState('');
+
+  const eliminarCuenta = async () => {
+    if (!accessToken) return;
+    setEliminando(true);
+    setErrorEliminar('');
+    try {
+      await cuentaAPI.eliminar(accessToken);
+      toast.success('Tu cuenta fue eliminada');
+      setConfirmandoEliminar(false);
+      await onLogout();
+    } catch (e: any) {
+      setErrorEliminar(e?.message || 'No se pudo eliminar la cuenta. Intenta de nuevo.');
+    } finally {
+      setEliminando(false);
+    }
+  };
 
   // Escape cierra el panel (teclado físico / web de escritorio).
   useEffect(() => {
@@ -640,6 +663,11 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                 </Grupo>
               ))}
 
+              {/* Legal */}
+              <Grupo>
+                <Fila icono={FileText} color={IOS.secundario} label="Política de privacidad" onClick={() => setPrivacidadAbierta(true)} />
+              </Grupo>
+
               {/* Cerrar sesión */}
               <Grupo>
                 <button
@@ -666,6 +694,18 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                 </button>
               </Grupo>
 
+              {/* Eliminar cuenta (Apple 5.1.1(v)): aparte, en rojo, con confirmación. */}
+              <Grupo pie="Se borran tu cuenta y tus datos personales. Los pedidos quedan en el negocio, sin tu usuario.">
+                <button
+                  type="button"
+                  className="fila-ios"
+                  onClick={() => { setErrorEliminar(''); setConfirmandoEliminar(true); }}
+                  style={{ width: '100%', minHeight: 48, fontSize: 16, color: IOS.rojo }}
+                >
+                  Eliminar cuenta
+                </button>
+              </Grupo>
+
               <p style={{ textAlign: 'center', fontSize: 12, color: IOS.secundario, paddingBottom: 8 }}>
                 La Oca · versión {versionApp}
               </p>
@@ -673,6 +713,41 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
           </motion.div>
         )}
       </AnimatePresence>
+      <PrivacidadPanel abierto={isOpen && privacidadAbierta} onCerrar={() => setPrivacidadAbierta(false)} />
+
+      {/* Confirmación de eliminar cuenta */}
+      <AnimatePresence>
+        {isOpen && confirmandoEliminar && (
+          <>
+            <motion.div key="fondo-eliminar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => !eliminando && setConfirmandoEliminar(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 70 }} />
+            <motion.div key="hoja-eliminar" role="alertdialog" aria-modal="true" aria-label="Eliminar cuenta"
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+              style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 71, margin: '0 auto', maxWidth: 520, background: IOS.fondo, borderRadius: '14px 14px 0 0', padding: '22px 16px max(env(safe-area-inset-bottom), 20px)' }}>
+              <p style={{ fontSize: 20, fontWeight: 700, color: IOS.texto, textAlign: 'center' }}>¿Eliminar tu cuenta?</p>
+              <p style={{ fontSize: 15, color: IOS.secundario, textAlign: 'center', lineHeight: 1.45, margin: '8px 4px 0' }}>
+                Se borran tu cuenta ({user.email}) y tus datos personales. Los pedidos que hiciste quedan en el negocio sin tu usuario. <strong style={{ color: IOS.texto }}>No se puede deshacer.</strong>
+              </p>
+              {errorEliminar && (
+                <p style={{ fontSize: 14, color: IOS.rojo, textAlign: 'center', margin: '12px 4px 0', lineHeight: 1.4 }}>{errorEliminar}</p>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 20 }}>
+                <button type="button" onClick={() => void eliminarCuenta()} disabled={eliminando} className="boton-ios"
+                  style={{ height: 50, borderRadius: 12, border: 'none', background: IOS.rojo, color: '#fff', fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  {eliminando && <Loader2 className="animate-spin" style={{ width: 17, height: 17 }} />}
+                  {eliminando ? 'Eliminando…' : 'Eliminar mi cuenta'}
+                </button>
+                <button type="button" onClick={() => setConfirmandoEliminar(false)} disabled={eliminando}
+                  style={{ height: 50, borderRadius: 12, border: 'none', background: '#fff', color: IOS.azul, fontSize: 17, fontWeight: 600 }}>
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <MembersPanel
         isOpen={isOpen && miembrosAbierto}
         onClose={() => setMiembrosAbierto(false)}

@@ -886,3 +886,12 @@ html,
 body {
   touch-action: manipulation;
 }
+
+/* Texto legal (política de privacidad dentro de la app). El reset de
+   Tailwind quita viñetas y tamaños de títulos: se devuelven acá. */
+.texto-legal h2 { font-size: 17px; font-weight: 600; margin: 20px 0 6px; }
+.texto-legal p, .texto-legal li { margin: 0 0 8px; }
+.texto-legal ul { list-style: disc; padding-left: 20px; margin: 0 0 8px; }
+.texto-legal a { color: #007aff; }
+.texto-legal .fecha { color: #8e8e93; font-size: 13px; }
+.texto-legal .pendiente { background: #fff4d6; border-radius: 4px; padding: 0 3px; }

@@ -4,6 +4,7 @@ import logo from '../assets/logo-icon.png';
 import { toast } from 'sonner';
 import { authAPI } from '../utils/api';
 import { estiloBarraDeEstado } from '../utils/initNative';
+import { PrivacidadPanel } from './PrivacidadPanel';
 
 interface LoginScreenProps {
   onLogin: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
@@ -117,6 +118,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   // Cuenta creada o login de una cuenta sin verificar: se muestra "Revisa tu correo".
   const [correoPendiente, setCorreoPendiente] = useState<string | null>(null);
   const [reenviando, setReenviando] = useState(false);
+  const [privacidadAbierta, setPrivacidadAbierta] = useState(false);
 
   // Business fields
   const [businessAction, setBusinessAction] = useState<'create' | 'join'>('create');
@@ -584,6 +586,13 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           {isCreatingAccount ? 'Iniciar sesión' : 'Crear una'}
         </button>
       </div>
+      <p style={{ textAlign: 'center', fontSize: 12, color: IOS.secundario, marginTop: 4, lineHeight: 1.4 }}>
+        {isCreatingAccount ? 'Al crear tu cuenta aceptas la ' : ''}
+        <button type="button" onClick={() => setPrivacidadAbierta(true)} style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: IOS.secundario, textDecoration: 'underline' }}>
+          {isCreatingAccount ? 'política de privacidad' : 'Política de privacidad'}
+        </button>
+      </p>
+      <PrivacidadPanel abierto={privacidadAbierta} onCerrar={() => setPrivacidadAbierta(false)} />
     </div>
   );
 }

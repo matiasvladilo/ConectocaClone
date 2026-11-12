@@ -11,7 +11,7 @@
 	     acceso y muestra un crash de privacidad si falta esta clave. El texto es
 	     el que ve el usuario en el diálogo de permiso. -->
 	<key>NSCameraUsageDescription</key>
-	<string>La Oca usa la cámara para escanear los códigos de barras de los productos.</string>
+	<string>La Oca usa la cámara para escanear códigos de barras y tomar fotos de los productos.</string>
 	<!-- Guardar/compartir archivos exportados (PDF/Excel) pasa por la hoja de
 	     compartir del sistema, que no necesita permiso de fototeca. Esta clave se
 	     declara por si a futuro se agrega guardar una imagen directo al carrete. -->
