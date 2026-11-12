@@ -161,7 +161,12 @@ export function CategoryManagement({ accessToken, onBack }: CategoryManagementPr
     </button>
   );
 
-  const grupos = agruparPorPadre(categories);
+  // Las categorías con subcategorías van al final: un grupo largo (p. ej.
+  // Distribuidora con sus 8 hijas) arriba empujaba al resto fuera de pantalla.
+  // Orden estable: dentro de cada bloque se respeta el de agruparPorPadre.
+  const grupos = [...agruparPorPadre(categories)].sort(
+    (a, b) => Number(a.hijas.length > 0) - Number(b.hijas.length > 0),
+  );
   const puedePadre = puedeTenerPadre(categories, editingCategory?.id);
 
   return (
