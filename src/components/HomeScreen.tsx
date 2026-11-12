@@ -1,10 +1,14 @@
 import React from 'react';
 import { User, Order } from '../App';
-import { Package, Plus, Menu, Bell, Clock, CheckCircle2, Truck, ChevronRight, MessageSquare, BarChart3, X, Store } from 'lucide-react';
+import { Button } from './ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Package, Plus, User as UserIcon, Menu, Bell, Clock, CheckCircle2, Truck, ChevronDown, ChevronUp, TrendingUp, ChevronRight, MessageSquare, Factory, BarChart3, X, Store } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, productsAPI, categoriesAPI, Product, Category } from '../utils/api';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import logo from '../assets/logo-icon.png';
+import { motion } from 'motion/react';
 import { SwipeableOrderCard } from './SwipeableOrderCard';
 import { type FlowStep } from '../utils/orderStatusFlow';
 import { aplicarCambioEstado } from '../utils/cambioEstadoDeslizando';
@@ -39,13 +43,13 @@ const statusConfig: Record<string, { label: string; color: string; bgColor: stri
     icon: Clock
   },
   in_progress: {
-    label: 'En preparación',
+    label: 'En Preparación',
     color: 'text-blue-700',
     bgColor: 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200',
     icon: Package
   },
   completed: {
-    label: 'Listo para despacho',
+    label: 'Listo para Despacho',
     color: 'text-green-700',
     bgColor: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200',
     icon: CheckCircle2
@@ -89,6 +93,21 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   // de sus productos, así que hay que cruzar por productId contra el catálogo.
   const [catalogProducts, setCatalogProducts] = React.useState<Product[] | null>(null);
   const [catalogCategories, setCatalogCategories] = React.useState<Category[] | null>(null);
+
+  // Resumen de pedidos: colapsado por defecto para que "Realizar nuevo pedido" y
+  // la lista de pedidos sean lo primero que se ve. Se recuerda la preferencia:
+  // si el usuario lo expande, queda expandido la próxima vez.
+  const [statsExpanded, setStatsExpanded] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('conectoca_home_stats_expanded') === 'true'; }
+    catch { return false; }
+  });
+  const toggleStats = () => {
+    setStatsExpanded(prev => {
+      const next = !prev;
+      try { localStorage.setItem('conectoca_home_stats_expanded', String(next)); } catch { /* storage no disponible */ }
+      return next;
+    });
+  };
 
   // Confirmó un cambio de estado deslizando una tarjeta. La lógica (aviso +
   // "Deshacer" + error) se comparte con despacho y producción en el helper.
@@ -187,365 +206,872 @@ export function HomeScreen({ user, orders, onViewOrder, onNewOrder, onViewProfil
   const inProgressOrders = orders.filter(o => o.status === 'in_progress').length;
   const completedOrders = orders.filter(o => o.status === 'completed').length;
   const dispatchedOrders = orders.filter(o => o.status === 'dispatched').length;
+  const deliveredOrders = orders.filter(o => o.status === 'delivered').length;
+  const totalAmount = orders.reduce((sum, o) => sum + (o.total || 0), 0);
+
+  // Get unique customers count (only for admin)
+  const uniqueCustomers = user.role === 'admin'
+    ? new Set(orders.map(o => o.customerName)).size
+    : 0;
 
   // Check if user is admin
   const isAdmin = user.role === 'admin';
   const isProduction = user.role === 'production';
 
-  const primerNombre = (user.name || '').trim().split(/\s+/)[0] || user.name;
-  const subtituloPanel = isAdmin ? 'Vista global del negocio' : isProduction ? 'Panel de producción' : 'Tus pedidos de hoy y próximos';
-
-  // Resumen siempre visible (antes iba plegado): son los números que se miran
-  // al abrir la app. Cuenta lo que trae la primera página, igual que antes.
-  const resumen: { label: string; valor: number }[] = isAdmin || user.role === 'dispatch'
-    ? [
-        { label: 'Pendientes', valor: pendingOrders },
-        { label: 'En prep.', valor: inProgressOrders },
-        { label: 'Listos', valor: completedOrders },
-        { label: 'Despachados', valor: dispatchedOrders },
-      ]
-    : [
-        { label: 'Pendientes', valor: pendingOrders },
-        { label: 'En preparación', valor: inProgressOrders },
-        { label: 'Listos', valor: completedOrders },
-      ];
-
-  // Accesos secundarios por rol, como lista agrupada de iOS.
-  const accesos: { key: string; label: string; icon: any; color: string; onClick: () => void }[] = [];
-  if (onGoToDashboard && isProduction) accesos.push({ key: 'dash', label: 'Panel de producción', icon: BarChart3, color: '#5856D6', onClick: onGoToDashboard });
-  if (onGoToProduction && user.role === 'dispatch') accesos.push({ key: 'desp', label: 'Panel de despacho', icon: Truck, color: '#5856D6', onClick: onGoToProduction });
-  if (onGoToBakeryKDS && (user.role === 'dispatch' || user.role === 'pastry')) accesos.push({ key: 'past', label: 'Panel de pastelería', icon: Store, color: '#FF2D55', onClick: onGoToBakeryKDS });
-  if (onManageProducts && (isAdmin || isProduction)) accesos.push({ key: 'prod', label: 'Productos', icon: Package, color: '#FF9500', onClick: onManageProducts });
-
   return (
-    <div className="min-h-screen" style={{ background: IOS.fondo }}>
-      {/* Encabezado */}
-      <div style={{ background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
-        <div className="max-w-md mx-auto home-contenedor" style={{ padding: '8px 16px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src={logo} alt="La Oca" style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0 }} />
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate" style={{ color: '#fff', fontSize: 22, fontWeight: 700, lineHeight: 1.2 }}>Hola, {primerNombre}</h1>
-              <p className="truncate" style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>{subtituloPanel}</p>
+    <div
+      className="min-h-screen relative overflow-hidden"
+      style={{ background: 'linear-gradient(135deg, #EAF2FF 0%, #CFE0FF 100%)' }}
+    >
+      {/* Decorative background elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <motion.div
+          className="absolute top-0 right-0 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl"
+          animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.3, 0.5, 0.3]
+          }}
+          transition={{ duration: 8, repeat: Infinity }}
+        />
+        <motion.div
+          className="absolute bottom-0 left-0 w-96 h-96 bg-yellow-200/20 rounded-full blur-3xl"
+          animate={{
+            scale: [1.2, 1, 1.2],
+            opacity: [0.2, 0.4, 0.2]
+          }}
+          transition={{ duration: 10, repeat: Infinity }}
+        />
+      </div>
+
+      {/* Header */}
+      <div
+        className="relative z-10 shadow-2xl"
+        style={{
+          background: 'linear-gradient(135deg, #0047BA 0%, #0078FF 100%)',
+          borderBottom: '3px solid #FFD43B',
+          paddingTop: 'max(env(safe-area-inset-top), 20px)'
+        }}
+      >
+        <div className="max-w-md mx-auto px-6 py-6 home-contenedor">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <motion.div
+                className="relative"
+                whileHover={{ rotate: [0, -10, 10, -10, 0] }}
+                transition={{ duration: 0.5 }}
+              >
+                <img
+                  src={logo}
+                  alt="La Oca Logo"
+                  className="w-12 h-12 object-contain relative z-10"
+                  style={{ imageRendering: 'crisp-edges' }}
+                />
+              </motion.div>
+              <div>
+                <h1 className="text-white tracking-wide" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  CONECTOCA
+                </h1>
+                <p className="text-blue-100 text-xs">
+                  Gestión de Pedidos La Oca
+                </p>
+              </div>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {onOpenNotifications && (
-              <button
-                type="button"
+              <motion.button
                 onClick={onOpenNotifications}
                 aria-label={unreadNotifications ? `Notificaciones, ${unreadNotifications} sin leer` : 'Notificaciones'}
-                className="boton-ios"
-                style={{ ...botonRedondo, position: 'relative' }}
+                whileTap={{ scale: 0.95 }}
+                className="w-11 h-11 rounded-full flex items-center justify-center relative"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
               >
-                <Bell style={{ width: 19, height: 19, color: '#fff' }} />
+                <Bell className="w-5 h-5 text-white" />
                 {!!unreadNotifications && unreadNotifications > 0 && (
-                  <span style={{
-                    position: 'absolute', top: -4, right: -6, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-                    background: '#FF3B30', color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: '18px', textAlign: 'center',
-                    boxShadow: '0 0 0 2px #0060E0',
-                  }}>
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: -6,
+                      right: -8,
+                      minWidth: 20,
+                      height: 20,
+                      padding: '0 5px',
+                      borderRadius: 10,
+                      background: '#FF3B30',
+                      color: '#fff',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: '20px',
+                      textAlign: 'center',
+                      boxShadow: '0 0 0 2px #0060E0',
+                    }}
+                  >
                     {unreadNotifications > 99 ? '99+' : unreadNotifications}
                   </span>
                 )}
-              </button>
+              </motion.button>
             )}
-            <button type="button" onClick={onViewProfile} aria-label="Abrir menú" className="boton-ios" style={botonRedondo}>
-              <Menu style={{ width: 19, height: 19, color: '#fff' }} />
-            </button>
-          </div>
-
-          {orders.length > 0 && (
-            <div
-              className="home-resumen"
+            <motion.button
+              onClick={onViewProfile}
+              aria-label="Abrir menú"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              className="w-11 h-11 rounded-full flex items-center justify-center relative overflow-hidden group"
               style={{
-                marginTop: 14, display: 'grid', gridTemplateColumns: `repeat(${resumen.length}, minmax(0, 1fr))`,
-                background: 'rgba(255,255,255,0.14)', borderRadius: 12, padding: '10px 2px',
+                background: 'rgba(255, 255, 255, 0.15)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 255, 255, 0.2)'
               }}
             >
-              {resumen.map((r, i) => (
-                <div key={r.label} style={{ textAlign: 'center', minWidth: 0, borderLeft: i > 0 ? '0.5px solid rgba(255,255,255,0.22)' : 'none', padding: '0 2px' }}>
-                  <p style={{ color: '#fff', fontSize: 22, fontWeight: 700, lineHeight: 1.15, fontVariantNumeric: 'tabular-nums' }}>{r.valor}</p>
-                  <p className="truncate" style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, letterSpacing: -0.2 }}>{r.label}</p>
+              <Menu className="w-5 h-5 text-white relative z-10" />
+              <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </motion.button>
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="space-y-2"
+          >
+            <h2 className="text-white" style={{ fontSize: '24px', fontWeight: 600 }}>
+              ¡Hola, {user.name}! 👋
+            </h2>
+            {/* El rol ya lo comunica esta línea de panel; el badge
+                "👑 ADMINISTRADOR" era redundante y ocupaba alto de más. */}
+            <p className="text-blue-100" style={{ fontSize: '14px' }}>
+              {isAdmin ? 'Panel de Administración - Vista Global' : isProduction ? 'Panel de Producción' : 'Bienvenido a tu panel de pedidos'}
+            </p>
+          </motion.div>
+
+          {/* Resumen de pedidos (colapsable). La barra siempre muestra los
+              números clave de un vistazo; el chevron despliega las tarjetas. */}
+          {orders.length > 0 && (
+            <div className="mt-6">
+              <button
+                onClick={toggleStats}
+                aria-expanded={statsExpanded}
+                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl backdrop-blur-md text-left"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.12)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <span className="text-blue-50 text-xs sm:text-sm truncate">
+                  {isAdmin
+                    ? `${pendingOrders} pend · ${inProgressOrders} en proceso · ${completedOrders} listos · ${dispatchedOrders} desp · ${uniqueCustomers} clientes`
+                    : `${pendingOrders} pendientes · ${inProgressOrders} en proceso`}
+                </span>
+                {statsExpanded
+                  ? <ChevronUp className="w-4 h-4 text-blue-100 shrink-0" />
+                  : <ChevronDown className="w-4 h-4 text-blue-100 shrink-0" />}
+              </button>
+
+          {statsExpanded && (isAdmin ? (
+            // Admin stats - Comprehensive global view
+            <motion.div
+              className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 home-stats"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(255, 212, 59, 0.2)',
+                  border: '1px solid rgba(255, 212, 59, 0.3)'
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Clock className="w-3.5 h-3.5 text-yellow-200" />
+                  <span className="text-[10px] text-yellow-100">Pendientes</span>
                 </div>
-              ))}
+                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  {pendingOrders}
+                </p>
+              </div>
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Package className="w-3.5 h-3.5 text-blue-200" />
+                  <span className="text-[10px] text-blue-100">En Proceso</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  {inProgressOrders}
+                </p>
+              </div>
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(16, 185, 129, 0.2)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-200" />
+                  <span className="text-[10px] text-green-100">Listos</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  {completedOrders}
+                </p>
+              </div>
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Truck className="w-3.5 h-3.5 text-blue-200" />
+                  <span className="text-[10px] text-blue-100">Despachados</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  {dispatchedOrders}
+                </p>
+              </div>
+              <div
+                className="p-3 rounded-xl backdrop-blur-md col-span-2"
+                style={{
+                  background: 'rgba(255, 212, 59, 0.2)',
+                  border: '1px solid rgba(255, 212, 59, 0.3)'
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <UserIcon className="w-3.5 h-3.5 text-yellow-200" />
+                  <span className="text-[10px] text-yellow-100">Clientes Activos</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '18px', fontWeight: 600 }}>
+                  {uniqueCustomers}
+                </p>
+              </div>
+            </motion.div>
+          ) : (
+            // Regular user stats
+            <motion.div
+              className="mt-2 grid grid-cols-2 gap-3"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Clock className="w-4 h-4 text-yellow-300" />
+                  <span className="text-xs text-blue-100">Pendientes</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
+                  {pendingOrders}
+                </p>
+              </div>
+              <div
+                className="p-3 rounded-xl backdrop-blur-md"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Package className="w-4 h-4 text-green-300" />
+                  <span className="text-xs text-blue-100">En Proceso</span>
+                </div>
+                <p className="text-white" style={{ fontSize: '20px', fontWeight: 600 }}>
+                  {inProgressOrders}
+                </p>
+              </div>
+            </motion.div>
+          ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* En escritorio (>=1024px) el inicio se ensancha. El CSS de Tailwind está
-          precompilado y casi no trae variantes lg:, por eso va con media query. */}
+      {/* En escritorio (>=1024px) el inicio se ensancha: los botones de acción
+          pasan a una fila horizontal arriba y los pedidos quedan en una sola
+          columna más ancha. El CSS de Tailwind está precompilado y casi no trae
+          variantes lg:, por eso va acá con media query (mismo patrón que
+          ProductManagement). */}
       <style>{`
         @media (min-width: 1024px) {
           .home-contenedor { max-width: 64rem; }
+          .home-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+          .home-acciones { display: flex; gap: 0.75rem; }
+          .home-acciones > * { flex: 1 1 0; margin: 0 !important; }
+          .home-acciones button { margin-top: 0 !important; }
           .home-segmentos { max-width: 420px; }
         }
       `}</style>
-      <div className="max-w-md mx-auto home-contenedor" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
-        {/* Acción principal */}
-        {onNewOrder && (
-          <button
-            type="button"
-            onClick={onNewOrder}
-            className="boton-ios"
-            style={{
-              width: '100%', height: 50, borderRadius: 12, border: 'none', background: IOS.azul, color: '#fff',
-              fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
-            }}
-          >
-            <Plus style={{ width: 20, height: 20 }} strokeWidth={2.5} />
-            {isProduction ? 'Nueva orden de producción' : 'Nuevo pedido'}
-          </button>
-        )}
-
-        {/* Accesos */}
-        {accesos.length > 0 && (
-          <div style={{ ...tarjeta, marginTop: 12 }}>
-            {accesos.map((a, i) => {
-              const Icono = a.icon;
-              return (
-                <div key={a.key}>
-                  {i > 0 && <div style={{ height: 0.5, background: IOS.separador, marginLeft: 56 }} />}
-                  <button type="button" onClick={a.onClick} className="fila-ios"
-                    style={{ width: '100%', height: 48, display: 'flex', alignItems: 'center', gap: 12, padding: '0 12px 0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
-                    <span style={{ width: 29, height: 29, borderRadius: 7, background: a.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icono style={{ width: 17, height: 17, color: '#fff' }} />
-                    </span>
-                    <span style={{ flex: 1, fontSize: 17, color: IOS.texto }}>{a.label}</span>
-                    <ChevronRight style={{ width: 18, height: 18, color: '#C7C7CC' }} />
-                  </button>
+      <div className="max-w-md mx-auto px-6 py-6 space-y-6 relative z-10 home-contenedor">
+        {/* Action Buttons */}
+        <div className="space-y-3 home-acciones">
+          {/* Dashboard Button - Only for production users - ABOVE production orders button */}
+          {onGoToDashboard && isProduction && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onGoToDashboard}
+                className="w-full h-14 text-white relative overflow-hidden group shadow-lg"
+                style={{
+                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <BarChart3 className="w-5 h-5" />
+                  Dashboard de Producción
                 </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Product Management - Only for production users */}
+          {onManageProducts && isProduction && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onManageProducts}
+                className="w-full h-14 text-white relative overflow-hidden group shadow-lg"
+                style={{
+                  background: 'linear-gradient(90deg, #2563EB 0%, #3B82F6 100%)', // slightly different blue
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Package className="w-5 h-5" />
+                  Gestión de Productos
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* New Order Button - Different text for production users */}
+          {onNewOrder && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+            >
+              <Button
+                onClick={onNewOrder}
+                className="w-full py-6 text-gray-900 hover:bg-yellow-400 transition-all group relative overflow-hidden"
+                style={{
+                  background: 'linear-gradient(90deg, #FFD43B 0%, #FFC700 100%)',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(255, 212, 59, 0.4)'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Plus className="w-5 h-5" />
+                  {isProduction ? 'Realizar nueva orden de producción' : 'Realizar nuevo pedido'}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 to-yellow-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Production Area Button - Only for admin and dispatch users */}
+          {/* El admin entra a Despacho desde Mi Perfil: acá solo queda Gestionar Productos como botón principal. */}
+          {onGoToProduction && user.role === 'dispatch' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.32 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onGoToProduction}
+                className="w-full h-12 text-white relative overflow-hidden group shadow-lg"
+                style={{
+                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Factory className="w-5 h-5" />
+                  Ir a Panel de Despacho
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Gestionar Productos (admin): ocupa el lugar del botón de Pastelería,
+              que el admin igual puede abrir desde el panel. Va en azul (el color que
+              tenía Despacho en este lugar) para no repetir el amarillo de
+              "Realizar nuevo pedido" justo arriba. */}
+          {onManageProducts && user.role === 'admin' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.33 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onManageProducts}
+                className="w-full h-12 relative overflow-hidden group shadow-lg mt-3"
+                style={{
+                  background: 'linear-gradient(90deg, #0047BA 0%, #0059FF 100%)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(0, 71, 186, 0.3)',
+                  color: 'white'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Package className="w-5 h-5" />
+                  Gestionar Productos
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Bakery KDS Button (despacho y pastelería; el admin ve Gestionar Productos) */}
+          {onGoToBakeryKDS && (user.role === 'dispatch' || user.role === 'pastry') && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.33 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Button
+                onClick={onGoToBakeryKDS}
+                className="w-full h-12 text-white relative overflow-hidden group shadow-lg mt-3"
+                style={{
+                  background: 'linear-gradient(90deg, #D946EF 0%, #EC4899 100%)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 14px rgba(236, 72, 153, 0.3)'
+                }}
+              >
+                <div className="flex items-center justify-center gap-2 relative z-10">
+                  <Store className="w-5 h-5" />
+                  Ir a Panel de Pastelería
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-r from-pink-500 to-pink-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+            </motion.div>
+          )}
+
+        </div>
+
+        {/* Orders List */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3
+              className="text-[#0047BA] flex items-center gap-2"
+              style={{ fontSize: '18px', fontWeight: 600 }}
+            >
+              <TrendingUp className="w-5 h-5" />
+              {pagination ? 'Mis Pedidos' : 'Pedidos Recientes'}
+            </h3>
+            <div className="flex items-center gap-3">
+              {/* Historial completo: enlace discreto "Ver todo" (estilo
+                  encabezado de sección de iOS) en vez de un botón grande;
+                  la pestaña "Anteriores" ya cubre lo reciente. */}
+              {onViewHistory ? (
+                <button
+                  type="button"
+                  onClick={onViewHistory}
+                  aria-label={pagination ? `Ver historial completo (${pagination.total} pedidos)` : 'Ver historial completo'}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    minHeight: 44,
+                    padding: '0 2px',
+                    fontSize: 15,
+                    fontWeight: 500,
+                    color: '#0059FF',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Ver todo
+                  <ChevronRight style={{ width: 17, height: 17 }} />
+                </button>
+              ) : pagination && (
+                <span
+                  className="text-xs px-2 py-1 rounded-full"
+                  style={{
+                    background: 'rgba(0, 71, 186, 0.1)',
+                    color: '#0047BA',
+                    fontWeight: 500
+                  }}
+                >
+                  {pagination.total} total
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Filtrar pedidos"
+            className="flex p-1 mb-4 home-segmentos"
+            style={{ background: 'rgba(0, 71, 186, 0.08)', borderRadius: '10px' }}
+          >
+            {([
+              ['hoy', 'Hoy'],
+              ['proximos', 'Próximos'],
+              ['anteriores', 'Anteriores'],
+            ] as const).map(([valor, etiqueta]) => {
+              const activo = segmento === valor;
+              const cantidad = valor === 'anteriores' ? null : pedidosPorSegmento[valor].length;
+              return (
+                <button
+                  key={valor}
+                  type="button"
+                  role="tab"
+                  aria-selected={activo}
+                  onClick={() => cambiarSegmento(valor)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-sm transition-colors"
+                  style={{
+                    borderRadius: '8px',
+                    fontWeight: activo ? 600 : 500,
+                    color: activo ? '#0047BA' : '#64748B',
+                    background: activo ? 'white' : 'transparent',
+                    boxShadow: activo ? '0 1px 3px rgba(0, 71, 186, 0.15)' : 'none'
+                  }}
+                >
+                  {etiqueta}
+                  {cantidad !== null && cantidad > 0 && (
+                    <span
+                      className="text-xs rounded-full"
+                      style={{ background: activo ? 'rgba(0, 71, 186, 0.1)' : 'rgba(100, 116, 139, 0.12)', lineHeight: '18px', padding: '0 6px' }}
+                    >
+                      {cantidad}
+                    </span>
+                  )}
+                </button>
               );
             })}
           </div>
-        )}
 
-        {/* Pedidos */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '22px 4px 8px' }}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: IOS.texto }}>Pedidos</h2>
-          {onViewHistory ? (
-            <button
-              type="button"
-              onClick={onViewHistory}
-              aria-label={pagination ? `Ver historial completo (${pagination.total} pedidos)` : 'Ver historial completo'}
-              style={{ display: 'flex', alignItems: 'center', gap: 2, minHeight: 44, padding: '0 2px', fontSize: 17, color: IOS.azul, background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              Ver todo
-              <ChevronRight style={{ width: 18, height: 18 }} />
-            </button>
-          ) : pagination && (
-            <span style={{ fontSize: 15, color: IOS.secundario }}>{pagination.total} en total</span>
-          )}
-        </div>
-
-        <div
-          role="tablist"
-          aria-label="Filtrar pedidos"
-          className="home-segmentos"
-          style={{ display: 'flex', padding: 2, marginBottom: 12, background: IOS.relleno, borderRadius: 9 }}
-        >
-          {([
-            ['hoy', 'Hoy'],
-            ['proximos', 'Próximos'],
-            ['anteriores', 'Anteriores'],
-          ] as const).map(([valor, etiqueta]) => {
-            const activo = segmento === valor;
-            const cantidad = valor === 'anteriores' ? null : pedidosPorSegmento[valor].length;
-            return (
-              <button
-                key={valor}
-                type="button"
-                role="tab"
-                aria-selected={activo}
-                onClick={() => cambiarSegmento(valor)}
-                style={{
-                  flex: 1, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 14,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                  fontWeight: activo ? 600 : 500, color: IOS.texto,
-                  background: activo ? '#fff' : 'transparent',
-                  boxShadow: activo ? '0 3px 8px rgba(0,0,0,0.12), 0 3px 1px rgba(0,0,0,0.04)' : 'none',
-                }}
+          <div className="space-y-3">
+            {isLoading && displayOrders.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="space-y-4"
               >
-                {etiqueta}
-                {cantidad !== null && cantidad > 0 && (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: IOS.secundario }}>{cantidad}</span>
-                )}
-              </button>
-            );
-          })}
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse" style={{ borderRadius: '16px' }}>
+                    <CardHeader className="pb-3">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="h-6 bg-gray-200 rounded w-1/3"></div>
+                        <div className="h-6 bg-gray-200 rounded w-24"></div>
+                      </div>
+                      <div className="h-4 bg-gray-200 rounded w-1/2 mt-2"></div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full mb-2"></div>
+                      <div className="flex justify-between">
+                        <div className="h-3 bg-gray-200 rounded w-20"></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </motion.div>
+            ) : displayOrders.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.4 }}
+              >
+                <Card
+                  className="border-2 border-dashed border-gray-300"
+                  style={{ borderRadius: '16px' }}
+                >
+                  <CardContent className="p-12 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                      <Package className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <p className="text-gray-600 mb-2" style={{ fontSize: '15px', fontWeight: 500 }}>
+                      No tienes pedidos aún
+                    </p>
+                    <p className="text-gray-400 text-sm">
+                      Crea tu primer pedido para comenzar
+                    </p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ) : (
+              <div className={isLoading ? 'opacity-50 transition-opacity duration-300 pointer-events-none' : ''}>
+                {(() => {
+                  const etiquetaDeDia = (order: Order) =>
+                    diaDelPedido(order).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+
+                  // Agrupa por día manteniendo el orden de llegada. En Próximos se
+                  // ordena del día más cercano al más lejano.
+                  const pedidosDelSegmento = pedidosPorSegmento[segmento];
+                  const grupos: Record<string, typeof displayOrders> = {};
+                  const ordenados = segmento === 'proximos'
+                    ? [...pedidosDelSegmento].sort((x, y) => diaDelPedido(x).getTime() - diaDelPedido(y).getTime())
+                    : pedidosDelSegmento;
+                  ordenados.forEach(order => {
+                    const clave = etiquetaDeDia(order);
+                    if (!grupos[clave]) grupos[clave] = [];
+                    grupos[clave].push(order);
+                  });
+
+                  const renderOrderGroup = ([dateLabel, groupOrders]: [string, typeof displayOrders], groupIndex: number, mostrarTitulo: boolean) => (
+                    <div key={dateLabel} className="space-y-3 mb-6">
+                      {/* Date Header (en Hoy no hace falta: todo es del mismo día) */}
+                      {mostrarTitulo && (
+                        <motion.div
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.1 + (groupIndex * 0.05) }}
+                          className="flex items-center gap-2 pb-1 pt-2"
+                        >
+                          <span className="text-sm font-medium text-gray-500">
+                            {dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
+                          </span>
+                          <div className="h-px flex-1 bg-gradient-to-r from-blue-200 to-transparent" />
+                        </motion.div>
+                      )}
+
+                      {/* Orders for this date */}
+                      {groupOrders.map((order, index) => {
+                        const config = statusConfig[order.status] || {
+                          label: 'Desconocido',
+                          color: 'text-gray-700',
+                          bgColor: 'bg-gray-50 border-gray-200',
+                          icon: Package
+                        };
+                        const StatusIcon = config.icon;
+
+                        return (
+                          <motion.div
+                            key={order.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.4 + (groupIndex * 0.1) + (index * 0.05) }}
+                          >
+                            <SwipeableOrderCard
+                              orderId={order.id}
+                              status={order.status}
+                              userRole={user.role}
+                              onTap={() => handleViewOrder(order)}
+                              onCambiarEstado={cambiarEstadoPedido}
+                            >
+                            <Card
+                              className="cursor-pointer transition-all duration-300 border-2 group hover:shadow-xl"
+                              style={{
+                                borderRadius: '16px',
+                                borderLeftWidth: order.status === 'pending' || order.status === 'in_progress' || order.status === 'completed' ? '4px' : '2px',
+                                borderLeftColor: order.status === 'pending' ? '#F59E0B' :
+                                  order.status === 'in_progress' ? '#0059FF' :
+                                    order.status === 'completed' ? '#10B981' : undefined
+                              }}
+                            >
+                              <CardHeader className="pb-2 pt-3">
+                                <div className="flex justify-between items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <CardTitle
+                                      className="text-[#0047BA] group-hover:text-[#0059FF] transition-colors truncate"
+                                      style={{ fontSize: '14px', fontWeight: 600 }}
+                                    >
+                                      Pedido #{order.id.slice(0, 8).toUpperCase()}
+                                    </CardTitle>
+                                    {order.notes && order.notes.trim() && (
+                                      <div
+                                        className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+                                        style={{
+                                          background: 'linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)',
+                                          boxShadow: '0 2px 4px rgba(245, 158, 11, 0.3)'
+                                        }}
+                                        title="Tiene observaciones"
+                                      >
+                                        <MessageSquare className="w-3 h-3 text-amber-900" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <Badge
+                                    className={`${config.bgColor} ${config.color} border flex items-center gap-1.5 px-2.5 py-1 flex-shrink-0`}
+                                    style={{ fontSize: '11px', fontWeight: 500 }}
+                                  >
+                                    <StatusIcon className="w-3.5 h-3.5" />
+                                    {config.label}
+                                  </Badge>
+                                </div>
+                                {/* Metadatos en dos líneas fijas en vez de una fila que se
+                                    partía en cualquier lado: con varias categorías el badge
+                                    ocupaba un renglón entero y los "•" quedaban colgando al
+                                    final de línea; las cantidades decimales salían como
+                                    "2.5000000001 unid.". */}
+                                <CardDescription className="text-xs mt-1.5">
+                                  <span className="flex items-center min-w-0" style={{ gap: 12, whiteSpace: 'nowrap' }}>
+                                    <span className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+                                      <Package className="w-3.5 h-3.5" />
+                                      {formatearCantidad(order.quantity)} unid.
+                                    </span>
+                                    <span className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+                                      <Clock className="w-3.5 h-3.5" />
+                                      {(() => {
+                                        const createdAt = order.createdAt || order.date;
+                                        // Compare LOCAL calendar dates (not UTC) to avoid midnight-shift false positives
+                                        const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                                        const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
+                                        const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
+                                        const hora = new Date(createdAt).toLocaleString('es-CL', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                          hour12: false
+                                        });
+                                        // Si el pedido se hizo otro día que el de entrega, se
+                                        // antepone la fecha para que "14:32" no se lea como hora
+                                        // de hoy. Antes esto llevaba el rótulo "Pedido anticipado",
+                                        // que aparecía en casi todos los pedidos y sumaba ruido.
+                                        if (deadlineDay && createdDay && deadlineDay !== createdDay) {
+                                          const fecha = new Date(createdAt).toLocaleDateString('es-CL', {
+                                            day: 'numeric',
+                                            month: 'short'
+                                          });
+                                          return `${fecha}, ${hora}`;
+                                        }
+                                        return hora;
+                                      })()}
+                                    </span>
+                                    {/* El local se omite en la cuenta del propio local: ya
+                                        figura en el saludo y se repetía en cada tarjeta. */}
+                                    {order.customerName && order.customerName !== user.name && (
+                                      <span className="flex items-center gap-1 font-medium text-blue-600 min-w-0">
+                                        <Store className="w-3.5 h-3.5" style={{ flexShrink: 0 }} />
+                                        <span className="truncate">{order.customerName}</span>
+                                      </span>
+                                    )}
+                                  </span>
+                                  {(() => {
+                                    const categorias = categoriasDePedido(order);
+                                    if (categorias.length === 0) return null;
+                                    const visibles = categorias.slice(0, 2);
+                                    const resto = categorias.length - visibles.length;
+                                    return (
+                                      <span className="flex items-center mt-1.5 min-w-0" style={{ gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                        {visibles.map((c) => (
+                                          <span
+                                            key={c}
+                                            className="truncate"
+                                            style={{
+                                              fontSize: 11, fontWeight: 600, color: '#1D4ED8', background: '#EFF6FF',
+                                              borderRadius: 6, padding: '2px 7px', maxWidth: '45%',
+                                            }}
+                                          >
+                                            {c}
+                                          </span>
+                                        ))}
+                                        {resto > 0 && (
+                                          <span style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', flexShrink: 0 }}>
+                                            +{resto}
+                                          </span>
+                                        )}
+                                      </span>
+                                    );
+                                  })()}
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent className="pt-0 pb-3">
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="flex-1 rounded-full h-1.5 overflow-hidden"
+                                    style={{ background: 'rgba(0, 71, 186, 0.1)' }}
+                                  >
+                                    <motion.div
+                                      className="h-1.5 rounded-full"
+                                      style={{
+                                        background: order.status === 'completed'
+                                          ? 'linear-gradient(90deg, #10B981 0%, #059669 100%)'
+                                          : order.status === 'in_progress'
+                                            ? 'linear-gradient(90deg, #0059FF 0%, #004BCE 100%)'
+                                            : 'linear-gradient(90deg, #F59E0B 0%, #D97706 100%)',
+                                        width: `${order.progress}%`
+                                      }}
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${order.progress}%` }}
+                                      transition={{ duration: 0.8, delay: 0.5 + (groupIndex * 0.1) + (index * 0.05) }}
+                                    />
+                                  </div>
+                                  <span className="text-[11px] text-gray-500 tabular-nums" style={{ fontWeight: 500 }}>
+                                    {order.progress}%
+                                  </span>
+                                </div>
+                              </CardContent>
+                            </Card>
+                            </SwipeableOrderCard>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  );
+
+                  const entradas = Object.entries(grupos);
+                  if (entradas.length === 0) {
+                    const vacio = {
+                      hoy: 'No hay pedidos para hoy',
+                      proximos: 'No hay pedidos para los próximos días',
+                      anteriores: 'No hay pedidos anteriores en esta página',
+                    }[segmento];
+                    return (
+                      <p className="text-center text-sm text-gray-500" style={{ padding: '40px 0' }}>{vacio}</p>
+                    );
+                  }
+                  return entradas.map((entrada, i) => renderOrderGroup(entrada, i, segmento !== 'hoy'));
+                })()}
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {pagination && onPageChange && segmento === 'anteriores' && (
+              <div className="mt-6">
+                <PaginationControls
+                  pagination={pagination}
+                  onPageChange={onPageChange}
+                  isLoading={isLoading}
+                />
+              </div>
+            )}
+          </div>
         </div>
-
-        {isLoading && displayOrders.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="animate-pulse" style={{ ...tarjeta, borderRadius: 16, height: 92 }} />
-            ))}
-          </div>
-        ) : displayOrders.length === 0 ? (
-          <div style={{ ...tarjeta, padding: '36px 24px', textAlign: 'center' }}>
-            <Package style={{ width: 40, height: 40, color: '#C7C7CC', margin: '0 auto 10px' }} />
-            <p style={{ fontSize: 17, fontWeight: 600, color: IOS.texto }}>Todavía no hay pedidos</p>
-            <p style={{ fontSize: 15, color: IOS.secundario, marginTop: 4 }}>Cuando hagas uno, aparecerá aquí.</p>
-          </div>
-        ) : (
-          <div style={{ opacity: isLoading ? 0.5 : 1, pointerEvents: isLoading ? 'none' : undefined, transition: 'opacity .3s' }}>
-            {(() => {
-              const etiquetaDeDia = (order: Order) =>
-                diaDelPedido(order).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-
-              // Agrupa por día manteniendo el orden de llegada. En Próximos se
-              // ordena del día más cercano al más lejano.
-              const pedidosDelSegmento = pedidosPorSegmento[segmento];
-              const grupos: Record<string, typeof displayOrders> = {};
-              const ordenados = segmento === 'proximos'
-                ? [...pedidosDelSegmento].sort((x, y) => diaDelPedido(x).getTime() - diaDelPedido(y).getTime())
-                : pedidosDelSegmento;
-              ordenados.forEach(order => {
-                const clave = etiquetaDeDia(order);
-                if (!grupos[clave]) grupos[clave] = [];
-                grupos[clave].push(order);
-              });
-
-              const entradas = Object.entries(grupos);
-              if (entradas.length === 0) {
-                const vacio = {
-                  hoy: 'No hay pedidos para hoy',
-                  proximos: 'No hay pedidos para los próximos días',
-                  anteriores: 'No hay pedidos anteriores en esta página',
-                }[segmento];
-                return <p style={{ textAlign: 'center', fontSize: 15, color: IOS.secundario, padding: '40px 0' }}>{vacio}</p>;
-              }
-
-              return entradas.map(([dateLabel, groupOrders]) => (
-                <div key={dateLabel} style={{ marginBottom: 18 }}>
-                  {/* En Hoy no hace falta el título: todo es del mismo día. */}
-                  {segmento !== 'hoy' && (
-                    <h3 style={{ fontSize: 13, fontWeight: 400, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '4px 16px 7px' }}>
-                      {dateLabel}
-                    </h3>
-                  )}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {groupOrders.map((order) => (
-                      <SwipeableOrderCard
-                        key={order.id}
-                        orderId={order.id}
-                        status={order.status}
-                        userRole={user.role}
-                        onTap={() => handleViewOrder(order)}
-                        onCambiarEstado={cambiarEstadoPedido}
-                      >
-                        <TarjetaPedido
-                          order={order}
-                          mostrarLocal={!!order.customerName && order.customerName !== user.name}
-                          categorias={categoriasDePedido(order)}
-                        />
-                      </SwipeableOrderCard>
-                    ))}
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
-        )}
-
-        {pagination && onPageChange && segmento === 'anteriores' && (
-          <div style={{ marginTop: 16 }}>
-            <PaginationControls pagination={pagination} onPageChange={onPageChange} isLoading={isLoading} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-
-const IOS = {
-  fondo: '#F2F2F7',
-  tarjeta: '#FFFFFF',
-  texto: '#000000',
-  secundario: '#8E8E93',
-  separador: 'rgba(60, 60, 67, 0.18)',
-  relleno: 'rgba(118, 118, 128, 0.12)',
-  azul: '#007AFF',
-};
-
-const ESTADO_COLOR: Record<string, string> = {
-  pending: '#FF9500',
-  in_progress: '#007AFF',
-  completed: '#34C759',
-  dispatched: '#5856D6',
-  delivered: '#30B0C7',
-  cancelled: '#FF3B30',
-};
-
-const tarjeta: React.CSSProperties = { background: IOS.tarjeta, borderRadius: 12, overflow: 'hidden' };
-
-const botonRedondo: React.CSSProperties = {
-  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.18)',
-};
-
-/** Hora del pedido; si se hizo otro día que el de entrega, con la fecha delante. */
-function horaDelPedido(order: Order): string {
-  const createdAt = order.createdAt || order.date;
-  const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-  const deadlineDay = order.deadline ? localDay(new Date(order.deadline.slice(0, 10) + 'T12:00:00')) : null;
-  const createdDay = createdAt ? localDay(new Date(createdAt)) : null;
-  const hora = new Date(createdAt).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-  if (deadlineDay && createdDay && deadlineDay !== createdDay) {
-    const fecha = new Date(createdAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' }).replace('.', '');
-    return `${fecha}, ${hora}`;
-  }
-  return hora;
-}
-
-function TarjetaPedido({ order, mostrarLocal, categorias }: { order: Order; mostrarLocal: boolean; categorias: string[] }) {
-  const config = statusConfig[order.status] || { label: 'Desconocido', icon: Package };
-  const StatusIcon = config.icon;
-  const color = ESTADO_COLOR[order.status] || IOS.secundario;
-  const codigo = `#${order.id.slice(0, 8).toUpperCase()}`;
-  const visibles = categorias.slice(0, 2);
-  const resto = categorias.length - visibles.length;
-  const enCurso = order.status === 'pending' || order.status === 'in_progress' || order.status === 'completed';
-
-  return (
-    <div style={{ background: IOS.tarjeta, borderRadius: 16, padding: '12px 14px 12px 12px', display: 'flex', gap: 12 }}>
-      <span style={{ width: 36, height: 36, borderRadius: 9, background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <StatusIcon style={{ width: 19, height: 19, color: '#fff' }} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <p className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 600, color: IOS.texto }}>
-            {mostrarLocal ? order.customerName : `Pedido ${codigo}`}
-          </p>
-          {order.notes && order.notes.trim() && (
-            <MessageSquare style={{ width: 15, height: 15, color: '#FF9500', flexShrink: 0 }} aria-label="Tiene observaciones" />
-          )}
-          <span style={{ fontSize: 14, color: IOS.secundario, flexShrink: 0 }}>{horaDelPedido(order)}</span>
-        </div>
-        <p className="truncate" style={{ fontSize: 14, color: IOS.secundario, marginTop: 1 }}>
-          <span style={{ color, fontWeight: 600 }}>{config.label}</span>
-          {' · '}{formatearCantidad(order.quantity)} unid.
-          {mostrarLocal && <> · {codigo}</>}
-        </p>
-        {visibles.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            {visibles.map((c) => (
-              <span key={c} className="truncate" style={{ fontSize: 12, fontWeight: 500, color: '#3C3C43', background: IOS.relleno, borderRadius: 6, padding: '2px 7px', maxWidth: '45%' }}>
-                {c}
-              </span>
-            ))}
-            {resto > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: IOS.secundario, flexShrink: 0 }}>+{resto}</span>}
-          </div>
-        )}
-        {enCurso && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <div style={{ flex: 1, height: 4, borderRadius: 2, background: IOS.relleno, overflow: 'hidden' }}>
-              <div style={{ width: `${Math.max(0, Math.min(100, order.progress || 0))}%`, height: '100%', borderRadius: 2, background: color, transition: 'width .6s' }} />
-            </div>
-            <span style={{ fontSize: 12, color: IOS.secundario, fontVariantNumeric: 'tabular-nums', minWidth: 30, textAlign: 'right' }}>{order.progress || 0}%</span>
-          </div>
-        )}
       </div>
     </div>
   );
