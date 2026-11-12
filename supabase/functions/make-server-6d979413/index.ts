@@ -768,7 +768,7 @@ app.delete("/make-server-6d979413/account", async (c) => {
           .eq('business_id', profile.businessId).neq('id', userId);
         if ((count ?? 0) > 0) {
           return c.json({
-            error: `Eres el dueño de ${biz.name}. Para eliminar tu cuenta, primero escríbenos para traspasar el negocio a otro administrador.`,
+            error: `Eres el dueño de ${biz.name}. Para eliminar tu cuenta, primero escríbenos a contacto@laoca.info para traspasar el negocio a otro administrador.`,
             codigo: 'DUENO_CON_MIEMBROS',
           }, 409);
         }
