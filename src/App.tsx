@@ -1996,7 +1996,9 @@ export default function App() {
 
       {currentScreen === "bakeryKds" &&
         currentUser &&
-        (currentUser.role === "pastry" || currentUser.role === "admin") && (
+        // Despacho también: el Inicio le muestra "Panel de pastelería" y sin
+        // este rol caía en una pantalla en blanco.
+        (currentUser.role === "pastry" || currentUser.role === "admin" || currentUser.role === "dispatch") && (
           <BakeryKDS
             orders={orders}
             onBack={() => setCurrentScreen("home")}

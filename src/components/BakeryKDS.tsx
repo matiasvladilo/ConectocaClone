@@ -1,45 +1,26 @@
 import { useState, useEffect } from 'react';
 import { Order } from '../App';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Badge } from './ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { DeliveryGuide } from './DeliveryGuide';
-import { Separator } from './ui/separator';
-import { Input } from './ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
   Package,
   Clock,
-  User,
-  CheckCircle2,
   PlayCircle,
+  CheckCircle2,
+  Truck,
   XCircle,
-  Printer,
-  Calendar,
-  Hash,
-  AlertCircle,
-  Search,
-  Filter,
-  SlidersHorizontal,
-  ArrowUpDown,
   Star,
-  Grid3x3,
-  List,
-  X as XIcon,
-  DollarSign,
   MessageSquare,
-  Truck
+  Search,
+  X,
+  ChevronDown,
+  SlidersHorizontal,
+  Printer,
 } from 'lucide-react';
 import { PaginationControls } from './PaginationControls';
 import { PaginationInfo, categoriesAPI, productsAPI, ordersAPI } from '../utils/api';
-import logo from '../assets/logo-icon.png';
-const logoFull = logo;
 import { toast } from 'sonner';
-import { formatCLP } from '../utils/format';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { parseDate } from '../utils/dateUtils';
 
@@ -294,7 +275,6 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
     setMaxAmount('');
     setCustomerFilter('');
     setSortBy('date-desc');
-    toast.success('Filtros limpiados');
   };
 
   // Apply search filter
@@ -370,7 +350,6 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
     }
 
     // Apply pastry category filter
-    console.log('📦 Total de pedidos antes del filtro: ', filtered.length);
 
     filtered = filtered.map(order => {
       // Only keep products that are in the Pastelería category
@@ -378,7 +357,6 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
       return { ...order, products: pastryProducts };
     }).filter(order => order.products.length > 0);
 
-    console.log('📦 Total de pedidos después del filtro: ', filtered.length);
 
 
     // Apply search filter
@@ -408,7 +386,7 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
       ? 100
       : newStatus === 'in_progress' ? 50 : 0;
     onUpdateOrderStatus(orderId, newStatus, progress);
-    toast.success(`Estado actualizado a: ${getStatusLabel(newStatus)}`);
+    toast.success(`Pedido: ${getStatusLabel(newStatus).toLowerCase()}`);
     setSelectedOrder(null);
   };
 
@@ -450,7 +428,7 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   };
 
   const formatDate = (dateString: string) => {
@@ -464,945 +442,500 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
     });
   };
 
-  const handlePrintGuide = () => {
-    if (!selectedOrder) return;
+  // ---- Vista ---------------------------------------------------------------
+  const [verFiltros, setVerFiltros] = useState(false);
+  const [confirmarCancelar, setConfirmarCancelar] = useState(false);
 
-    // Create printable content
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('No se pudo abrir la ventana de impresión');
-      return;
-    }
+  // Pedidos con productos de pastelería, sin filtrar por estado: base de los
+  // contadores de las píldoras (antes contaban todos los pedidos, incluidos
+  // los que no tenían nada de pastelería).
+  const pedidosDePasteleria = orders
+    .map(order => ({ ...order, products: order.products?.filter(p => pastryProductIds.has(p.productId)) || [] }))
+    .filter(order => order.products.length > 0);
+  const conteoPorEstado = (estado: FilterStatus) =>
+    estado === 'all' ? pedidosDePasteleria.length : pedidosDePasteleria.filter(o => o.status === estado).length;
 
-    const guideContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Guía de Despacho - Pedido #${selectedOrder.id.slice(0, 8)}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 40px;
-              max-width: 800px;
-              margin: 0 auto;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 3px solid #1e40af;
-              padding-bottom: 20px;
-              margin-bottom: 30px;
-            }
-            .header-logo {
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              margin-bottom: 15px;
-            }
-            .header-logo img {
-              width: 180px;
-              height: auto;
-              object-fit: contain;
-            }
-            .header h1 {
-              color: #1e40af;
-              margin: 10px 0 0 0;
-              font-size: 1.8em;
-              letter-spacing: 2px;
-            }
-            .header h2 {
-              color: #1e40af;
-              margin: 10px 0 0 0;
-              font-size: 1.3em;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 10px;
-            }
-            .label {
-              font-weight: bold;
-            }
-            .products-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin: 20px 0;
-            }
-            .products-table th,
-            .products-table td {
-              border: 1px solid #ddd;
-              padding: 12px;
-              text-align: left;
-            }
-            .products-table th {
-              background-color: #1e40af;
-              color: white;
-            }
-            .total {
-              text-align: right;
-              font-size: 1.2em;
-              font-weight: bold;
-              margin-top: 20px;
-            }
-            .signature {
-              margin-top: 60px;
-              border-top: 2px solid #000;
-              padding-top: 10px;
-              width: 300px;
-            }
-            @media print {
-              body {
-                padding: 20px;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="header-logo">
-              <img src="${logoFull}" alt="Logo La Oca" onload="console.log('Logo loaded')" onerror="console.error('Logo failed to load'); this.style.display='none';" />
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const esFuturo = (deadline?: string) => {
+    if (!deadline) return false;
+    const [y, m, d] = deadline.split('T')[0].split('-').map(Number);
+    if (!y || !m || !d) return false;
+    return new Date(y, m - 1, d).getTime() > hoy.getTime();
+  };
+  const futuros = filteredOrders.filter(o => esFuturo(o.deadline));
+  const deHoy = filteredOrders.filter(o => !esFuturo(o.deadline));
+
+  const abrirPedido = (order: Order) => {
+    setConfirmarCancelar(false);
+    setSelectedOrder(order);
+  };
+
+  // Siguiente paso natural del pedido (botón grande de la hoja).
+  const siguiente: Partial<Record<Order['status'], { estado: Order['status']; label: string; color: string }>> = {
+    pending: { estado: 'in_progress', label: 'Empezar a preparar', color: KDS.azul },
+    in_progress: { estado: 'completed', label: 'Marcar listo para despacho', color: KDS.verde },
+    completed: { estado: 'dispatched', label: 'Marcar despachado', color: KDS.indigo },
+    dispatched: { estado: 'delivered', label: 'Marcar recibido', color: KDS.turquesa },
+  };
+
+  const filtrosActivos = [dateFrom || dateTo, customerFilter, sortBy !== 'date-desc'].filter(Boolean).length;
+
+  const renderTarjeta = (order: Order, futuro: boolean) => {
+    const est = ESTADO_KDS[order.status] ?? ESTADO_KDS.pending;
+    const Icono = est.icono;
+    const prioritario = priorityOrders.has(order.id);
+    return (
+      <div key={order.id} style={{ ...tarjeta, boxShadow: prioritario ? `0 0 0 2px ${KDS.naranja}` : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          <button type="button" onClick={() => abrirPedido(order)} className="fila-ios"
+            style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 4px 12px 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+            <span style={{ width: 32, height: 32, borderRadius: 8, background: est.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icono style={{ width: 18, height: 18, color: '#fff' }} />
+            </span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: KDS.texto }}>{order.customerName}</span>
+                {order.notes && order.notes.trim() && <MessageSquare style={{ width: 14, height: 14, color: KDS.naranja, flexShrink: 0 }} aria-label="Tiene observaciones" />}
+              </span>
+              <span className="truncate" style={{ display: 'block', fontSize: 13, color: KDS.secundario }}>
+                <span style={{ color: est.color, fontWeight: 600 }}>{est.label}</span>
+                {' · '}{futuro ? `entrega ${formatDate(order.deadline)}` : formatTime(order.createdAt || order.date)}
+                {' · '}#{order.id.slice(0, 8).toUpperCase()}
+              </span>
+            </span>
+          </button>
+          <button type="button" onClick={() => togglePriority(order.id)} aria-pressed={prioritario}
+            aria-label={prioritario ? 'Quitar prioridad' : 'Marcar como prioritario'}
+            style={{ width: 48, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <Star style={{ width: 20, height: 20, color: prioritario ? KDS.naranja : '#C7C7CC', fill: prioritario ? KDS.naranja : 'none' }} />
+          </button>
+        </div>
+        {(order.products || []).map((product, idx) => {
+          const estadoItem = order.itemStatuses?.[product.productId] || 'pending';
+          return (
+            <div key={product.productId + idx}>
+              <Separador inset={60} />
+              <button type="button" onClick={() => abrirPedido(order)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 8px 60px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: estadoItem === 'completed' ? KDS.verde : estadoItem === 'in_progress' ? KDS.azul : KDS.naranja }} />
+                <span className="truncate" style={{ flex: 1, minWidth: 0, fontSize: 15, color: '#3C3C43' }}>{product.name}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: KDS.texto, flexShrink: 0 }}>×{product.quantity}</span>
+              </button>
             </div>
-            <h1>CONECTOCA</h1>
-            <h2>Guía de Despacho</h2>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Pedido #:</span> ${selectedOrder.id.slice(0, 8).toUpperCase()}</span>
-            <span><span class="label">Fecha:</span> ${formatDate(selectedOrder.createdAt || selectedOrder.date)}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Cliente:</span> ${selectedOrder.customerName || 'Cliente'}</span>
-            <span><span class="label">Hora:</span> ${formatTime(selectedOrder.createdAt || selectedOrder.date)}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Dirección de Despacho:</span> ${selectedOrder.deliveryAddress || 'Sin dirección registrada'}</span>
-          </div>
-          
-          <div class="info-row">
-            <span><span class="label">Fecha límite:</span> ${formatDate(selectedOrder.deadline)}</span>
-          </div>
-          
-          <table class="products-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Cantidad</th>
-                <th>Precio Unit.</th>
-                <th>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${selectedOrder.products?.map(p => `
-                <tr>
-                  <td>${p.name}</td>
-                  <td>${p.quantity}</td>
-                  <td>$${p.price.toLocaleString('es-CL', { minimumFractionDigits: 2 })}</td>
-                  <td>$${(p.price * p.quantity).toLocaleString('es-CL', { minimumFractionDigits: 2 })}</td>
-                </tr>
-              `).join('') || ''}
-            </tbody>
-          </table>
-          
-          <div class="total">
-            Total: $${(selectedOrder.total || 0).toLocaleString('es-CL', { minimumFractionDigits: 2 })}
-          </div>
-          
-          <div style="margin-top: 40px;">
-            <p><span class="label">Despachado por:</span> _______________________</p>
-          </div>
-          
-          <div class="signature">
-            <p style="margin: 0;">Firma del receptor</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(guideContent);
-    printWindow.document.close();
-    printWindow.print();
-
-    toast.success('Guía de despacho generada');
-    setShowDeliveryGuide(false);
+          );
+        })}
+      </div>
+    );
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-      {/* Header. Inset del notch en el header de color (env()=0 en web). */}
-      <div className="bg-gradient-to-r from-blue-700 to-blue-900 shadow-2xl" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-3">
-          {/* Top row with logo and controls */}
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <motion.button
-                onClick={onBack}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:bg-white/20 rounded-full transition-colors flex-shrink-0"
-              >
-                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-              </motion.button>
-
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <motion.img
-                  src={logo}
-                  alt="La Oca Logo"
-                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain flex-shrink-0"
-                  style={{ imageRendering: 'crisp-edges' }}
-                  whileHover={{ rotate: [0, -10, 10, -10, 0], transition: { duration: 0.5 } }}
-                />
-                <div className="min-w-0">
-                  <h1 className="text-base sm:text-xl tracking-wider truncate">CONECTOCA - Pastelería</h1>
-                  <p className="text-[10px] sm:text-xs text-blue-200 opacity-80 truncate">KDS de Pastelería</p>
-                </div>
-              </div>
+    <div className="min-h-screen" style={{ background: KDS.fondo }}>
+      {/* Encabezado */}
+      <div style={{ background: 'linear-gradient(135deg, #C2185B 0%, #FF2D55 100%)', paddingTop: 'max(env(safe-area-inset-top), 16px)' }}>
+        <div className="max-w-5xl mx-auto" style={{ padding: '8px 16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={onBack} aria-label="Volver" className="boton-ios" style={botonRedondo}>
+              <ArrowLeft style={{ width: 20, height: 20, color: '#fff' }} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate" style={{ color: '#fff', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>Pastelería</h1>
+              <p className="truncate" style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
+                Pedidos con productos de pastelería
+                {lastSync ? ` · act. ${lastSync.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : ''}
+              </p>
             </div>
-
-            {/* KDS Button */}
-            {onGoToKDS && (
-              <Button
-                onClick={onGoToKDS}
-                className="bg-yellow-500 hover:bg-yellow-600 text-yellow-900 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 h-9 sm:h-10 flex-shrink-0"
-              >
-                <Grid3x3 className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Vista KDS</span>
-                <span className="sm:hidden">KDS</span>
-              </Button>
-            )}
           </div>
-
-          {/* Triangular Navigation Buttons */}
-          <motion.div
-            className="flex items-center justify-between gap-2"
-            drag="x"
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.2}
-            onDragEnd={(event, info) => {
-              if (Math.abs(info.offset.x) > 50) {
-                handleSwipe(info.offset.x);
-              }
-            }}
-          >
-            {/* Left Triangle Button */}
-            <motion.button
-              onClick={handlePreviousFilter}
-              disabled={filterStatusIndex === 0}
-              whileHover={{ scale: filterStatusIndex === 0 ? 1 : 1.15 }}
-              whileTap={{ scale: filterStatusIndex === 0 ? 1 : 0.9 }}
-              className={`
-                flex-shrink-0 touch-manipulation
-                ${filterStatusIndex === 0
-                  ? 'opacity-30 cursor-not-allowed'
-                  : 'cursor-pointer opacity-80 hover:opacity-100'
-                }
-              `}
-              style={{
-                clipPath: 'polygon(100% 0%, 100% 100%, 0% 50%)',
-                backgroundColor: filterStatusIndex === 0 ? '#1e3a8a' : '#60a5fa',
-                width: '32px',
-                height: '32px',
-                minWidth: '32px',
-                minHeight: '32px'
-              }}
-              aria-label="Filtro anterior"
+          <div style={{ position: 'relative', marginTop: 12 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: 'rgba(255,255,255,0.8)' }} />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar local, producto o código"
+              aria-label="Buscar pedidos"
+              className="buscador-sobre-azul"
+              style={{ width: '100%', height: 36, borderRadius: 10, border: 'none', outline: 'none', background: 'rgba(255,255,255,0.2)', color: '#fff', fontSize: 16, padding: searchQuery ? '0 34px' : '0 12px 0 34px' }}
             />
-
-            {/* Current Status Display */}
-            <motion.div
-              key={filterStatus}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{
-                type: "spring",
-                stiffness: 300,
-                damping: 25
-              }}
-              className={`
-                flex-1 px-4 py-2 rounded-lg text-center
-                ${getFilterStatusColor(filterStatus)}
-                shadow-md
-              `}
-            >
-              <div className="flex items-center justify-center gap-2">
-                {getFilterStatusIcon(filterStatus)}
-                <div>
-                  <p className="text-xs opacity-60 leading-tight">Mostrando</p>
-                  <p className="text-sm leading-tight">{getFilterStatusLabel(filterStatus)}</p>
-                </div>
-                <span className={`
-                  px-2 py-0.5 rounded-full text-xs
-                  ${filterStatus === 'all' ? 'bg-white/20' : 'bg-black/20'}
-                `}>
-                  {getStatusCount(filterStatus)}
-                </span>
-              </div>
-            </motion.div>
-
-            {/* Right Triangle Button */}
-            <motion.button
-              onClick={handleNextFilter}
-              disabled={filterStatusIndex === filterStatusOptions.length - 1}
-              whileHover={{ scale: filterStatusIndex === filterStatusOptions.length - 1 ? 1 : 1.15 }}
-              whileTap={{ scale: filterStatusIndex === filterStatusOptions.length - 1 ? 1 : 0.9 }}
-              className={`
-                flex-shrink-0 touch-manipulation
-                ${filterStatusIndex === filterStatusOptions.length - 1
-                  ? 'opacity-30 cursor-not-allowed'
-                  : 'cursor-pointer opacity-80 hover:opacity-100'
-                }
-              `}
-              style={{
-                clipPath: 'polygon(0% 0%, 0% 100%, 100% 50%)',
-                backgroundColor: filterStatusIndex === filterStatusOptions.length - 1 ? '#1e3a8a' : '#60a5fa',
-                width: '32px',
-                height: '32px',
-                minWidth: '32px',
-                minHeight: '32px'
-              }}
-              aria-label="Filtro siguiente"
-            />
-          </motion.div>
-
-          {/* Search and Advanced Filters */}
-          <div className="mt-3 space-y-2">
-            {/* Search Bar and Quick Actions */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Buscar por ID, cliente, producto, dirección..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-gray-300"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-white"
-                  >
-                    <XIcon className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-
-              {/* Sort Selector */}
-              <Select value={sortBy} onValueChange={(value: string) => setSortBy(value as SortOption)}>
-                <SelectTrigger className="w-[200px] bg-white/10 border-white/20 text-white">
-                  <ArrowUpDown className="w-4 h-4 mr-2" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="date-desc">Más reciente</SelectItem>
-                  <SelectItem value="date-asc">Más antiguo</SelectItem>
-                  <SelectItem value="amount-desc">Mayor monto</SelectItem>
-                  <SelectItem value="amount-asc">Menor monto</SelectItem>
-                  <SelectItem value="customer-asc">Cliente A-Z</SelectItem>
-                  <SelectItem value="customer-desc">Cliente Z-A</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* View Mode Toggle */}
-              <div className="flex gap-1 bg-white/10 rounded-lg p-1">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded transition-colors ${viewMode === 'grid' ? 'bg-white/20' : 'hover:bg-white/10'
-                    }`}
-                >
-                  <Grid3x3 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded transition-colors ${viewMode === 'list' ? 'bg-white/20' : 'hover:bg-white/10'
-                    }`}
-                >
-                  <List className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Advanced Filters Toggle */}
-              <Popover open={showAdvancedFilters} onOpenChange={setShowAdvancedFilters}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-                  >
-                    <SlidersHorizontal className="w-4 h-4 mr-2" />
-                    Filtros
-                    {hasActiveFilters && (
-                      <Badge className="ml-2 bg-yellow-500 text-blue-900">
-                        {[dateFrom, dateTo, minAmount, maxAmount, customerFilter].filter(Boolean).length}
-                      </Badge>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 bg-gray-800 border-gray-700 text-white">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-medium">Filtros Avanzados</h4>
-                      {hasActiveFilters && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={clearAllFilters}
-                          className="text-yellow-400 hover:text-yellow-300 h-auto p-1"
-                        >
-                          Limpiar
-                        </Button>
-                      )}
-                    </div>
-
-                    <Separator className="bg-gray-700" />
-
-                    {/* Date Range */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Rango de Fechas</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Desde"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            type="date"
-                            value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Hasta"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Amount Range */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Rango de Monto</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Input
-                            type="number"
-                            value={minAmount}
-                            onChange={(e) => setMinAmount(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Mínimo"
-                          />
-                        </div>
-                        <div>
-                          <Input
-                            type="number"
-                            value={maxAmount}
-                            onChange={(e) => setMaxAmount(e.target.value)}
-                            className="bg-gray-700 border-gray-600 text-white text-sm"
-                            placeholder="Máximo"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Customer Filter */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-gray-300">Cliente</label>
-                      <Input
-                        type="text"
-                        value={customerFilter}
-                        onChange={(e) => setCustomerFilter(e.target.value)}
-                        className="bg-gray-700 border-gray-600 text-white"
-                        placeholder="Nombre del cliente..."
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Pastelería Profile Mode */}
-
-            {/* Filter Summary */}
-            {(searchQuery || hasActiveFilters) && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 text-xs text-blue-200"
-              >
-                <Filter className="w-3 h-3" />
-                <span>
-                  Mostrando {filteredOrders.length} de {orders.length} pedidos
-                </span>
-                {priorityOrders.size > 0 && (
-                  <span className="flex items-center gap-1 text-yellow-400">
-                    <Star className="w-3 h-3 fill-current" />
-                    {priorityOrders.size} prioritario{priorityOrders.size !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </motion.div>
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} aria-label="Borrar búsqueda" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X style={{ width: 14, height: 14, color: '#fff' }} />
+              </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Orders Grid */}
-      <div className="max-w-7xl mx-auto px-6 pt-4">
-        {filteredOrders.length === 0 ? (
-          <div className="text-center py-20">
-            <Package className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-            <p className="text-gray-400 text-xl">No hay pedidos en esta categoría</p>
-          </div>
-        ) : (
-          <>
-            <div className={`${viewMode === 'grid'
-              ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              : "space-y-3"
-              } ${isLoading ? 'opacity-50 transition-opacity duration-300' : ''}`}>
-              <AnimatePresence>
-                {(() => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
+      <main className="max-w-5xl mx-auto" style={{ padding: '16px 16px max(env(safe-area-inset-bottom), 32px)' }}>
+        {/* Estado */}
+        <div className="sin-scrollbar" style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 12px', padding: '0 16px' }}>
+          {filterStatusOptions.map(key => {
+            const activo = filterStatus === key;
+            const color = key === 'all' ? KDS.azul : (ESTADO_KDS[key as Order['status']]?.color ?? KDS.azul);
+            return (
+              <button key={key} type="button" aria-pressed={activo} onClick={() => setFilterStatus(key)}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? color : KDS.tarjeta, color: activo ? '#fff' : KDS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}>
+                {!activo && key !== 'all' && <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />}
+                {PILDORA[key]}
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>{conteoPorEstado(key)}</span>
+              </button>
+            );
+          })}
+        </div>
 
-                  const isFutureOrder = (deadline?: string) => {
-                    if (!deadline) return false;
-                    const parts = deadline.split('T')[0].split('-');
-                    if (parts.length !== 3) return false;
-                    const deadlineDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                    deadlineDate.setHours(0, 0, 0, 0);
-                    return deadlineDate > today;
-                  };
-
-                  const futureOrders: Order[] = [];
-                  const regularOrders: Order[] = [];
-
-                  filteredOrders.forEach(order => {
-                    if (isFutureOrder(order.deadline)) {
-                      futureOrders.push(order);
-                    } else {
-                      regularOrders.push(order);
-                    }
-                  });
-
-                  const renderOrderCards = (ordersToRender: Order[], isFutureGroup: boolean) => {
-                    return ordersToRender.map((order) => (
-                      <motion.div
-                        key={order.id}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.9 }}
-                        layout
-                        className="relative"
-                      >
-                        {/* Priority Star Button */}
-                        <motion.button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            togglePriority(order.id);
-                          }}
-                          whileHover={{ scale: 1.2 }}
-                          whileTap={{ scale: 0.9 }}
-                          className={`absolute -top-2 -right-2 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all ${priorityOrders.has(order.id)
-                            ? 'bg-yellow-500 text-yellow-900 shadow-lg'
-                            : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                            }`}
-                        >
-                          <Star className={`w-4 h-4 ${priorityOrders.has(order.id) ? 'fill-current' : ''}`} />
-                        </motion.button>
-
-                        <Card
-                          className={`
-                        cursor-pointer
-                        border-l-8 ${getStatusColor(order.status)} 
-                        bg-gray-800 border-gray-700 text-white 
-                        hover:shadow-2xl hover:scale-105 transition-all
-                        ${order.status === 'pending' ? 'animate-pulse' : ''}
-                        ${priorityOrders.has(order.id) ? 'ring-2 ring-yellow-500' : ''}
-                        ${isFutureGroup ? 'border-dashed border-purple-500/50 bg-gray-800/80 shadow-[0_0_15px_rgba(168,85,247,0.15)]' : ''}
-                      `}
-                          onClick={() => setSelectedOrder(order)}
-                        >
-                          <CardHeader className="pb-3">
-                            <div className="flex items-start justify-between">
-                              <div className="flex items-center gap-2">
-                                <Hash className="w-4 h-4 text-gray-400" />
-                                <CardTitle className={`text-lg ${isFutureGroup ? 'text-purple-300' : ''}`}>
-                                  {order.id.slice(0, 8).toUpperCase()}
-                                </CardTitle>
-                                {order.notes && order.notes.trim() && (
-                                  <div
-                                    className="w-5 h-5 rounded-full flex items-center justify-center bg-gradient-to-br from-yellow-500 to-amber-600 shadow-lg"
-                                    title="Tiene observaciones"
-                                  >
-                                    <MessageSquare className="w-3 h-3 text-yellow-900" />
-                                  </div>
-                                )}
-                              </div>
-                              <Badge className={`${getStatusColor(order.status)} text-white border-0`}>
-                                <div className="flex items-center gap-1">
-                                  {getStatusIcon(order.status)}
-                                  <span className="text-xs">{getStatusLabel(order.status)}</span>
-                                </div>
-                              </Badge>
-                            </div>
-                          </CardHeader>
-
-                          <CardContent className="space-y-3">
-                            {/* Production Areas Badges - Show if order has areas */}
-
-
-                            <div className={`${viewMode === 'list' ? 'grid grid-cols-2 md:grid-cols-4 gap-4' : 'space-y-3'}`}>
-                              <div className="flex items-center gap-2 text-sm text-gray-300">
-                                <User className="w-4 h-4 text-blue-400" />
-                                <span>{order.customerName}</span>
-                              </div>
-
-                              <div className={`flex items-center gap-2 text-sm ${isFutureGroup ? 'bg-purple-900/40 p-1.5 rounded-md border border-purple-500/30' : 'text-gray-300'}`}>
-                                <Clock className={`w-4 h-4 ${isFutureGroup ? 'text-purple-400' : 'text-yellow-400'}`} />
-                                <span className={isFutureGroup ? 'text-purple-200' : ''}>
-                                  {isFutureGroup ? formatDate(order.deadline) : formatTime(order.createdAt || order.date)}
-                                </span>
-                              </div>
-
-                              {viewMode === 'list' && (
-                                <>
-                                  <div className="flex items-center gap-2 text-sm text-gray-300">
-                                    <DollarSign className="w-4 h-4 text-green-400" />
-                                    <span className="text-green-400">${(order.total || 0).toLocaleString('es-CL')}</span>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 text-sm text-gray-300">
-                                    <Package className="w-4 h-4 text-purple-400" />
-                                    <span>{order.products?.length || 0} producto{(order.products?.length || 0) !== 1 ? 's' : ''}</span>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-
-                            {viewMode === 'grid' && (
-                              <>
-                                <Separator className="bg-gray-700" />
-
-                                <div className="space-y-2">
-                                  <p className="text-xs text-gray-400">Productos:</p>
-                                  {order.products?.slice(0, 3).map((product, idx) => {
-                                    const status = order.itemStatuses?.[product.productId] || 'pending';
-                                    return (
-                                      <div key={idx} className="flex justify-between items-center text-sm">
-                                        <div className="flex items-center gap-2">
-                                          <div className={`w-2 h-2 rounded-full ${status === 'completed' ? 'bg-green-500' : status === 'in_progress' ? 'bg-blue-500' : 'bg-yellow-500'}`} />
-                                          <span className="text-gray-300">{product.name}</span>
-                                        </div>
-                                        <span className="text-yellow-400">×{product.quantity}</span>
-                                      </div>
-                                    );
-                                  })}
-                                  {(order.products?.length || 0) > 3 && (
-                                    <p className="text-xs text-gray-500">
-                                      +{(order.products?.length || 0) - 3} más...
-                                    </p>
-                                  )}
-                                </div>
-
-                                <Separator className="bg-gray-700" />
-
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm text-gray-400">Total:</span>
-                                  <span className="text-xl text-green-400">
-                                    ${(order.total || 0).toLocaleString('es-CL')}
-                                  </span>
-                                </div>
-                              </>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </motion.div>
-                    ));
-                  };
-
-                  return (
-                    <>
-                      {futureOrders.length > 0 && (
-                        <>
-                          <div className={`col-span-full flex items-center gap-2 pb-2 ${regularOrders.length > 0 ? 'pt-2' : ''}`}>
-                            <div className="h-px flex-1 bg-gradient-to-r from-purple-500/50 to-transparent" />
-                            <span className="text-sm font-medium px-4 py-1.5 rounded-full backdrop-blur-sm border text-purple-200 bg-purple-900/40 border-purple-500/30 shadow-sm">
-                              <Clock className="w-4 h-4 inline mr-1.5 -mt-0.5 text-purple-400" />
-                              Programados (Futuro)
-                            </span>
-                            <div className="h-px flex-1 bg-gradient-to-l from-purple-500/50 to-transparent" />
-                          </div>
-                          {renderOrderCards(futureOrders, true)}
-                        </>
-                      )}
-
-                      {!searchQuery && filterStatus === 'all' && futureOrders.length > 0 && regularOrders.length > 0 && (
-                        <div className="col-span-full flex items-center gap-2 pb-2 pt-6">
-                          <div className="h-px flex-1 bg-gradient-to-r from-blue-500/50 to-transparent" />
-                          <span className="text-sm font-medium px-4 py-1.5 rounded-full backdrop-blur-sm border text-blue-200 bg-blue-900/40 border-blue-500/30 shadow-sm">
-                            <Package className="w-4 h-4 inline mr-1.5 -mt-0.5 text-blue-400" />
-                            De Hoy / Atrasados
-                          </span>
-                          <div className="h-px flex-1 bg-gradient-to-l from-blue-500/50 to-transparent" />
-                        </div>
-                      )}
-
-                      {renderOrderCards(regularOrders, false)}
-                    </>
-                  );
-                })()}
-              </AnimatePresence>
-            </div>
-
-            {/* Pagination Controls */}
-            {pagination && onPageChange && (
-              <div className="mt-6">
-                <PaginationControls
-                  pagination={pagination}
-                  onPageChange={onPageChange}
-                  isLoading={isLoading}
-                />
+        {/* Filtros */}
+        <div style={tarjeta}>
+          <button type="button" onClick={() => setVerFiltros(v => !v)} aria-expanded={verFiltros} className="fila-ios"
+            style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+            <SlidersHorizontal style={{ width: 18, height: 18, color: KDS.azul, flexShrink: 0 }} />
+            <span style={{ fontSize: 17, color: KDS.texto }}>Filtros y orden</span>
+            <span style={{ flex: 1, textAlign: 'right', fontSize: 15, color: filtrosActivos ? KDS.azul : KDS.secundario }}>
+              {filtrosActivos ? `${filtrosActivos} activo${filtrosActivos === 1 ? '' : 's'}` : 'Ninguno'}
+            </span>
+            <ChevronDown style={{ width: 18, height: 18, color: 'rgba(60,60,67,0.3)', transform: verFiltros ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+          </button>
+          {verFiltros && (
+            <>
+              <Separador />
+              <div className="fila-ios" style={{ position: 'relative', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px' }}>
+                <span style={{ fontSize: 17, color: KDS.texto }}>Ordenar</span>
+                <span className="truncate" style={{ flex: 1, textAlign: 'right', fontSize: 17, color: KDS.secundario }}>{ORDEN[sortBy]}</span>
+                <ChevronDown style={{ width: 16, height: 16, color: 'rgba(60,60,67,0.3)' }} />
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} aria-label="Ordenar"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, fontSize: 16 }}>
+                  {Object.entries(ORDEN).map(([valor, etiqueta]) => <option key={valor} value={valor}>{etiqueta}</option>)}
+                </select>
               </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Order Detail Modal */}
-      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-gray-800 text-white border-gray-700">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-2xl">
-              <Package className="w-6 h-6 text-blue-400" />
-              Pedido #{selectedOrder?.id.slice(0, 8).toUpperCase()}
-            </DialogTitle>
-            <DialogDescription className="text-gray-400">
-              Detalles completos y opciones de gestión
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedOrder && (
-            <div className="space-y-6">
-              {/* Status Badge */}
-              <div className="flex items-center gap-3">
-                <Badge className={`${getStatusColor(selectedOrder.status)} text-white text-base px-4 py-2`}>
-                  {getStatusIcon(selectedOrder.status)}
-                  <span className="ml-2">{getStatusLabel(selectedOrder.status)}</span>
-                </Badge>
+              <Separador />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', minHeight: 44 }}>
+                <span style={{ fontSize: 17, color: KDS.texto }}>Local</span>
+                <input value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} placeholder="Todos" aria-label="Filtrar por local"
+                  style={{ flex: 1, minWidth: 0, height: 44, border: 'none', outline: 'none', background: 'transparent', textAlign: 'right', fontSize: 17, color: KDS.texto }} />
               </div>
-
-              {/* Order Info */}
-              <div className="grid grid-cols-2 gap-4 p-4 bg-gray-900 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-blue-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Cliente</p>
-                    <p className="text-sm">{selectedOrder.customerName}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-yellow-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Fecha y hora de ingreso</p>
-                    <p className="text-sm">{new Date(selectedOrder.createdAt || selectedOrder.date).toLocaleString('es-CL', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-green-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Fecha límite</p>
-                    <p className="text-sm">{formatDate(selectedOrder.deadline)}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-orange-400" />
-                  <div>
-                    <p className="text-xs text-gray-400">Progreso</p>
-                    <p className="text-sm">{selectedOrder.progress}%</p>
-                  </div>
+              <Separador />
+              <div style={{ padding: '10px 16px' }}>
+                <p style={{ fontSize: 13, color: KDS.secundario, margin: '0 0 6px' }}>Fecha del pedido</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <CampoFecha etiqueta="Desde" valor={dateFrom} onCambio={setDateFrom} />
+                  <CampoFecha etiqueta="Hasta" valor={dateTo} onCambio={setDateTo} />
                 </div>
               </div>
-
-              {/* Products List */}
-              <div>
-                <h3 className="text-sm text-gray-400 mb-3">Productos solicitados:</h3>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {selectedOrder.products?.map((product, idx) => (
-                    <div
-                      key={idx}
-                      className="flex justify-between items-center p-3 bg-gray-900 rounded-lg flex-wrap gap-4"
-                    >
-                      <div className="flex-1">
-                        <p className="text-sm">{product.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {formatCLP(product.price)} × {product.quantity}
-                        </p>
-                      </div>
-                      <div className="flex gap-2 items-center">
-                        {(() => {
-                          const status = selectedOrder.itemStatuses?.[product.productId] || 'pending';
-                          return (
-                            <>
-                              <Button
-                                size="sm"
-                                variant={status === 'in_progress' ? 'default' : 'outline'}
-                                className={status === 'in_progress' ? 'bg-blue-600 hover:bg-blue-700 border-none' : 'text-blue-400 border-blue-800'}
-                                onClick={(e: any) => {
-                                  e.stopPropagation();
-                                  handleItemStatusChange(selectedOrder.id, product.productId, 'in_progress');
-                                }}
-                              >
-                                <PlayCircle className="w-4 h-4 mr-1" />
-                                En Producción
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={status === 'completed' ? 'default' : 'outline'}
-                                className={status === 'completed' ? 'bg-green-600 hover:bg-green-700 border-none' : 'text-green-400 border-green-800'}
-                                onClick={(e: any) => {
-                                  e.stopPropagation();
-                                  handleItemStatusChange(selectedOrder.id, product.productId, 'completed');
-                                }}
-                              >
-                                <CheckCircle2 className="w-4 h-4 mr-1" />
-                                Listo
-                              </Button>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Separator className="bg-gray-700" />
-
-              {/* Total */}
-              <div className="flex justify-between items-center p-4 bg-gray-900 rounded-lg">
-                <span className="text-lg">Total del pedido:</span>
-                <span className="text-2xl text-green-400">
-                  ${(selectedOrder.total || 0).toLocaleString('es-CL', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-
-              {/* Notes Section - Always visible for debugging */}
-              <Separator className="bg-gray-700" />
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-yellow-400" />
-                  <h3 className="text-sm text-gray-400">Observaciones del Cliente:</h3>
-                </div>
-                {selectedOrder.notes && selectedOrder.notes.trim() ? (
-                  <div className="p-4 bg-gradient-to-br from-yellow-900/30 to-amber-900/20 border-2 border-yellow-600/40 rounded-lg">
-                    <p className="text-sm text-gray-200" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                      {selectedOrder.notes}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-gray-900/50 border border-gray-700 rounded-lg">
-                    <p className="text-sm text-gray-500 italic">
-                      Sin observaciones
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="space-y-3">
-                <p className="text-sm text-gray-400">Cambiar estado:</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'pending')}
-                    disabled={selectedOrder.status === 'pending'}
-                    className="bg-yellow-500 hover:bg-yellow-600 text-yellow-900"
-                  >
-                    <Clock className="w-4 h-4 mr-2" />
-                    Pendiente
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'in_progress')}
-                    disabled={selectedOrder.status === 'in_progress'}
-                    className="bg-blue-500 hover:bg-blue-600 text-blue-900"
-                  >
-                    <PlayCircle className="w-4 h-4 mr-2" />
-                    En Preparación
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'completed')}
-                    disabled={selectedOrder.status === 'completed'}
-                    className="bg-green-500 hover:bg-green-600 text-green-900"
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Listo
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'dispatched')}
-                    disabled={selectedOrder.status === 'dispatched'}
-                    className="bg-indigo-500 hover:bg-indigo-600 text-indigo-900"
-                  >
-                    <Package className="w-4 h-4 mr-2" />
-                    Despachado
-                  </Button>
-                </div>
-
-                {/* Secondary Actions Row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'delivered')}
-                    disabled={selectedOrder.status === 'delivered'}
-                    className="bg-teal-500 hover:bg-teal-600 text-teal-900"
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Recibido
-                  </Button>
-
-                  <Button
-                    onClick={() => handleStatusChange(selectedOrder.id, 'cancelled')}
-                    disabled={selectedOrder.status === 'cancelled'}
-                    className="bg-red-500 hover:bg-red-600 text-red-900"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Cancelar
-                  </Button>
-                </div>
-
-                {/* Print Guide Button */}
-                {(selectedOrder.status === 'completed' || selectedOrder.status === 'cancelled') && (
-                  <Button
-                    onClick={() => setShowDeliveryGuide(true)}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Printer className="w-4 h-4 mr-2" />
-                    Imprimir Guía de Despacho
-                  </Button>
-                )}
-              </div>
-            </div>
+              {(hasActiveFilters || sortBy !== 'date-desc') && (
+                <>
+                  <Separador />
+                  <button type="button" onClick={clearAllFilters} className="fila-ios"
+                    style={{ width: '100%', height: 44, border: 'none', background: 'transparent', fontSize: 17, color: KDS.azul, cursor: 'pointer' }}>
+                    Quitar filtros
+                  </button>
+                </>
+              )}
+            </>
           )}
+        </div>
+
+        {/* Pedidos */}
+        <div style={{ opacity: isLoading ? 0.5 : 1, transition: 'opacity .3s' }}>
+          {filteredOrders.length === 0 ? (
+            <div style={{ ...tarjeta, marginTop: 20, padding: '36px 24px', textAlign: 'center' }}>
+              <Package style={{ width: 40, height: 40, color: '#C7C7CC', margin: '0 auto 10px' }} />
+              <p style={{ fontSize: 17, fontWeight: 600, color: KDS.texto }}>No hay pedidos aquí</p>
+              <p style={{ fontSize: 15, color: KDS.secundario, marginTop: 4 }}>Prueba con otro estado o búsqueda.</p>
+            </div>
+          ) : (
+            <>
+              {deHoy.length > 0 && (
+                <>
+                  <h2 style={tituloSeccion}>Hoy y atrasados · {deHoy.length}</h2>
+                  <div className="kds-grilla">{deHoy.map(o => renderTarjeta(o, false))}</div>
+                </>
+              )}
+              {futuros.length > 0 && (
+                <>
+                  <h2 style={tituloSeccion}>Programados · {futuros.length}</h2>
+                  <div className="kds-grilla">{futuros.map(o => renderTarjeta(o, true))}</div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {pagination && onPageChange && (
+          <div style={{ marginTop: 16 }}>
+            <PaginationControls pagination={pagination} onPageChange={onPageChange} isLoading={isLoading} />
+          </div>
+        )}
+      </main>
+
+      <style>{`
+        .kds-grilla { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        @media (min-width: 768px) { .kds-grilla { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+        @media (min-width: 1200px) { .kds-grilla { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+      `}</style>
+
+      {/* Detalle del pedido */}
+      <Dialog open={!!selectedOrder} onOpenChange={(abierto) => { if (!abierto) setSelectedOrder(null); }}>
+        <DialogContent
+          className="hoja-ios"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          style={{
+            top: 'auto', bottom: 0, left: 0, right: 0, translate: 'none', margin: '0 auto',
+            width: '100%', maxWidth: 640, height: '92dvh', padding: 0, gap: 0, border: 'none',
+            borderRadius: '14px 14px 0 0', background: KDS.fondo, display: 'flex', flexDirection: 'column',
+          }}
+        >
+          {selectedOrder && (() => {
+            const est = ESTADO_KDS[selectedOrder.status] ?? ESTADO_KDS.pending;
+            const paso = siguiente[selectedOrder.status];
+            const otros = (['pending', 'in_progress', 'completed', 'dispatched', 'delivered'] as Order['status'][])
+              .filter(s => s !== selectedOrder.status && s !== paso?.estado);
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px 10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <DialogTitle className="truncate" style={{ fontSize: 17, fontWeight: 600, color: KDS.texto }}>{selectedOrder.customerName}</DialogTitle>
+                    <DialogDescription style={{ fontSize: 13, color: KDS.secundario }}>
+                      Pedido #{selectedOrder.id.slice(0, 8).toUpperCase()}
+                    </DialogDescription>
+                  </div>
+                  <button type="button" onClick={() => setSelectedOrder(null)} aria-label="Cerrar"
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: '#E3E3E8', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                    <X style={{ width: 17, height: 17, color: '#3C3C43' }} />
+                  </button>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 16px 16px' }}>
+                  <div style={tarjeta}>
+                    <FilaInfo etiqueta="Estado" valor={<span style={{ color: est.color, fontWeight: 600 }}>{est.label}</span>} />
+                    <Separador />
+                    <FilaInfo etiqueta="Entrega" valor={selectedOrder.deadline ? formatDate(selectedOrder.deadline) : '—'} />
+                    <Separador />
+                    <FilaInfo etiqueta="Ingresó" valor={new Date(selectedOrder.createdAt || selectedOrder.date).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })} />
+                    {selectedOrder.deliveryAddress && !/sin direcci/i.test(selectedOrder.deliveryAddress) && (
+                      <>
+                        <Separador />
+                        <FilaInfo etiqueta="Dirección" valor={selectedOrder.deliveryAddress} />
+                      </>
+                    )}
+                  </div>
+
+                  {selectedOrder.notes && selectedOrder.notes.trim() && (
+                    <>
+                      <h3 style={tituloSeccion}>Observaciones</h3>
+                      <div style={{ ...tarjeta, padding: '12px 16px', background: '#FFF8E6' }}>
+                        <p style={{ fontSize: 16, color: KDS.texto, whiteSpace: 'pre-wrap', lineHeight: 1.5, overflowWrap: 'anywhere' }}>{selectedOrder.notes}</p>
+                      </div>
+                    </>
+                  )}
+
+                  <h3 style={tituloSeccion}>Productos de pastelería</h3>
+                  <div style={tarjeta}>
+                    {selectedOrder.products?.map((product, idx) => {
+                      const estadoItem = selectedOrder.itemStatuses?.[product.productId] || 'pending';
+                      return (
+                        <div key={product.productId + idx}>
+                          {idx > 0 && <Separador />}
+                          <div style={{ padding: '10px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 16, color: KDS.texto }}>{product.name}</span>
+                              <span style={{ fontSize: 18, fontWeight: 700, color: KDS.texto, flexShrink: 0 }}>×{product.quantity}</span>
+                            </div>
+                            <div style={{ display: 'flex', padding: 2, marginTop: 8, background: KDS.relleno, borderRadius: 9 }}>
+                              {([
+                                ['pending', 'Pendiente', KDS.naranja],
+                                ['in_progress', 'Preparando', KDS.azul],
+                                ['completed', 'Listo', KDS.verde],
+                              ] as const).map(([valor, etiqueta, color]) => {
+                                const activo = estadoItem === valor;
+                                return (
+                                  <button key={valor} type="button" aria-pressed={activo}
+                                    onClick={() => handleItemStatusChange(selectedOrder.id, product.productId, valor)}
+                                    style={{
+                                      flex: 1, height: 30, borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 14,
+                                      fontWeight: activo ? 600 : 500, color: activo ? '#fff' : KDS.texto,
+                                      background: activo ? color : 'transparent',
+                                    }}>
+                                    {etiqueta}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <h3 style={tituloSeccion}>Cambiar estado del pedido</h3>
+                  <div style={tarjeta}>
+                    {otros.map((s, idx) => {
+                      const e = ESTADO_KDS[s];
+                      const I = e.icono;
+                      return (
+                        <div key={s}>
+                          {idx > 0 && <Separador inset={56} />}
+                          <button type="button" onClick={() => handleStatusChange(selectedOrder.id, s)} className="fila-ios"
+                            style={{ width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                            <span style={{ width: 28, height: 28, borderRadius: 7, background: e.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <I style={{ width: 16, height: 16, color: '#fff' }} />
+                            </span>
+                            <span style={{ flex: 1, fontSize: 16, color: KDS.texto }}>{e.label}</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ ...tarjeta, marginTop: 20 }}>
+                    <button type="button" onClick={() => setShowDeliveryGuide(true)} className="fila-ios"
+                      style={{ width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}>
+                      <Printer style={{ width: 20, height: 20, color: KDS.azul }} />
+                      <span style={{ flex: 1, fontSize: 16, color: KDS.azul }}>Guía de despacho</span>
+                    </button>
+                    {selectedOrder.status !== 'cancelled' && (
+                      <>
+                        <Separador />
+                        {confirmarCancelar ? (
+                          <div style={{ padding: 12 }}>
+                            <p style={{ fontSize: 14, color: KDS.secundario, textAlign: 'center', margin: '0 0 10px' }}>¿Cancelar este pedido?</p>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <button type="button" onClick={() => setConfirmarCancelar(false)} className="boton-ios" style={{ ...botonAccion, background: '#E3E3E8', color: KDS.texto }}>No</button>
+                              <button type="button" onClick={() => handleStatusChange(selectedOrder.id, 'cancelled')} className="boton-ios" style={{ ...botonAccion, background: KDS.rojo, color: '#fff' }}>Sí, cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmarCancelar(true)} className="fila-ios"
+                            style={{ width: '100%', height: 46, border: 'none', background: 'transparent', fontSize: 16, color: KDS.rojo, cursor: 'pointer' }}>
+                            Cancelar pedido
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {paso && (
+                  <div style={{ flexShrink: 0, padding: '10px 16px max(env(safe-area-inset-bottom), 16px)', borderTop: `0.5px solid ${KDS.separador}`, background: 'rgba(242,242,247,0.94)' }}>
+                    <button type="button" onClick={() => handleStatusChange(selectedOrder.id, paso.estado)} className="boton-ios"
+                      style={{ ...botonAccion, width: '100%', height: 50, borderRadius: 12, fontSize: 17, background: paso.color, color: '#fff' }}>
+                      {paso.label}
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
-      {/* Delivery Guide Dialog */}
       {selectedOrder && (
         <DeliveryGuide
           order={selectedOrder}
           open={showDeliveryGuide}
           onClose={() => setShowDeliveryGuide(false)}
         />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+const KDS = {
+  fondo: '#F2F2F7',
+  tarjeta: '#FFFFFF',
+  texto: '#000000',
+  secundario: '#8E8E93',
+  separador: 'rgba(60, 60, 67, 0.18)',
+  relleno: 'rgba(118, 118, 128, 0.12)',
+  azul: '#007AFF',
+  rojo: '#FF3B30',
+  naranja: '#FF9500',
+  verde: '#34C759',
+  indigo: '#5856D6',
+  turquesa: '#30B0C7',
+};
+
+const ESTADO_KDS: Record<Order['status'], { label: string; color: string; icono: any }> = {
+  pending: { label: 'Pendiente', color: KDS.naranja, icono: Clock },
+  in_progress: { label: 'En preparación', color: KDS.azul, icono: PlayCircle },
+  completed: { label: 'Listo para despacho', color: KDS.verde, icono: CheckCircle2 },
+  dispatched: { label: 'Despachado', color: KDS.indigo, icono: Truck },
+  delivered: { label: 'Recibido', color: KDS.turquesa, icono: CheckCircle2 },
+  cancelled: { label: 'Cancelado', color: KDS.rojo, icono: XCircle },
+};
+
+const PILDORA: Record<FilterStatus, string> = {
+  all: 'Todos',
+  pending: 'Pendientes',
+  in_progress: 'Preparando',
+  completed: 'Listos',
+  dispatched: 'Despachados',
+  delivered: 'Recibidos',
+  cancelled: 'Cancelados',
+};
+
+const ORDEN: Record<SortOption, string> = {
+  'date-desc': 'Más recientes',
+  'date-asc': 'Más antiguos',
+  'customer-asc': 'Local (A–Z)',
+  'customer-desc': 'Local (Z–A)',
+  'amount-desc': 'Monto mayor',
+  'amount-asc': 'Monto menor',
+};
+
+const tarjeta: React.CSSProperties = { background: KDS.tarjeta, borderRadius: 12, overflow: 'hidden' };
+
+const tituloSeccion: React.CSSProperties = {
+  fontSize: 13, fontWeight: 400, color: KDS.secundario, textTransform: 'uppercase', letterSpacing: 0.2, margin: '22px 16px 7px',
+};
+
+const botonRedondo: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.2)',
+};
+
+const botonAccion: React.CSSProperties = {
+  flex: 1, height: 44, borderRadius: 10, border: 'none', fontSize: 16, fontWeight: 600, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+};
+
+function Separador({ inset = 16 }: { inset?: number }) {
+  return <div style={{ height: 0.5, background: KDS.separador, marginLeft: inset }} />;
+}
+
+function FilaInfo({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode }) {
+  return (
+    <div style={{ minHeight: 44, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px' }}>
+      <span style={{ fontSize: 16, color: KDS.texto, flexShrink: 0 }}>{etiqueta}</span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: 'right', fontSize: 16, color: KDS.secundario, overflowWrap: 'anywhere' }}>{valor}</span>
+    </div>
+  );
+}
+
+/** Fecha nativa con su etiqueta visible: iOS no muestra placeholder en type=date. */
+function CampoFecha({ etiqueta, valor, onCambio }: { etiqueta: string; valor: string; onCambio: (v: string) => void }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, position: 'relative', borderRadius: 9, overflow: 'hidden', background: KDS.relleno }}>
+      <input
+        type="date"
+        value={valor}
+        onChange={(e) => onCambio(e.target.value)}
+        aria-label={etiqueta}
+        style={{
+          display: 'block', width: '100%', boxSizing: 'border-box', height: 36, border: 'none', padding: '0 10px',
+          WebkitAppearance: 'none', appearance: 'none', background: 'transparent', fontSize: 15,
+          color: valor ? KDS.texto : 'transparent',
+        }}
+      />
+      {!valor && (
+        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: KDS.secundario, pointerEvents: 'none' }}>
+          {etiqueta}
+        </span>
       )}
     </div>
   );
