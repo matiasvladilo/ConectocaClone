@@ -1215,6 +1215,19 @@ export const stockEventsAPI = {
 // «Para comprar» (solo admin). Ver docs/superpowers/specs/2026-11-15-para-comprar-reposicion-design.md
 export type MotivoReposicion = 'agotado' | 'pocos_dias' | 'bajo_minimo' | 'sin_ventas_recientes';
 
+export interface CompraSugerida {
+  proveedor: string;
+  proveedorNombre: string;
+  precioUnidad: number;
+  formatoUnidades: number | null;
+  formato: string;
+  observadoEn: string;
+  url: string;
+  comprarRedondeado: number;
+  costoEstimado: number;
+  antiguo: boolean;
+}
+
 export interface FilaReposicion {
   productId: string;
   name: string;
@@ -1222,6 +1235,10 @@ export interface FilaReposicion {
   stock: number;
   minStock: number | null;
   rotacionDiaria: number;
+  rotacion7: number;
+  rotacion28: number;
+  /** Mejor precio enviado por Oca Pricing (null si no hay). */
+  compra: CompraSugerida | null;
   diasQueAlcanza: number | null;
   comprar: number;
   motivo: MotivoReposicion;

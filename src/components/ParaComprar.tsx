@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, MessageCircle, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AjustesReposicion, FilaReposicion } from '../utils/api';
-import { etiquetaMotivo, textoListaCompra } from '../utils/listaCompra';
+import { etiquetaMotivo, resumenCosto, subeDemanda, textoListaCompra } from '../utils/listaCompra';
 import { compartirTexto, exportarLibroExcel } from '../utils/descargarArchivo';
 
 /**
@@ -74,10 +74,13 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
         'Stock': f.stock,
         'Sale por día': f.rotacionDiaria,
         'Alcanza (días)': f.diasQueAlcanza ?? '',
-        'Comprar': f.comprar,
+        'Comprar': f.compra?.comprarRedondeado ?? f.comprar,
+        'Proveedor': f.compra?.proveedorNombre ?? '',
+        'Precio c/u': f.compra?.precioUnidad ?? '',
+        'Costo estimado': f.compra?.costoEstimado ?? '',
         'Motivo': etiquetaMotivo(f),
       })));
-      hoja['!cols'] = [{ wch: 40 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
+      hoja['!cols'] = [{ wch: 40 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 30 }];
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, hoja, 'Para comprar');
       await exportarLibroExcel(libro, `Para_comprar_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -148,10 +151,21 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
                     <span style={{ display: 'block', fontSize: 12, color: IOS.secundario }}>
                       Stock {fmt(f.stock)}{f.rotacionDiaria > 0 ? ` · sale ${fmt(f.rotacionDiaria)}/día` : ''} · {etiquetaMotivo(f)}
                     </span>
+                    {subeDemanda(f) && (
+                      <span style={{ display: 'block', fontSize: 12, color: IOS.naranja }}>↑ Sube: esta semana sale {fmt(f.rotacion7)}/día</span>
+                    )}
+                    {f.compra && (
+                      <span style={{ display: 'block', fontSize: 12, color: IOS.secundario }}>
+                        {f.compra.proveedorNombre} ${Math.round(f.compra.precioUnidad).toLocaleString('es-CL')} c/u
+                        {f.compra.formatoUnidades && f.compra.formatoUnidades > 1 ? ` · ${f.compra.comprarRedondeado / f.compra.formatoUnidades} × ${f.compra.formato}` : ''}
+                        {' · ≈ $'}{f.compra.costoEstimado.toLocaleString('es-CL')}
+                        {f.compra.antiguo ? ` · precio del ${new Date(f.compra.observadoEn).toLocaleDateString('es-CL')}` : ''}
+                      </span>
+                    )}
                   </span>
                   <span style={{ textAlign: 'right', flexShrink: 0 }}>
                     <span style={{ display: 'block', fontSize: 12, color: IOS.secundario }}>Comprar</span>
-                    <span style={{ display: 'block', fontSize: 20, fontWeight: 700, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>{fmt(f.comprar)}</span>
+                    <span style={{ display: 'block', fontSize: 20, fontWeight: 700, color: IOS.texto, fontVariantNumeric: 'tabular-nums' }}>{fmt(f.compra?.comprarRedondeado ?? f.comprar)}</span>
                   </span>
                 </div>
               </div>
@@ -159,6 +173,14 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
           })
         )}
       </div>
+      {!cargando && !error && filas.length > 0 && (() => {
+        const r = resumenCosto(filas);
+        return r.conPrecio > 0 ? (
+          <p style={{ fontSize: 15, fontWeight: 600, color: IOS.texto, padding: '10px 16px 0' }}>
+            Costo estimado ≈ ${r.total.toLocaleString('es-CL')} <span style={{ fontWeight: 400, color: IOS.secundario }}>({r.conPrecio} de {filas.length} con precio de Oca Pricing)</span>
+          </p>
+        ) : null;
+      })()}
       <p style={{ fontSize: 13, color: IOS.secundario, padding: '8px 16px 0', lineHeight: 1.35 }}>
         Calculado con los despachos de las últimas 4 semanas. Si un producto estuvo agotado parte del mes, la sugerencia puede quedar corta.
       </p>
