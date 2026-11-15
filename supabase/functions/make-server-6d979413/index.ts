@@ -15,6 +15,14 @@ import {
   type Permiso,
   type ResultadoAutorizacion,
 } from "./authz.ts";
+import {
+  AJUSTES_POR_DEFECTO,
+  VENTANA_DIAS,
+  calcularReposicion,
+  sumarSalidas,
+  validarAjustes,
+  type ProductoStock,
+} from "./replenishment.ts";
 
 const app = new Hono();
 
@@ -1853,6 +1861,115 @@ app.get('/make-server-6d979413/products/:id/stock-events', async (c) => {
   } catch (err: any) {
     console.error('Error getting stock events:', err);
     return c.json({ error: 'Error al obtener movimientos' }, 500);
+  }
+});
+
+// ─── «Para comprar»: reposición según rotación (solo admin) ─────────────────
+// Spec: docs/superpowers/specs/2026-11-15-para-comprar-reposicion-design.md
+
+async function leerAjustesReposicion(businessId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('business_replenishment_settings')
+    .select('coverage_days, alert_days')
+    .eq('business_id', businessId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? { coverageDays: data.coverage_days, alertDays: data.alert_days } : AJUSTES_POR_DEFECTO;
+}
+
+app.get('/make-server-6d979413/distribution/replenishment', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!tienePermiso(profile, 'distribucion.reposicion')) return c.json({ error: 'No autorizado' }, 403);
+
+    const ahora = new Date();
+    const desde = new Date(ahora.getTime() - VENTANA_DIAS * 86_400_000).toISOString();
+
+    const { data: productos, error: prodErr } = await supabaseAdmin
+      .from('products')
+      .select('id, name, category_id, stock, min_stock, unlimited_stock, track_stock, created_at')
+      .eq('business_id', profile.businessId)
+      .is('archived_at', null);
+    if (prodErr) throw prodErr;
+
+    // PostgREST corta en 1000 filas: se pagina para no subestimar la rotación
+    // de un mes con muchos despachos.
+    const eventos: { product_id: string; type: string; quantity: number }[] = [];
+    for (let desdeFila = 0; ; desdeFila += 1000) {
+      const { data: pagina, error: evErr } = await supabaseAdmin
+        .from('stock_events')
+        .select('product_id, type, quantity')
+        .eq('business_id', profile.businessId)
+        .in('type', ['despacho', 'devolucion'])
+        .gte('created_at', desde)
+        .order('created_at', { ascending: true })
+        .range(desdeFila, desdeFila + 999);
+      if (evErr) throw evErr;
+      eventos.push(...(pagina || []));
+      if (!pagina || pagina.length < 1000) break;
+    }
+
+    const ajustes = await leerAjustesReposicion(profile.businessId);
+    const filas = calcularReposicion(
+      (productos || []).map((p: any): ProductoStock => ({
+        id: p.id,
+        name: p.name,
+        categoryId: p.category_id ?? null,
+        stock: Number(p.stock),
+        minStock: p.min_stock != null ? Number(p.min_stock) : null,
+        unlimitedStock: p.unlimited_stock,
+        trackStock: p.track_stock,
+        createdAt: p.created_at,
+      })),
+      sumarSalidas(eventos),
+      ajustes,
+      ahora,
+    );
+
+    return c.json({ data: { filas, ajustes, calculadoEn: ahora.toISOString() } });
+  } catch (err: any) {
+    // Nunca [] ante un error: "nada que comprar" es la conclusión opuesta a la real.
+    console.error('Error calculando la reposición:', err);
+    return c.json({ error: 'No se pudo calcular la reposición' }, 500);
+  }
+});
+
+app.put('/make-server-6d979413/distribution/replenishment/settings', async (c) => {
+  const { error, userId } = await verifyAuth(c.req.header('Authorization'));
+  if (error) return c.json({ error }, 401);
+
+  try {
+    const profile = await getProfile(userId!);
+    if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
+    if (!tienePermiso(profile, 'distribucion.reposicion')) return c.json({ error: 'No autorizado' }, 403);
+
+    const validacion = validarAjustes(await c.req.json().catch(() => null));
+    if (!validacion.ok) return c.json({ error: validacion.error }, 400);
+
+    const { data, error: upsertErr } = await supabaseAdmin
+      .from('business_replenishment_settings')
+      .upsert({
+        business_id: profile.businessId,
+        coverage_days: validacion.ajustes.coverageDays,
+        alert_days: validacion.ajustes.alertDays,
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      }, { onConflict: 'business_id' })
+      .select('coverage_days, alert_days')
+      .single();
+    if (upsertErr) {
+      console.error('Error guardando ajustes de reposición:', upsertErr);
+      return c.json({ error: 'Error al guardar los ajustes' }, 500);
+    }
+
+    return c.json({ data: { coverageDays: data.coverage_days, alertDays: data.alert_days } });
+  } catch (err: any) {
+    console.error('Error actualizando ajustes de reposición:', err);
+    return c.json({ error: 'Error al guardar los ajustes' }, 500);
   }
 });
 
