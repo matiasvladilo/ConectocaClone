@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, Search, RefreshCw, Share, X, ChevronRight, ChevronsUpDown, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { productsAPI, categoriesAPI, stockEventsAPI } from '../utils/api';
-import type { Product, Category, StockEvent } from '../utils/api';
+import { productsAPI, categoriesAPI, stockEventsAPI, replenishmentAPI } from '../utils/api';
+import type { Product, Category, StockEvent, Reposicion, AjustesReposicion } from '../utils/api';
+import { ParaComprar } from './ParaComprar';
+import { filtrarReposicion } from '../utils/listaCompra';
 import { formatCLP } from '../utils/format';
 import { formatDateCL } from '../utils/dateUtils';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
@@ -37,6 +39,8 @@ const ESTADOS_STOCK: { key: 'todos' | 'agotado' | 'bajo' | 'ok'; label: string; 
 interface DistributionPanelProps {
   onBack: () => void;
   accessToken: string;
+  /** Solo admin: muestra la píldora «Para comprar». El servidor vuelve a chequearlo. */
+  puedeVerReposicion?: boolean;
 }
 
 export type EstadoStock = 'agotado' | 'bajo' | 'ok';
@@ -68,7 +72,7 @@ export function elegirCategoriaInicial(categories: Category[]): string {
   return distri ? distri.id : 'all';
 }
 
-export function DistributionPanel({ onBack, accessToken }: DistributionPanelProps) {
+export function DistributionPanel({ onBack, accessToken, puedeVerReposicion = false }: DistributionPanelProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +82,10 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
   // (Distribuidora) solo se aplica una vez, en la primera carga.
   const categoriaInicializada = useRef(false);
   const [busqueda, setBusqueda] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoStock>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoStock | 'comprar'>('todos');
+  const [reposicion, setReposicion] = useState<Reposicion | null>(null);
+  const [cargandoReposicion, setCargandoReposicion] = useState(false);
+  const [errorReposicion, setErrorReposicion] = useState(false);
 
   // Un error de carga NO puede caer en el empty-state: "no hay productos que
   // controlen stock" se lee como "no hay nada que reponer", que es exactamente
@@ -167,6 +174,27 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     };
   }, [cargar]);
 
+  const cargarReposicion = useCallback(async () => {
+    if (!puedeVerReposicion) return;
+    setCargandoReposicion(true);
+    setErrorReposicion(false);
+    try {
+      setReposicion(await replenishmentAPI.get(accessToken));
+    } catch (error) {
+      console.error('Error calculando la reposición:', error);
+      setErrorReposicion(true);
+    } finally {
+      setCargandoReposicion(false);
+    }
+  }, [accessToken, puedeVerReposicion]);
+
+  useEffect(() => { cargarReposicion(); }, [cargarReposicion]);
+
+  const guardarAjustesReposicion = async (ajustes: AjustesReposicion) => {
+    await replenishmentAPI.guardarAjustes(accessToken, ajustes);
+    await cargarReposicion();
+  };
+
   // Refresco manual (botón del header): usa silent=true para no tapar la
   // tabla con el "Cargando…" de la carga inicial —los datos viejos siguen
   // visibles hasta que llegan los nuevos—, pero sí confirma con un toast
@@ -175,6 +203,7 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     setRefrescando(true);
     try {
       await cargar(true);
+      await cargarReposicion();
       toast.success('Datos actualizados');
     } catch {
       toast.error('No se pudo actualizar. Probá de nuevo.');
@@ -218,10 +247,16 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
     ),
   }), [productosDelAmbito]);
 
+  const filasReposicion = useMemo(() => {
+    if (!reposicion) return [];
+    const idsValidos = categoriaId === 'all' ? null : idsDeCategoriaConHijas(categories, categoriaId);
+    return filtrarReposicion(reposicion.filas, idsValidos, busqueda);
+  }, [reposicion, categories, categoriaId, busqueda]);
+
   const filas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return productosDelAmbito
-      .filter(x => filtroEstado === 'todos' || x.estado === filtroEstado)
+      .filter(x => filtroEstado === 'todos' || filtroEstado === 'comprar' || x.estado === filtroEstado)
       .filter(x => !q ||
         x.producto.name.toLowerCase().includes(q) ||
         (x.producto.sku || '').toLowerCase().includes(q))
@@ -400,9 +435,40 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               </button>
             );
           })}
+          {puedeVerReposicion && (() => {
+            const activo = filtroEstado === 'comprar';
+            return (
+              <button
+                type="button"
+                aria-pressed={activo}
+                onClick={() => setFiltroEstado('comprar')}
+                style={{
+                  flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: activo ? 600 : 500,
+                  background: activo ? IOS.azul : IOS.tarjeta, color: activo ? '#fff' : IOS.texto,
+                  boxShadow: activo ? 'none' : '0 0 0 0.5px rgba(0,0,0,0.08)',
+                }}
+              >
+                Para comprar
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: activo ? 0.9 : 0.5 }}>
+                  {errorReposicion || cargandoReposicion || !reposicion ? '—' : filasReposicion.length}
+                </span>
+              </button>
+            );
+          })()}
         </div>
 
         {/* Lista */}
+        {filtroEstado === 'comprar' ? (
+          <ParaComprar
+            filas={filasReposicion}
+            ajustes={reposicion?.ajustes ?? null}
+            cargando={cargandoReposicion && !reposicion}
+            error={errorReposicion}
+            onReintentar={() => { cargarReposicion(); }}
+            onGuardarAjustes={guardarAjustesReposicion}
+          />
+        ) : (
         <section>
           <h3 style={{ fontSize: 13, color: IOS.secundario, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '0 16px 6px', fontWeight: 400 }}>
             {loading || errorCarga ? 'Productos' : `${filas.length} productos · lo más urgente primero`}
@@ -461,14 +527,11 @@ export function DistributionPanel({ onBack, accessToken }: DistributionPanelProp
               })
             )}
           </div>
-          {/* Se deja explícito para que quede claro que está planeado y no olvidado:
-              calcular una sugerencia hoy sería inventar un número, porque el
-              historial de reposiciones recién empieza a acumularse. */}
           <p style={{ fontSize: 13, color: IOS.secundario, padding: '8px 16px 0', lineHeight: 1.35 }}>
-            Toca un producto para ver sus movimientos. La sugerencia de cuánto y cada cuánto reponer
-            llegará cuando haya más historial.
+            Toca un producto para ver sus movimientos.{puedeVerReposicion ? ' Lo que conviene reponer y cuánto está en «Para comprar».' : ''}
           </p>
         </section>
+        )}
       </div>
 
       {createPortal(

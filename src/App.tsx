@@ -1864,6 +1864,7 @@ export default function App() {
         <DistributionPanel
           onBack={() => setCurrentScreen("profile")}
           accessToken={accessToken}
+          puedeVerReposicion={currentUser.role === "admin"}
         />
       )}
 
