@@ -110,3 +110,28 @@ function descargarEnWeb(blob: Blob, nombre: string): void {
   // algunos navegadores.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * Comparte un texto (p. ej. la lista «Para comprar» por WhatsApp).
+ * Nativo → hoja de compartir del sistema; web → navigator.share si existe; si no,
+ * portapapeles. Cancelar la hoja de compartir no es un error.
+ */
+export async function compartirTexto(texto: string, titulo: string): Promise<'compartido' | 'copiado'> {
+  try {
+    if (isNativePlatform()) {
+      const { Share } = await import('@capacitor/share');
+      await Share.share({ title: titulo, text: texto, dialogTitle: titulo });
+      return 'compartido';
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      await navigator.share({ title: titulo, text: texto });
+      return 'compartido';
+    }
+  } catch (err) {
+    const mensaje = err instanceof Error ? err.message : String(err);
+    if (/cancel|abort/i.test(mensaje)) return 'compartido';
+    throw err;
+  }
+  await navigator.clipboard.writeText(texto);
+  return 'copiado';
+}

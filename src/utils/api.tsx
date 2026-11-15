@@ -1211,6 +1211,46 @@ export const stockEventsAPI = {
     return response?.data || [];
   },
 };
+
+// «Para comprar» (solo admin). Ver docs/superpowers/specs/2026-11-15-para-comprar-reposicion-design.md
+export type MotivoReposicion = 'agotado' | 'pocos_dias' | 'bajo_minimo' | 'sin_ventas_recientes';
+
+export interface FilaReposicion {
+  productId: string;
+  name: string;
+  categoryId: string | null;
+  stock: number;
+  minStock: number | null;
+  rotacionDiaria: number;
+  diasQueAlcanza: number | null;
+  comprar: number;
+  motivo: MotivoReposicion;
+}
+
+export interface AjustesReposicion {
+  coverageDays: number;
+  alertDays: number;
+}
+
+export interface Reposicion {
+  filas: FilaReposicion[];
+  ajustes: AjustesReposicion;
+  calculadoEn: string;
+}
+
+export const replenishmentAPI = {
+  get: async (token: string): Promise<Reposicion> => {
+    const response = await fetchAPI('/distribution/replenishment', {}, token);
+    return response.data;
+  },
+  guardarAjustes: async (token: string, ajustes: AjustesReposicion): Promise<AjustesReposicion> => {
+    const response = await fetchAPI('/distribution/replenishment/settings', {
+      method: 'PUT',
+      body: JSON.stringify(ajustes),
+    }, token);
+    return response.data;
+  },
+};
 /**
  * Categorías que puede pedir cada miembro (tabla categorias_permitidas,
  * migración 20261112_a). Lista vacía = puede pedir todo. Se lee directo con el
