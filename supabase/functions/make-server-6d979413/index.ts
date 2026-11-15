@@ -1897,7 +1897,8 @@ app.get('/make-server-6d979413/distribution/replenishment', async (c) => {
     if (prodErr) throw prodErr;
 
     // PostgREST corta en 1000 filas: se pagina para no subestimar la rotación
-    // de un mes con muchos despachos.
+    // de un mes con muchos despachos. El desempate por id evita que los eventos
+    // de una misma orden (mismo created_at) se repitan u omitan entre páginas.
     const eventos: { product_id: string; type: string; quantity: number }[] = [];
     for (let desdeFila = 0; ; desdeFila += 1000) {
       const { data: pagina, error: evErr } = await supabaseAdmin
@@ -1907,6 +1908,7 @@ app.get('/make-server-6d979413/distribution/replenishment', async (c) => {
         .in('type', ['despacho', 'devolucion'])
         .gte('created_at', desde)
         .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
         .range(desdeFila, desdeFila + 999);
       if (evErr) throw evErr;
       eventos.push(...(pagina || []));

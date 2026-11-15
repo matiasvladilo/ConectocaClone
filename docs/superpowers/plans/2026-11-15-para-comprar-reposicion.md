@@ -1181,6 +1181,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:** ninguno (operación). Cada paso que toca producción se confirma con el usuario antes.
 
+**Orden de despliegue obligatorio:** 1) aplicar la migración, 2) desplegar la Edge Function, 3) publicar el frontend. Si la función se despliega antes que la tabla, GET/PUT de reposición responden 500 hasta que exista (falla cerrada, pero la función queda caída para los admins). Si el frontend se publica antes que la función, muestra un error (404), no una lista vacía.
+
 - [ ] **Step 1: Aplicar la migración** en el proyecto Supabase de Conectoca (con permiso del usuario): `supabase db push` o la herramienta MCP `apply_migration` con el contenido de `20261115_a_business_replenishment_settings.sql`. Verificar: `select * from business_replenishment_settings;` devuelve 0 filas sin error.
 
 - [ ] **Step 2: Desplegar la función** (con permiso del usuario): `supabase functions deploy make-server-6d979413`. Verificar en los logs que arranca sin `CRITICAL`.
