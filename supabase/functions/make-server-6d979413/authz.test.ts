@@ -30,6 +30,7 @@ test('admin tiene todos los permisos de la matriz', () => {
     'pedidos.cambiar_estado', 'pedidos.cambiar_estado_area', 'produccion.ordenes',
     'asistencia.ver_de_otros', 'asistencia.gestionar',
     'notificaciones.enviar_a_otros', 'negocio.ver_miembros',
+    'distribucion.reposicion',
   ] satisfies Permiso[];
 
   for (const permiso of permisosConocidos) {
@@ -202,4 +203,11 @@ test('un recursoUsuarioId nulo no cuenta como propio', () => {
     recursoBusinessId: NEGOCIO_A,
   });
   assert.equal(r.ok, false);
+});
+
+test('para comprar: solo admin ve la reposición sugerida', () => {
+  assert.equal(tienePermiso(admin, 'distribucion.reposicion'), true);
+  for (const perfil of [production, dispatch, local, worker, { role: 'pastry', businessId: NEGOCIO_A }, { role: 'user', businessId: NEGOCIO_A }]) {
+    assert.equal(tienePermiso(perfil, 'distribucion.reposicion'), false, `${perfil.role} no debería verla`);
+  }
 });

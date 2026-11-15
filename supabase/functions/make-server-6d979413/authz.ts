@@ -39,6 +39,7 @@ export type Permiso =
   | 'productos.leer'
   | 'productos.escribir'
   | 'productos.kardex'
+  | 'distribucion.reposicion'
   | 'categorias.gestionar'
   | 'areas.gestionar'
   // Materias primas, recetas y etiquetado
@@ -82,6 +83,10 @@ const MATRIZ: Record<Permiso, readonly Rol[]> = {
   'productos.escribir': ['admin', 'production'],
 
   'productos.kardex': ['admin', 'production'],
+
+  // «Para comprar»: rotación y cantidades sugeridas de la Distribuidora. Es una
+  // decisión de compra (plata del negocio): solo administración.
+  'distribucion.reposicion': ['admin'],
 
   // El servidor ya era admin-only acá, aunque la pantalla de categorías se le
   // ofrece también a production (App.tsx:1971). Se conserva admin-only: abrirlo

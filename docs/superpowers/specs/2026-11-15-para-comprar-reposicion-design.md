@@ -38,7 +38,7 @@ Para cada producto del negocio que controla stock (se excluyen `unlimitedStock`,
 
 | Valor | Fórmula |
 |---|---|
-| Ventana | 28 días hasta ahora. Si el primer evento del producto en `stock_events` es más reciente, la ventana empieza en ese evento (mínimo 1 día). |
+| Ventana | 28 días hasta ahora. Si el producto se creó hace menos (`products.created_at`), la ventana empieza en su creación (mínimo 1 día). |
 | Salidas netas | Σ `quantity` de `despacho` − Σ `quantity` de `devolucion` dentro de la ventana, con piso 0. `merma`, `ajuste` y `reposicion` no cuentan: no son demanda. |
 | Rotación diaria | salidas netas ÷ días de la ventana |
 | Días que alcanza | stock ÷ rotación (sin valor si la rotación es 0) |
@@ -89,8 +89,8 @@ Sin fila → se usan los valores por defecto.
   1. `verifyAuth`, `getProfile`, `tienePermiso(profile, 'distribucion.reposicion')`.
   2. Lee los productos del negocio y los ajustes.
   3. Una consulta a `stock_events` filtrada por `business_id`, `type IN ('despacho','devolucion')` y
-     `created_at >= ahora − 28 días`; y otra que trae el primer `created_at` por producto (para la
-     ventana de productos nuevos). Ambas con chequeo explícito de error (devolver 500, nunca `[]`).
+     `created_at >= ahora − 28 días` (la ventana de los productos nuevos usa `products.created_at`,
+     que ya viene con los productos). Con chequeo explícito de error (devolver 500, nunca `[]`).
   4. Pasa todo a la función pura `calcularReposicion` y devuelve el resultado.
 - `PUT /distribution/replenishment/settings` → valida rangos y guarda (upsert) los dos números.
 
@@ -102,11 +102,12 @@ Junto a `authz.ts`, sin dependencias de Supabase, con sus pruebas en `replenishm
 calcularReposicion(
   productos: ProductoStock[],
   salidas: Map<productId, { despachos: number; devoluciones: number }>,
-  primerEvento: Map<productId, Date>,
   ajustes: { coverageDays: number; alertDays: number },
   ahora: Date,
 ): FilaReposicion[]
 ```
+
+`ProductoStock` incluye `createdAt: string` (`products.created_at`), que la ventana usa para los productos nuevos.
 
 `FilaReposicion`: id, nombre, categoría, stock, mínimo manual, rotación diaria, días que alcanza,
 cantidad sugerida, motivo (`'pocos_dias' | 'agotado' | 'bajo_minimo' | 'sin_ventas_recientes'`).
