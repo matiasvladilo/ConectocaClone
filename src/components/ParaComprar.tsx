@@ -38,7 +38,8 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
 
   const guardar = async () => {
     const nuevo = { coverageDays: Number(cobertura), alertDays: Number(aviso) };
-    if (ajustes && nuevo.coverageDays === ajustes.coverageDays && nuevo.alertDays === ajustes.alertDays) return;
+    if (!ajustes) return;
+    if (nuevo.coverageDays === ajustes.coverageDays && nuevo.alertDays === ajustes.alertDays) return;
     setGuardando(true);
     try {
       await onGuardarAjustes(nuevo);
@@ -54,7 +55,7 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
   };
 
   const compartir = async () => {
-    if (filas.length === 0) return;
+    if (error || filas.length === 0) return;
     try {
       const r = await compartirTexto(textoListaCompra(filas, new Date()), 'Para comprar');
       if (r === 'copiado') toast.success('Lista copiada: pégala en WhatsApp');
@@ -64,7 +65,7 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
   };
 
   const exportar = async () => {
-    if (filas.length === 0) return;
+    if (error || filas.length === 0) return;
     setExportando(true);
     try {
       const XLSX = await import('xlsx');
@@ -94,12 +95,12 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
       <div style={{ ...tarjeta, marginBottom: 12, padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}>
           Comprar para
-          <input type="number" inputMode="numeric" min={1} max={60} value={cobertura} onChange={e => setCobertura(e.target.value)} onBlur={guardar} disabled={guardando} style={inputDias} aria-label="Días de cobertura" />
+          <input type="number" inputMode="numeric" min={1} max={60} value={cobertura} onChange={e => setCobertura(e.target.value)} onBlur={guardar} disabled={guardando || !ajustes} style={inputDias} aria-label="Días de cobertura" />
           días
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}>
           Avisar con menos de
-          <input type="number" inputMode="numeric" min={1} max={30} value={aviso} onChange={e => setAviso(e.target.value)} onBlur={guardar} disabled={guardando} style={inputDias} aria-label="Días de aviso" />
+          <input type="number" inputMode="numeric" min={1} max={30} value={aviso} onChange={e => setAviso(e.target.value)} onBlur={guardar} disabled={guardando || !ajustes} style={inputDias} aria-label="Días de aviso" />
           días
         </label>
         {guardando && <Loader2 className="animate-spin" style={{ width: 16, height: 16, color: IOS.secundario }} />}
@@ -110,10 +111,10 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
           {cargando || error ? 'Para comprar' : `${filas.length} productos · lo más urgente primero`}
         </h3>
         <span style={{ display: 'flex', gap: 14 }}>
-          <button type="button" onClick={compartir} disabled={filas.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 4, color: IOS.azul, fontSize: 15, background: 'none', border: 'none', opacity: filas.length ? 1 : 0.4 }}>
+          <button type="button" onClick={compartir} disabled={error || filas.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 4, color: IOS.azul, fontSize: 15, background: 'none', border: 'none', opacity: !error && filas.length ? 1 : 0.4 }}>
             <MessageCircle style={{ width: 16, height: 16 }} /> Compartir
           </button>
-          <button type="button" onClick={exportar} disabled={filas.length === 0 || exportando} style={{ display: 'flex', alignItems: 'center', gap: 4, color: IOS.azul, fontSize: 15, background: 'none', border: 'none', opacity: filas.length ? 1 : 0.4 }}>
+          <button type="button" onClick={exportar} disabled={error || filas.length === 0 || exportando} style={{ display: 'flex', alignItems: 'center', gap: 4, color: IOS.azul, fontSize: 15, background: 'none', border: 'none', opacity: !error && filas.length ? 1 : 0.4 }}>
             <FileSpreadsheet style={{ width: 16, height: 16 }} /> Excel
           </button>
         </span>
