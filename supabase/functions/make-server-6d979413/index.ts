@@ -23,6 +23,13 @@ import {
   validarAjustes,
   type ProductoStock,
 } from "./replenishment.ts";
+import {
+  agregarCompra,
+  idsDistribuidora,
+  validarPrecios,
+  verificarIntegracion,
+  type PrecioCompra,
+} from "./integracion.ts";
 
 const app = new Hono();
 
@@ -1877,6 +1884,87 @@ async function leerAjustesReposicion(businessId: string) {
   return data ? { coverageDays: data.coverage_days, alertDays: data.alert_days } : AJUSTES_POR_DEFECTO;
 }
 
+async function leerPreciosCompra(businessId: string): Promise<Map<string, PrecioCompra>> {
+  const { data, error } = await supabaseAdmin
+    .from('precios_compra')
+    .select('product_id, proveedor, proveedor_nombre, precio_unidad, formato_unidades, formato, observado_en, url')
+    .eq('business_id', businessId);
+  if (error) throw error;
+  return new Map((data || []).map((r: any) => [r.product_id, {
+    productId: r.product_id,
+    proveedor: r.proveedor,
+    proveedorNombre: r.proveedor_nombre,
+    precioUnidad: Number(r.precio_unidad),
+    formatoUnidades: r.formato_unidades != null ? Number(r.formato_unidades) : null,
+    formato: r.formato,
+    observadoEn: r.observado_en,
+    url: r.url,
+  }]));
+}
+
+async function categoriasDistribuidora(businessId: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin
+    .from('categories')
+    .select('id, name, parent_id')
+    .eq('business_id', businessId);
+  if (error) throw error;
+  return idsDistribuidora(data || []);
+}
+
+/**
+ * Reposición de un negocio (la usan la pestaña de admin y la integración con Oca Pricing).
+ * `soloCategorias`: si viene, deja solo esos productos (Distribuidora para la integración).
+ */
+async function calcularReposicionDeNegocio(businessId: string, soloCategorias?: Set<string>) {
+  const ahora = new Date();
+  const desde = new Date(ahora.getTime() - VENTANA_DIAS * 86_400_000).toISOString();
+
+  const { data: productos, error: prodErr } = await supabaseAdmin
+    .from('products')
+    .select('id, name, category_id, stock, min_stock, unlimited_stock, track_stock, created_at')
+    .eq('business_id', businessId)
+    .is('archived_at', null);
+  if (prodErr) throw prodErr;
+
+  // PostgREST corta en 1000 filas: se pagina para no subestimar la rotación
+  // de un mes con muchos despachos. El desempate por id evita que los eventos
+  // de una misma orden (mismo created_at) se repitan u omitan entre páginas.
+  const eventos: { product_id: string; type: string; quantity: number; created_at: string }[] = [];
+  for (let desdeFila = 0; ; desdeFila += 1000) {
+    const { data: pagina, error: evErr } = await supabaseAdmin
+      .from('stock_events')
+      .select('product_id, type, quantity, created_at')
+      .eq('business_id', businessId)
+      .in('type', ['despacho', 'devolucion'])
+      .gte('created_at', desde)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(desdeFila, desdeFila + 999);
+    if (evErr) throw evErr;
+    eventos.push(...(pagina || []));
+    if (!pagina || pagina.length < 1000) break;
+  }
+
+  const [ajustes, precios] = await Promise.all([leerAjustesReposicion(businessId), leerPreciosCompra(businessId)]);
+  const delAmbito = (productos || []).filter((p: any) => !soloCategorias || (p.category_id && soloCategorias.has(p.category_id)));
+  const filas = calcularReposicion(
+    delAmbito.map((p: any): ProductoStock => ({
+      id: p.id,
+      name: p.name,
+      categoryId: p.category_id ?? null,
+      stock: Number(p.stock),
+      minStock: p.min_stock != null ? Number(p.min_stock) : null,
+      unlimitedStock: p.unlimited_stock,
+      trackStock: p.track_stock,
+      createdAt: p.created_at,
+    })),
+    sumarSalidas(eventos, ahora),
+    ajustes,
+    ahora,
+  );
+  return { filas: agregarCompra(filas, precios, ahora), ajustes, calculadoEn: ahora.toISOString() };
+}
+
 app.get('/make-server-6d979413/distribution/replenishment', async (c) => {
   const { error, userId } = await verifyAuth(c.req.header('Authorization'));
   if (error) return c.json({ error }, 401);
@@ -1886,53 +1974,7 @@ app.get('/make-server-6d979413/distribution/replenishment', async (c) => {
     if (!profile?.businessId) return c.json({ error: 'Usuario no asociado a ningun negocio' }, 404);
     if (!tienePermiso(profile, 'distribucion.reposicion')) return c.json({ error: 'No autorizado' }, 403);
 
-    const ahora = new Date();
-    const desde = new Date(ahora.getTime() - VENTANA_DIAS * 86_400_000).toISOString();
-
-    const { data: productos, error: prodErr } = await supabaseAdmin
-      .from('products')
-      .select('id, name, category_id, stock, min_stock, unlimited_stock, track_stock, created_at')
-      .eq('business_id', profile.businessId)
-      .is('archived_at', null);
-    if (prodErr) throw prodErr;
-
-    // PostgREST corta en 1000 filas: se pagina para no subestimar la rotación
-    // de un mes con muchos despachos. El desempate por id evita que los eventos
-    // de una misma orden (mismo created_at) se repitan u omitan entre páginas.
-    const eventos: { product_id: string; type: string; quantity: number }[] = [];
-    for (let desdeFila = 0; ; desdeFila += 1000) {
-      const { data: pagina, error: evErr } = await supabaseAdmin
-        .from('stock_events')
-        .select('product_id, type, quantity')
-        .eq('business_id', profile.businessId)
-        .in('type', ['despacho', 'devolucion'])
-        .gte('created_at', desde)
-        .order('created_at', { ascending: true })
-        .order('id', { ascending: true })
-        .range(desdeFila, desdeFila + 999);
-      if (evErr) throw evErr;
-      eventos.push(...(pagina || []));
-      if (!pagina || pagina.length < 1000) break;
-    }
-
-    const ajustes = await leerAjustesReposicion(profile.businessId);
-    const filas = calcularReposicion(
-      (productos || []).map((p: any): ProductoStock => ({
-        id: p.id,
-        name: p.name,
-        categoryId: p.category_id ?? null,
-        stock: Number(p.stock),
-        minStock: p.min_stock != null ? Number(p.min_stock) : null,
-        unlimitedStock: p.unlimited_stock,
-        trackStock: p.track_stock,
-        createdAt: p.created_at,
-      })),
-      sumarSalidas(eventos),
-      ajustes,
-      ahora,
-    );
-
-    return c.json({ data: { filas, ajustes, calculadoEn: ahora.toISOString() } });
+    return c.json({ data: await calcularReposicionDeNegocio(profile.businessId) });
   } catch (err: any) {
     // Nunca [] ante un error: "nada que comprar" es la conclusión opuesta a la real.
     console.error('Error calculando la reposición:', err);
@@ -1972,6 +2014,77 @@ app.put('/make-server-6d979413/distribution/replenishment/settings', async (c) =
   } catch (err: any) {
     console.error('Error actualizando ajustes de reposición:', err);
     return c.json({ error: 'Error al guardar los ajustes' }, 500);
+  }
+});
+
+// ─── Integración con Oca Pricing (servidor a servidor, clave compartida) ────
+// Spec: docs/superpowers/specs/2026-11-15-conexion-oca-pricing-design.md
+// Solo lee productos y reposición de Distribuidora y solo escribe precios_compra.
+
+function integracionOcaPricing(c: any) {
+  return verificarIntegracion(
+    c.req.header('X-Integracion-Clave'),
+    Deno.env.get('OCA_PRICING_CLAVE'),
+    Deno.env.get('OCA_PRICING_BUSINESS_ID'),
+  );
+}
+
+app.get('/make-server-6d979413/integracion/oca-pricing/productos', async (c) => {
+  const acceso = integracionOcaPricing(c);
+  if (!acceso.ok) return c.json({ error: acceso.error }, acceso.status);
+  try {
+    const categorias = await categoriasDistribuidora(acceso.businessId);
+    const { data, error } = await supabaseAdmin
+      .from('products')
+      .select('id, name, category_id, stock, unlimited_stock, track_stock')
+      .eq('business_id', acceso.businessId)
+      .is('archived_at', null);
+    if (error) throw error;
+    return c.json({
+      data: (data || [])
+        .filter((p: any) => p.category_id && categorias.has(p.category_id))
+        .map((p: any) => ({ id: p.id, name: p.name, stock: Number(p.stock), unlimitedStock: p.unlimited_stock, trackStock: p.track_stock })),
+    });
+  } catch (err: any) {
+    console.error('Integración Oca Pricing — productos:', err);
+    return c.json({ error: 'No se pudieron leer los productos' }, 500);
+  }
+});
+
+app.get('/make-server-6d979413/integracion/oca-pricing/reposicion', async (c) => {
+  const acceso = integracionOcaPricing(c);
+  if (!acceso.ok) return c.json({ error: acceso.error }, acceso.status);
+  try {
+    const categorias = await categoriasDistribuidora(acceso.businessId);
+    return c.json({ data: await calcularReposicionDeNegocio(acceso.businessId, categorias) });
+  } catch (err: any) {
+    console.error('Integración Oca Pricing — reposición:', err);
+    return c.json({ error: 'No se pudo calcular la reposición' }, 500);
+  }
+});
+
+app.put('/make-server-6d979413/integracion/oca-pricing/precios', async (c) => {
+  const acceso = integracionOcaPricing(c);
+  if (!acceso.ok) return c.json({ error: acceso.error }, acceso.status);
+  try {
+    const { data: productos, error: prodErr } = await supabaseAdmin
+      .from('products')
+      .select('id')
+      .eq('business_id', acceso.businessId)
+      .is('archived_at', null);
+    if (prodErr) throw prodErr;
+    const validacion = validarPrecios(await c.req.json().catch(() => null), new Set((productos || []).map((p: any) => p.id)));
+    if (!validacion.ok) return c.json({ error: validacion.error }, 400);
+
+    const { data: guardados, error: rpcErr } = await supabaseAdmin.rpc('reemplazar_precios_compra', {
+      p_business_id: acceso.businessId,
+      p_precios: validacion.precios,
+    });
+    if (rpcErr) throw rpcErr;
+    return c.json({ data: { guardados } });
+  } catch (err: any) {
+    console.error('Integración Oca Pricing — precios:', err);
+    return c.json({ error: 'No se pudieron guardar los precios' }, 500);
   }
 });
 
