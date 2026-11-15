@@ -159,7 +159,7 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
                         {f.compra.proveedorNombre} ${Math.round(f.compra.precioUnidad).toLocaleString('es-CL')} c/u
                         {f.compra.formatoUnidades && f.compra.formatoUnidades > 1 ? ` · ${f.compra.comprarRedondeado / f.compra.formatoUnidades} × ${f.compra.formato}` : ''}
                         {' · ≈ $'}{f.compra.costoEstimado.toLocaleString('es-CL')}
-                        {f.compra.antiguo ? ` · precio del ${new Date(f.compra.observadoEn).toLocaleDateString('es-CL')}` : ''}
+                        {f.compra.antiguo ? ` · precio antiguo (${new Date(f.compra.observadoEn).toLocaleDateString('es-CL')})` : ''}
                       </span>
                     )}
                   </span>
@@ -182,7 +182,7 @@ export function ParaComprar({ filas, ajustes, cargando, error, onReintentar, onG
         ) : null;
       })()}
       <p style={{ fontSize: 13, color: IOS.secundario, padding: '8px 16px 0', lineHeight: 1.35 }}>
-        Calculado con los despachos de las últimas 4 semanas. Si un producto estuvo agotado parte del mes, la sugerencia puede quedar corta.
+        Calculado con el mayor ritmo de despachos entre la última semana y las últimas 4 semanas. Si un producto estuvo agotado parte del mes, la sugerencia puede quedar corta.
       </p>
     </section>
   );

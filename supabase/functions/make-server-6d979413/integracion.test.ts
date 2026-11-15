@@ -84,3 +84,22 @@ test('idsDistribuidora incluye subcategorías a cualquier profundidad', () => {
   ]);
   assert.deepEqual([...ids].sort(), ['b', 'd', 'g']);
 });
+
+test('validarPrecios exige fecha ISO 8601 y rechaza fechas en el futuro', () => {
+  const ids = new Set(['p1']);
+  const ahora = new Date('2026-11-15T12:00:00Z');
+  for (const f of ['1', 'Nov 15', '2026-11-17T12:00:00Z']) {
+    assert.equal(validarPrecios({ precios: [precio('p1', { observadoEn: f })] }, ids, ahora).ok, false, f);
+  }
+  assert.equal(validarPrecios({ precios: [precio('p1', { observadoEn: '2026-11-15T07:00:00Z' })] }, ids, ahora).ok, true);
+  assert.equal(validarPrecios({ precios: [precio('p1', { observadoEn: '2026-11-15T07:00:00.123+00:00' })] }, ids, ahora).ok, true);
+});
+
+test('validarPrecios rechaza una lista vacía salvo vaciar: true', () => {
+  const ids = new Set(['p1']);
+  assert.equal(validarPrecios({ precios: [] }, ids).ok, false);
+  assert.equal(validarPrecios({ precios: [], vaciar: false }, ids).ok, false);
+  const r = validarPrecios({ precios: [], vaciar: true }, ids);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.ok && r.precios, []);
+});

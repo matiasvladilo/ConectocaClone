@@ -152,7 +152,7 @@ En cada fila con `compra`:
 > **Comprar 36** (3 cajas de 12) · Alvi $870 c/u · ≈ $31.320 · visto hoy
 
 Sin `compra`, la fila queda como en la parte 1. Al pie de la lista: «Costo estimado total ≈ $X (N productos
-con precio)». Compartir por WhatsApp agrega el proveedor y el costo a cada línea.
+con precio)». Compartir por WhatsApp agrega el proveedor y el precio unitario a cada línea.
 
 ### Dónde se ve en Conectoca
 
@@ -209,8 +209,11 @@ Verificación manual: enviar precios con un límite pequeño, abrir «Para compr
 
 ## Despliegue (orden)
 
-1. Conectoca: migraciones (`business_replenishment_settings` de la parte 1 y `precios_compra`).
-2. Conectoca: Edge Function con los secretos `OCA_PRICING_CLAVE` y `OCA_PRICING_BUSINESS_ID`.
+1. Conectoca: migraciones `_a` (`business_replenishment_settings`, parte 1) y `_b` (`precios_compra`), siempre
+   antes de la función.
+2. Conectoca: Edge Function con los secretos `OCA_PRICING_CLAVE` y `OCA_PRICING_BUSINESS_ID`. Desplegarla con
+   la verificación JWT desactivada (`--no-verify-jwt` / `verify_jwt: false`): un despliegue puede reactivarla y
+   Oca Pricing no envía JWT. Prueba de humo: sin clave → 401; `GET productos` con clave → ~352 filas.
 3. Oca Pricing: variables `CONECTOCA_INTEGRACION_URL` y `CONECTOCA_INTEGRACION_CLAVE` en Netlify, GitHub y
    `.env`; desplegar.
 4. Primer envío de precios a mano (botón) y verificación.

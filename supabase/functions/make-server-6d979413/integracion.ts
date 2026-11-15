@@ -7,6 +7,7 @@
 export const MAX_PRECIOS = 2000;
 export const DIAS_PRECIO_ANTIGUO = 7;
 const DIA_MS = 86_400_000;
+const FECHA_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
 /** Clave compartida (`OCA_PRICING_CLAVE`) y negocio fijo (`OCA_PRICING_BUSINESS_ID`), nunca desde la petición. */
 export function verificarIntegracion(
@@ -39,9 +40,11 @@ export interface PrecioCompra {
   url: string;
 }
 
-export function validarPrecios(body: unknown, idsDelNegocio: Set<string>): { ok: true; precios: PrecioCompra[] } | { ok: false; error: string } {
+export function validarPrecios(body: unknown, idsDelNegocio: Set<string>, ahora: Date = new Date()): { ok: true; precios: PrecioCompra[] } | { ok: false; error: string } {
   const lista = (body as { precios?: unknown } | null)?.precios;
   if (!Array.isArray(lista)) return { ok: false, error: 'Falta la lista de precios' };
+  // Una lista vacía borraría todos los precios: solo con confirmación explícita.
+  if (lista.length === 0 && (body as { vaciar?: unknown }).vaciar !== true) return { ok: false, error: 'Lista vacía: envía vaciar: true para borrar todos los precios' };
   if (lista.length > MAX_PRECIOS) return { ok: false, error: `Máximo ${MAX_PRECIOS} precios por envío` };
   const vistos = new Set<string>();
   const precios: PrecioCompra[] = [];
@@ -54,7 +57,7 @@ export function validarPrecios(body: unknown, idsDelNegocio: Set<string>): { ok:
     if (typeof p.precioUnidad !== 'number' || !Number.isFinite(p.precioUnidad) || p.precioUnidad <= 0 || p.precioUnidad >= 10_000_000) return malo('precio inválido');
     if (p.formatoUnidades !== null && (!Number.isInteger(p.formatoUnidades) || (p.formatoUnidades as number) < 1 || (p.formatoUnidades as number) > 10_000)) return malo('formato inválido');
     if (typeof p.formato !== 'string' || p.formato.length > 100) return malo('formato inválido');
-    if (typeof p.observadoEn !== 'string' || Number.isNaN(Date.parse(p.observadoEn))) return malo('fecha inválida');
+    if (typeof p.observadoEn !== 'string' || !FECHA_ISO.test(p.observadoEn) || !Number.isFinite(Date.parse(p.observadoEn)) || Date.parse(p.observadoEn) > ahora.getTime() + DIA_MS) return malo('fecha inválida');
     if (typeof p.url !== 'string' || p.url.length > 500 || (p.url !== '' && !/^https?:\/\//.test(p.url))) return malo('enlace inválido');
     vistos.add(p.productId);
     precios.push({

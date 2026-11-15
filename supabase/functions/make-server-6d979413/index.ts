@@ -1945,7 +1945,14 @@ async function calcularReposicionDeNegocio(businessId: string, soloCategorias?: 
     if (!pagina || pagina.length < 1000) break;
   }
 
-  const [ajustes, precios] = await Promise.all([leerAjustesReposicion(businessId), leerPreciosCompra(businessId)]);
+  // Si falta la tabla de precios (migración sin aplicar) la lista base sigue funcionando, sin precios.
+  const [ajustes, precios] = await Promise.all([
+    leerAjustesReposicion(businessId),
+    leerPreciosCompra(businessId).catch((err) => {
+      console.error('No se pudieron leer los precios de compra:', err);
+      return new Map<string, PrecioCompra>();
+    }),
+  ]);
   const delAmbito = (productos || []).filter((p: any) => !soloCategorias || (p.category_id && soloCategorias.has(p.category_id)));
   const filas = calcularReposicion(
     delAmbito.map((p: any): ProductoStock => ({

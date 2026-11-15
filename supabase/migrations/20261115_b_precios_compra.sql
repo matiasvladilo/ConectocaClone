@@ -30,6 +30,8 @@ AS $$
 DECLARE
   n integer;
 BEGIN
+  -- Serializa envíos simultáneos del mismo negocio (evita choques de clave primaria).
+  PERFORM pg_advisory_xact_lock(hashtext(p_business_id::text));
   DELETE FROM public.precios_compra WHERE business_id = p_business_id;
   INSERT INTO public.precios_compra
     (business_id, product_id, proveedor, proveedor_nombre, precio_unidad, formato_unidades, formato, observado_en, url)
