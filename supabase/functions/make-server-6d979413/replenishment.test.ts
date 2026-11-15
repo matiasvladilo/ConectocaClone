@@ -136,3 +136,38 @@ test('validarAjustes acepta enteros en rango y rechaza el resto', () => {
     assert.equal(validarAjustes(malo).ok, false, JSON.stringify(malo));
   }
 });
+
+test('si la última semana sale más rápido, manda el ritmo de 7 días', () => {
+  // 28 días: 28 → 1/día; 7 días: 21 → 3/día. Stock 6 → 2 días (< 3)
+  const s = new Map([['a', { despachos: 28, devoluciones: 0, despachos7: 21, devoluciones7: 0 }]]);
+  const [fila] = calcularReposicion([producto('a', 6)], s, AJUSTES_POR_DEFECTO, AHORA);
+  assert.equal(fila.rotacion7, 3);
+  assert.equal(fila.rotacion28, 1);
+  assert.equal(fila.rotacionDiaria, 3);
+  assert.equal(fila.comprar, 15); // 3 × 7 − 6
+});
+
+test('si la última semana sale menos, se mantiene el promedio del mes', () => {
+  // 28 días: 56 → 2/día; 7 días: 0. Stock 4 → 2 días
+  const s = new Map([['a', { despachos: 56, devoluciones: 0, despachos7: 0, devoluciones7: 0 }]]);
+  const [fila] = calcularReposicion([producto('a', 4)], s, AJUSTES_POR_DEFECTO, AHORA);
+  assert.equal(fila.rotacionDiaria, 2);
+  assert.equal(fila.rotacion7, 0);
+});
+
+test('producto de 3 días: ambas ventanas son de 3 días', () => {
+  const nuevo = producto('n', 3, { createdAt: '2026-11-12T12:00:00Z' });
+  const s = new Map([['n', { despachos: 9, devoluciones: 0, despachos7: 9, devoluciones7: 0 }]]);
+  const [fila] = calcularReposicion([nuevo], s, AJUSTES_POR_DEFECTO, AHORA);
+  assert.equal(fila.rotacion7, 3);
+  assert.equal(fila.rotacion28, 3);
+});
+
+test('sumarSalidas separa la última semana cuando recibe la fecha', () => {
+  const m = sumarSalidas([
+    { product_id: 'a', type: 'despacho', quantity: 5, created_at: '2026-11-14T10:00:00Z' }, // dentro de 7 días
+    { product_id: 'a', type: 'despacho', quantity: 4, created_at: '2026-11-01T10:00:00Z' }, // fuera
+    { product_id: 'a', type: 'devolucion', quantity: 1, created_at: '2026-11-13T10:00:00Z' },
+  ], AHORA);
+  assert.deepEqual(m.get('a'), { despachos: 9, devoluciones: 1, despachos7: 5, devoluciones7: 1 });
+});
