@@ -16,8 +16,12 @@ export function registerServiceWorker(config?: ServiceWorkerConfig) {
     return;
   }
 
-  // Wait for the page to load
-  window.addEventListener('load', () => {
+  // Si la página ya tenía un service worker al cargar, un cambio de
+  // controlador es una actualización. Si no, es la primera instalación
+  // (el SW hace clients.claim()) y no hay nada que recargar.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+
+  const register = () => {
     const swUrl = '/service-worker.js';
 
     navigator.serviceWorker
@@ -60,12 +64,21 @@ export function registerServiceWorker(config?: ServiceWorkerConfig) {
           config.onError(error);
         }
       });
-  });
+  };
+
+  // Se llama desde un useEffect, que puede correr después del evento `load`
+  // (pasa cuando la página carga rápido). En ese caso el listener nunca se
+  // dispararía, así que registramos de inmediato.
+  if (document.readyState === 'complete') {
+    register();
+  } else {
+    window.addEventListener('load', register, { once: true });
+  }
 
   // Handle controller change (new service worker activated)
   let refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!refreshing) {
+    if (hadController && !refreshing) {
       refreshing = true;
       console.log('[ServiceWorker] Controller changed, reloading page');
       window.location.reload();
