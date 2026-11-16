@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '../utils/supabase/client';
+import type { Accion, TipoOtp } from '../utils/accionCuenta';
+import { estiloBarraDeEstado } from '../utils/initNative';
 
 /**
  * Pantalla a la que llevan los enlaces de los correos de cuenta
@@ -9,26 +11,16 @@ import { createClient } from '../utils/supabase/client';
  *
  * - verificar: canjea el token (verifyOtp) y con eso la cuenta queda
  *   confirmada. Se cierra la sesión que crea verifyOtp para que la persona
- *   entre con su contraseña como siempre (y en la app nativa, si abrió el
- *   correo en el teléfono, el enlace abre el navegador).
+ *   entre con su contraseña como siempre.
  * - nueva-clave: canjea el token y pide la contraseña nueva (updateUser).
  *
  * Se monta en main.tsx ANTES que <App/>, para que la app no intente restaurar
- * una sesión ni redirigir mientras se procesa el enlace.
+ * una sesión ni redirigir mientras se procesa el enlace. En la app nativa
+ * también llega acá cuando el enlace abre la app (utils/enlacesCuentaNativos.ts);
+ * si no, el enlace abre el navegador. Ver docs/enlaces-app.md.
  */
 
-type Accion = 'verificar' | 'nueva-clave';
-type TipoOtp = 'signup' | 'magiclink' | 'recovery';
-
-export function leerAccionCuenta(search: string): { accion: Accion; tokenHash: string; tipo: TipoOtp } | null {
-  const q = new URLSearchParams(search);
-  const accion = q.get('cuenta');
-  const tokenHash = q.get('token_hash');
-  const tipo = q.get('type');
-  if ((accion !== 'verificar' && accion !== 'nueva-clave') || !tokenHash) return null;
-  if (tipo !== 'signup' && tipo !== 'magiclink' && tipo !== 'recovery') return null;
-  return { accion, tokenHash, tipo };
-}
+export { leerAccionCuenta } from '../utils/accionCuenta';
 
 const IOS = { fondo: '#F2F2F7', texto: '#000', secundario: 'rgba(60,60,67,0.6)', azul: '#007AFF', rojo: '#FF3B30' };
 
@@ -39,6 +31,10 @@ export function AccionCuenta({ accion, tokenHash, tipo }: { accion: Accion; toke
   const [verClave, setVerClave] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensajeError, setMensajeError] = useState('');
+
+  // En la app nativa la barra de estado arranca con texto blanco (para el azul
+  // de marca); esta pantalla es clara, así que va con texto oscuro.
+  useEffect(() => { void estiloBarraDeEstado('oscuro'); }, []);
 
   useEffect(() => {
     let vivo = true;

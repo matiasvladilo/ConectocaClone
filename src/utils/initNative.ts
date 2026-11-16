@@ -13,6 +13,11 @@
 
 import { isNativePlatform, getPlatform } from './platform.ts';
 
+// true en cuanto alguna pantalla fija el estilo de la barra de estado con
+// estiloBarraDeEstado(); initNative() corre después de montar React y no debe
+// pisarlo con el default.
+let estiloPedido = false;
+
 export async function initNative(): Promise<void> {
   if (!isNativePlatform()) return;
 
@@ -38,7 +43,9 @@ export async function initNative(): Promise<void> {
   // El theme de la app es azul oscuro (#0c3c84). Texto claro encima.
   try {
     const { StatusBar, Style } = await import('@capacitor/status-bar');
-    await StatusBar.setStyle({ style: Style.Dark }); // 'Dark' = contenido claro
+    // Si una pantalla ya pidió su estilo (p. ej. AccionCuenta al abrir la app
+    // desde un enlace), no se lo pisamos con el default.
+    if (!estiloPedido) await StatusBar.setStyle({ style: Style.Dark }); // 'Dark' = contenido claro
     if (getPlatform() === 'android') {
       await StatusBar.setBackgroundColor({ color: '#0c3c84' });
     }
@@ -75,6 +82,7 @@ export async function initNative(): Promise<void> {
  */
 export async function estiloBarraDeEstado(contenido: 'claro' | 'oscuro'): Promise<void> {
   if (!isNativePlatform()) return;
+  estiloPedido = true;
   try {
     const { StatusBar, Style } = await import('@capacitor/status-bar');
     // Style.Dark = contenido claro (texto blanco); Style.Light = contenido oscuro.

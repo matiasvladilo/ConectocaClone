@@ -22,6 +22,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- App Links: los enlaces de los correos de cuenta
+                 (https://<host>/?cuenta=...) abren la app en vez del navegador.
+                 Solo la raíz "/": los QR de reclamos (/opina, /reclamos) siguen
+                 abriendo la web. El host sale de build.gradle (appLinksHost).
+                 autoVerify exige que el sitio publique
+                 /.well-known/assetlinks.json con la huella de la llave de firma
+                 (docs/enlaces-app.md); mientras no esté, Android abre el
+                 navegador como hasta ahora. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${appLinksHost}" android:path="/" />
+            </intent-filter>
+
+            <!-- Esquema propio, para probar los enlaces sin dominio verificado
+                 (adb shell am start -d 'info.laoca.app://cuenta?...'). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="info.laoca.app" />
+            </intent-filter>
+
         </activity>
 
         <provider
