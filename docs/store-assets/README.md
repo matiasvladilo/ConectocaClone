@@ -52,8 +52,25 @@ Se derivan del ícono de marca (pato sobre `#0c3c84`). Para regenerarlos, primer
 `npm run generate:assets` y luego copiar/redimensionar desde
 `ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png`.
 
-Falta (diseño, no automatizable acá):
-- **Google Play — gráfico de funciones**: 1024×500 PNG/JPG.
+- `feature-graphic-1024x500.png` (1024×500, sin transparencia) — **gráfico de
+  funciones de Google Play**. Hecho el 2026-11-22 con la paleta corporativa
+  (navy `#053b84`, acento mostaza `#f9c404`).
+
+  La fuente está en `feature-graphic/`: es un HTML que se renderiza con Chrome
+  headless, así que el texto se edita y se vuelve a generar sin abrir un editor
+  de imágenes:
+
+  ```bash
+  cd docs/store-assets/feature-graphic
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+    --window-size=1024,500 \
+    --screenshot=../feature-graphic-1024x500.png \
+    "file://$PWD/feature-graphic.html"
+  ```
+
+  Verificar después con `sips -g pixelWidth -g pixelHeight -g hasAlpha`: Play
+  exige 1024×500 exactos y rechaza PNG con canal alfa.
 
 ## Capturas
 
