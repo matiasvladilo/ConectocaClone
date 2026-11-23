@@ -7,6 +7,13 @@
 --
 -- Se aplicó el mismo día en que nació la columna (20261111_a), cuando ningún
 -- usuario había elegido nada todavía, así que no pisa elecciones de nadie.
+--
+-- Nota: en producción este archivo quedó partido en DOS entradas de
+-- `schema_migrations`: 20261111140035 (el ALTER/UPDATE de abajo) y
+-- 20261111140601 "20261111_c_notificaciones_default_por_rol_trigger" (la
+-- función y el trigger). No falta nada en el repo — es el mismo SQL, aplicado
+-- en dos tandas. No confundir ese `_c` de prod con el `20261111_c` del repo,
+-- que es products_archived_at y se aplicó después (20261111155958).
 
 ALTER TABLE public.profiles
   ALTER COLUMN notificaciones_silenciadas
