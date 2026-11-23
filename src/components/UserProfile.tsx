@@ -22,6 +22,7 @@ import {
   Truck,
   X,
   FileText,
+  Printer,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -31,6 +32,7 @@ import { version as versionApp } from '../../package.json';
 import { estiloBarraDeEstado } from '../utils/initNative';
 import { isNativePlatform } from '../utils/platform';
 import { seccionesParaRol } from '../utils/preferenciasNotificaciones';
+import { impresionAutomaticaActiva, guardarImpresionAutomatica } from '../utils/impresionAutomatica';
 import { MembersPanel } from './MembersPanel';
 import { PrivacidadPanel } from './PrivacidadPanel';
 import { cuentaAPI } from '../utils/api';
@@ -227,6 +229,9 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  // Impresión automática: preferencia de ESTE equipo (localStorage), no de la
+  // cuenta, porque la impresora está enchufada a un computador concreto.
+  const [imprimirSolo, setImprimirSolo] = useState(() => impresionAutomaticaActiva());
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressValue, setAddressValue] = useState(user.address || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -390,6 +395,20 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </label>
   );
+
+  // Solo despacho y admin ven los pedidos que entran, así que son los únicos
+  // que pueden imprimirlos al llegar.
+  const puedeImprimirSolo = user.role === 'dispatch' || user.role === 'admin';
+
+  const alternarImprimirSolo = (activa: boolean) => {
+    setImprimirSolo(activa);
+    guardarImpresionAutomatica(activa);
+    toast.success(
+      activa
+        ? 'Este equipo va a imprimir la guía al llegar un pedido'
+        : 'Impresión automática desactivada en este equipo',
+    );
+  };
 
   const seccionesAvisos = onCambiarNotificacionesSilenciadas ? seccionesParaRol(user.role) : [];
   const alternarCategoria = (clave: string, activa: boolean) => {
@@ -662,6 +681,28 @@ export function UserProfile({ user, isOpen, onClose, onLogout, onUpdateProfile, 
                   ))}
                 </Grupo>
               ))}
+
+              {/* Impresión automática de la guía al llegar un pedido. La
+                  preferencia es de este equipo, no de la cuenta. */}
+              {puedeImprimirSolo && (
+                <Grupo
+                  titulo="Impresión"
+                  pie={
+                    imprimirSolo
+                      ? 'Al llegar un pedido se arma la guía y se abre el diálogo de impresión. El navegador no permite imprimir sin mostrarlo: para que salga sin ningún click, hay que abrir Chrome con la opción --kiosk-printing. Vale solo para este equipo.'
+                      : 'Imprime la guía de despacho sola cada vez que entra un pedido nuevo. Se activa por equipo: actívalo en el computador que tiene la impresora.'
+                  }
+                >
+                  {filaInterruptor(
+                    'impresion-automatica',
+                    'Imprimir al llegar un pedido',
+                    imprimirSolo,
+                    alternarImprimirSolo,
+                    Printer,
+                    IOS.turquesa,
+                  )}
+                </Grupo>
+              )}
 
               {/* Legal */}
               <Grupo>

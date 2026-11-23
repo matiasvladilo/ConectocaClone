@@ -22,6 +22,8 @@ import { ProductIngredientConfig } from "./components/ProductIngredientConfig";
 import { PWAHead } from "./components/PWAHead";
 import { InstallPWA } from "./components/InstallPWA";
 import { AudioInitializer } from "./components/AudioInitializer";
+import { ImpresionAutomatica } from "./components/ImpresionAutomatica";
+import { impresionAutomaticaActiva } from "./utils/impresionAutomatica";
 import { Toaster } from "./components/ui/sonner";
 import { createClient, setRememberSession } from "./utils/supabase/client";
 import { registerServiceWorker } from "./utils/registerServiceWorker";
@@ -250,6 +252,9 @@ export default function App() {
   const [silenciadas, setSilenciadas] = useState<string[]>([]);
   const silenciadasRef = useRef<string[]>([]);
   silenciadasRef.current = silenciadas;
+  // Pedidos esperando salir por la impresora (Mi cuenta → Impresión).
+  // Se imprimen de a uno; ver components/ImpresionAutomatica.tsx.
+  const [colaImpresion, setColaImpresion] = useState<Order[]>([]);
 
   // Use ref instead of state to avoid closure issues with setInterval
   const hasLoadedInitialOrders = useRef(false);
@@ -843,6 +848,15 @@ export default function App() {
           newOrdersFound: newOrders.length,
           newOrderIds: newOrders.map(o => o.id.substring(0, 8))
         });
+
+        // Impresión automática: va aparte de los avisos a propósito. En
+        // despacho puede interesar imprimir sin sonido, o sonar sin imprimir.
+        if (newOrders.length > 0 && impresionAutomaticaActiva()) {
+          setColaImpresion((cola) => {
+            const yaEnCola = new Set(cola.map((o) => o.id));
+            return [...cola, ...newOrders.filter((o) => !yaEnCola.has(o.id))];
+          });
+        }
 
         if (newOrders.length > 0 && silenciadasRef.current.includes('pedido_nuevo')) {
           // Avisos de pedidos nuevos apagados: solo registrar que ya se vieron.
@@ -2027,6 +2041,13 @@ export default function App() {
             onRefresh={() => loadOrders(accessToken)}
           />
         )}
+
+      <ImpresionAutomatica
+        cola={colaImpresion}
+        alImprimir={(orderId) =>
+          setColaImpresion((cola) => cola.filter((o) => o.id !== orderId))
+        }
+      />
 
       <Toaster />
     </div>
