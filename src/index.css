@@ -5380,30 +5380,33 @@ button, span, p, h1, h2, h3, h4, h5, h6, div {
 }
 
 @media print {
-  body * {
-    visibility: hidden;
-    position: static;
+  body > *:not(#print-root) {
+    display: none !important;
   }
 
-  .thermal-print-content, .thermal-print-content * {
-    visibility: visible;
+  #print-root {
+    display: block !important;
   }
 
-  .thermal-print-content {
+  .thermal-print-content, #thermal-receipt-print {
     width: 100%;
     margin: 0;
-    padding: 0;
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-
-  [role="dialog"], [data-state="open"], .dialog-overlay, button, header, nav, footer {
-    display: none !important;
+    background-color: #fff;
+    position: static !important;
+    visibility: visible !important;
   }
 
   .thermal-receipt {
     display: block !important;
+  }
+
+  #print-root thead {
+    display: table-header-group;
+  }
+
+  #print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
 
@@ -5419,31 +5422,21 @@ button, span, p, h1, h2, h3, h4, h5, h6, div {
 }
 
 @media print {
-  @page {
-    size: 80mm auto;
+  @page termica {
     margin: 0;
-    padding: 0;
   }
 
-  .thermal-receipt {
-    width: 80mm;
-    max-width: 80mm;
-    margin: 0;
-    padding: 2mm;
-    font-size: 11px;
+  @page a4 {
+    size: A4 portrait;
+    margin: 15mm;
   }
 
-  @supports (width: 58mm) {
-    @page {
-      size: 58mm auto;
-    }
+  .thermal-print-content, #thermal-receipt-print {
+    page: termica;
+  }
 
-    .thermal-receipt {
-      width: 58mm;
-      max-width: 58mm;
-      padding: 1mm;
-      font-size: 9px;
-    }
+  .standard-print-content {
+    page: a4;
   }
 }
 
@@ -5547,26 +5540,12 @@ button, span, p, h1, h2, h3, h4, h5, h6, div {
 }
 
 @media print {
-  body * {
-    visibility: hidden;
-    position: static;
-  }
-
-  .standard-print-content, .standard-print-content * {
-    visibility: visible;
-  }
-
   .standard-print-content {
     width: 100%;
     margin: 0;
     padding: 0;
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-
-  [role="dialog"], [data-state="open"], .dialog-overlay, button, header, nav, footer {
-    display: none !important;
+    position: static !important;
+    visibility: visible !important;
   }
 
   .standard-receipt {
@@ -5586,11 +5565,6 @@ button, span, p, h1, h2, h3, h4, h5, h6, div {
 }
 
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 15mm;
-  }
-
   .standard-receipt {
     width: 100%;
     max-width: 100%;

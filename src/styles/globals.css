@@ -275,46 +275,46 @@ body {
    THERMAL PRINTER STYLES - 58mm & 80mm
    =========================================== */
 
-/* Hide everything except thermal print content when printing */
+/* Al imprimir se oculta la app con display:none y la guía queda en flujo
+   normal dentro de #print-root (el único hijo de <body> que sobrevive).
+
+   POR QUÉ ASÍ: antes se usaba `body * { visibility: hidden }` (que oculta pero
+   deja la app ocupando alto) y la guía iba en `position: absolute/fixed`, o
+   sea fuera del flujo del documento. Una caja fuera de flujo no se fragmenta
+   de forma confiable entre hojas en Chromium: el final se pierde. Con el
+   pedido de 97 productos del 23/11/2026 la guía salió hasta el ítem ~88 y los
+   últimos no se imprimieron. */
 @media print {
-  body * {
-    visibility: hidden;
-    position: static;
+  body > *:not(#print-root) {
+    display: none !important;
   }
 
-  .thermal-print-content,
-  .thermal-print-content *,
-  #thermal-receipt-print,
-  #thermal-receipt-print * {
-    visibility: visible;
+  #print-root {
+    display: block !important;
   }
 
   .thermal-print-content,
   #thermal-receipt-print {
-    position: fixed;
-    left: 0;
-    top: 0;
+    position: static !important;
+    visibility: visible !important;
     width: 100%;
     margin: 0;
-    padding: 0;
-    z-index: 9999;
-    background-color: white;
+    background-color: #fff;
   }
 
-  /* Hide dialogs and overlays */
-  [role="dialog"],
-  [data-state="open"],
-  .dialog-overlay,
-  button,
-  header,
-  nav,
-  footer {
-    display: none !important;
-  }
-
-  /* Ensure thermal receipt is visible */
   .thermal-receipt {
     display: block !important;
+  }
+
+  /* El encabezado de la tabla se repite en cada hoja y las filas no se
+     parten a la mitad entre dos hojas. */
+  #print-root thead {
+    display: table-header-group;
+  }
+
+  #print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
 
@@ -331,33 +331,34 @@ body {
 }
 
 /* Print-specific styles for thermal receipt */
+/* Hojas con nombre: cada formato usa su propia página.
+
+   ANTES: había dos `@page` sueltas (una para térmica y otra para A4) y, como
+   `@page` es global, ganaba la última del archivo — la de A4. Resultado: el
+   recibo térmico se maquetaba en hojas A4 con 15mm de margen. Encima
+   `size: 80mm auto` no es CSS válido (`auto` solo se acepta solo, no junto a
+   una medida), así que el navegador descartaba toda esa declaración. */
 @media print {
-  @page {
-    size: 80mm auto;
+  @page termica {
+    /* Sin `size` a propósito: manda el tamaño de papel configurado en el
+       driver de la impresora térmica (el rollo), que es el único que conoce
+       el largo real. Acá solo se saca el margen de la hoja; los márgenes en
+       mm del recibo los pone el componente como padding. */
     margin: 0;
-    padding: 0;
   }
 
-  .thermal-receipt {
-    width: 80mm;
-    max-width: 80mm;
-    font-size: 11px;
-    margin: 0;
-    padding: 2mm;
+  @page a4 {
+    size: A4 portrait;
+    margin: 15mm;
   }
 
-  /* Adjust for 58mm printers */
-  @supports (width: 58mm) {
-    @page {
-      size: 58mm auto;
-    }
+  .thermal-print-content,
+  #thermal-receipt-print {
+    page: termica;
+  }
 
-    .thermal-receipt {
-      width: 58mm;
-      max-width: 58mm;
-      font-size: 9px;
-      padding: 1mm;
-    }
+  .standard-print-content {
+    page: a4;
   }
 }
 
@@ -472,39 +473,18 @@ body {
    STANDARD PRINTER STYLES - A4/Letter
    =========================================== */
 
-/* Hide everything except standard print content when printing */
+/* La guía A4 se imprime con el mismo mecanismo que la térmica: el bloque que
+   oculta la app y pagina las tablas está más arriba, acá solo se devuelve este
+   contenedor al flujo normal. */
 @media print {
-  body * {
-    visibility: hidden;
-    position: static;
-  }
-
-  .standard-print-content,
-  .standard-print-content * {
-    visibility: visible;
-  }
-
   .standard-print-content {
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: static !important;
+    visibility: visible !important;
     width: 100%;
     margin: 0;
     padding: 0;
   }
 
-  /* Hide dialogs and overlays for standard print */
-  [role="dialog"],
-  [data-state="open"],
-  .dialog-overlay,
-  button,
-  header,
-  nav,
-  footer {
-    display: none !important;
-  }
-
-  /* Ensure standard receipt is visible */
   .standard-receipt {
     display: block !important;
   }
@@ -522,13 +502,9 @@ body {
   padding: 20mm;
 }
 
-/* Print-specific styles for standard receipt */
+/* Print-specific styles for standard receipt.
+   El tamaño de página de este formato está en `@page a4`, más arriba. */
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 15mm;
-  }
-
   .standard-receipt {
     width: 100%;
     max-width: 100%;

@@ -37,6 +37,8 @@ export const ThermalReceiptTemplate = ({
         });
     };
 
+    const cantidadProductos = order.products && order.products.length > 0 ? order.products.length : 1;
+
     return (
         <div style={{
             fontFamily: 'Arial, sans-serif',
@@ -120,10 +122,14 @@ export const ThermalReceiptTemplate = ({
                 )}
             </div>
 
-            {/* 3. Products Table */}
+            {/* 3. Products Table.
+                Los productos van numerados a propósito: en un pedido largo es
+                la única forma de ver de un vistazo si la guía salió completa
+                (el conteo del pie tiene que coincidir con el último número). */}
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '0.9em' }}>
                 <thead>
                     <tr style={{ borderBottom: '1px solid black' }}>
+                        <th style={{ textAlign: 'right', padding: '2px 4px 2px 0', width: '22px' }}>#</th>
                         <th style={{ textAlign: 'left', padding: '2px' }}>Producto</th>
                         <th style={{ textAlign: 'center', padding: '2px', width: '40px' }}>Cant.</th>
                         <th style={{ textAlign: 'right', padding: '2px', width: '60px' }}>Subtotal</th>
@@ -133,6 +139,9 @@ export const ThermalReceiptTemplate = ({
                     {order.products && order.products.length > 0 ? (
                         order.products.map((p, i) => (
                             <tr key={i} style={{ borderBottom: '1px dotted #ccc' }}>
+                                <td style={{ padding: '4px 4px 4px 0', textAlign: 'right', verticalAlign: 'top', color: '#555' }}>
+                                    {i + 1}
+                                </td>
                                 <td style={{ padding: '4px 2px', verticalAlign: 'top' }}>
                                     {p.name}
                                 </td>
@@ -146,6 +155,7 @@ export const ThermalReceiptTemplate = ({
                         ))
                     ) : (
                         <tr>
+                            <td style={{ padding: '4px 4px 4px 0', textAlign: 'right', color: '#555' }}>1</td>
                             <td style={{ padding: '4px 2px' }}>{order.productName}</td>
                             <td style={{ padding: '4px 2px', textAlign: 'center' }}>{order.quantity}</td>
                             <td style={{ padding: '4px 2px', textAlign: 'right' }}>{formatCLP(order.total || 0)}</td>
@@ -154,9 +164,22 @@ export const ThermalReceiptTemplate = ({
                 </tbody>
             </table>
 
-            {/* 4. Total */}
-            <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.2em', marginBottom: '20px' }}>
+            {/* 4. Total y cierre. El conteo y el "FIN DE GUÍA" son el control
+                de que no se cortó nada: si falta el cierre, falta papel. */}
+            <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.2em' }}>
                 Total: {formatCLP(order.total || 0)}
+            </div>
+            <div style={{ textAlign: 'right', fontSize: '0.85em', marginTop: '2px' }}>
+                {cantidadProductos} {cantidadProductos === 1 ? 'producto' : 'productos'} en esta guía
+            </div>
+            <div style={{
+                textAlign: 'center',
+                fontWeight: 'bold',
+                fontSize: '0.9em',
+                letterSpacing: '0.08em',
+                margin: '12px 0 18px'
+            }}>
+                — FIN DE GUÍA —
             </div>
 
             {/* 5. Footer / Signature */}
