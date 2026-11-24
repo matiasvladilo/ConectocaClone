@@ -58,6 +58,7 @@ const logoFull = logo;
 import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';
 import { parseDate } from '../utils/dateUtils';
+import { idPedidoCoincide } from '../utils/busquedaPedido';
 
 interface ProductionAreaProps {
   orders: Order[];
@@ -329,7 +330,7 @@ export function ProductionArea({ orders, onBack, onUpdateOrderStatus, accessToke
 
     const query = searchQuery.toLowerCase();
     return (
-      order.id.toLowerCase().includes(query) ||
+      idPedidoCoincide(order.id, query) ||
       order.customerName.toLowerCase().includes(query) ||
       order.productName.toLowerCase().includes(query) ||
       (order.deliveryAddress && order.deliveryAddress.toLowerCase().includes(query))

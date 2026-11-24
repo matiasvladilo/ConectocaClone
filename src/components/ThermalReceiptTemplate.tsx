@@ -78,8 +78,14 @@ export const ThermalReceiptTemplate = ({
                     <div style={{ fontWeight: 'bold', fontSize: '1em', marginTop: '4px' }}>
                         GUÍA DE DESPACHO
                     </div>
+                    {/* Mismo id que muestra el resto de la app ("Pedido
+                        #4210C619") y que entiende el buscador. Antes salía
+                        `D-4210`: 4 caracteres y con prefijo, así que buscar en
+                        la app lo que decía el papel no encontraba nada. Además
+                        4 caracteres no alcanzan para identificar un pedido —
+                        de 6.558 pedidos, 607 compartían esos 4 con otro. */}
                     <div style={{ fontSize: '0.9em' }}>
-                        ID Despacho: D-{order.id ? order.id.slice(0, 4) : '???'}
+                        ID Despacho: {order.id ? '#' + order.id.slice(0, 8).toUpperCase() : '???'}
                     </div>
                 </div>
             </div>

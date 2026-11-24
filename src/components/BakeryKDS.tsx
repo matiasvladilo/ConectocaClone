@@ -42,6 +42,7 @@ import { toast } from 'sonner';
 import { formatCLP } from '../utils/format';
 import { idsDeCategoriaConHijas } from '../utils/categoryTree';
 import { parseDate } from '../utils/dateUtils';
+import { idPedidoCoincide } from '../utils/busquedaPedido';
 
 interface BakeryKDSProps {
   orders: Order[];
@@ -303,7 +304,7 @@ export function BakeryKDS({ orders, onBack, onUpdateOrderStatus, accessToken, la
 
     const query = searchQuery.toLowerCase();
     return (
-      order.id.toLowerCase().includes(query) ||
+      idPedidoCoincide(order.id, query) ||
       order.customerName.toLowerCase().includes(query) ||
       order.productName.toLowerCase().includes(query) ||
       (order.deliveryAddress && order.deliveryAddress.toLowerCase().includes(query))

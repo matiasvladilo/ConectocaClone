@@ -34,6 +34,7 @@ import { productsAPI, Product, categoriesAPI, Category, ordersAPI } from '../uti
 import { mapApiOrder } from '../utils/mapApiOrder';
 import { nombreCategoriaRaiz } from '../utils/categoryTree';
 import { canEditOrder } from '../utils/orderPermissions';
+import { idPedidoCoincide } from '../utils/busquedaPedido';
 
 interface OrderHistoryProps {
   orders: Order[];
@@ -251,7 +252,7 @@ export function OrderHistory({ orders, onBack, onViewOrder, userName, userRole, 
       filtered = filtered.filter(order =>
         order.productName.toLowerCase().includes(query) ||
         order.customerName.toLowerCase().includes(query) ||
-        order.id.toLowerCase().includes(query)
+        idPedidoCoincide(order.id, query)
       );
     }
 

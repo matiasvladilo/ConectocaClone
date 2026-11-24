@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { idPedidoCoincide } from '../utils/busquedaPedido';
 
 interface ProductionOrdersProps {
   onBack: () => void;
@@ -397,7 +398,7 @@ export function ProductionOrders({ onBack, accessToken, userName, userRole, onNa
   // Filter orders
   const filteredOrders = productionOrders.filter(order => {
     const matchesSearch =
-      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      idPedidoCoincide(order.id, searchTerm) ||
       order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.products.some(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
 

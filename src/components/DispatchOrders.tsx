@@ -26,6 +26,7 @@ import { formatDateCL } from '../utils/dateUtils';
 import { StandardDeliveryGuideContent } from './StandardDeliveryGuide';
 import { EditOrderDialog } from './EditOrderDialog';
 import { canEditOrder, isOrderEditableStatus } from '../utils/orderPermissions';
+import { idPedidoCoincide } from '../utils/busquedaPedido';
 
 interface DispatchOrdersProps {
   orders: Order[];
@@ -136,7 +137,7 @@ export function DispatchOrders({
   // Filter orders
   const filteredOrders = orders.filter(order => {
     const matchesSearch =
-      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      idPedidoCoincide(order.id, searchTerm) ||
       order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.productName.toLowerCase().includes(searchTerm.toLowerCase());
 
